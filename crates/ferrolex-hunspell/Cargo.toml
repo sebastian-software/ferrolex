@@ -1,0 +1,21 @@
+[package]
+name = "ferrolex-hunspell"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Hunspell dictionary fetch, import, and conversion planning crate for Ferrolex."
+documentation = "https://docs.rs/ferrolex-hunspell"
+keywords = ["spellcheck", "dictionary", "hunspell", "affix"]
+categories = ["internationalization", "text-processing"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrolex-dict = { version = "0.1.0", path = "../ferrolex-dict" }
+
+[lints]
+workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "ferrolex"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Rust-native spell, dictionary, and Lexios brand validation toolkit."
+documentation = "https://docs.rs/ferrolex"
+readme = "README.md"
+keywords = ["spellcheck", "dictionary", "brand", "i18n", "lexios"]
+categories = ["internationalization", "text-processing", "development-tools"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrolex-brand = { version = "0.1.0", path = "../ferrolex-brand" }
+ferrolex-core = { version = "0.1.0", path = "../ferrolex-core" }
+ferrolex-dict = { version = "0.1.0", path = "../ferrolex-dict" }
+ferrolex-hunspell = { version = "0.1.0", path = "../ferrolex-hunspell" }
+ferrolex-json = { version = "0.1.0", path = "../ferrolex-json" }
+ferrolex-oxc = { version = "0.1.0", path = "../ferrolex-oxc" }
+ferrolex-tokenizer = { version = "0.1.0", path = "../ferrolex-tokenizer" }
+
+[lints]
+workspace = true

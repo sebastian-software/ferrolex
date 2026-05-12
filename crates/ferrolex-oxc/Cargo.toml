@@ -1,0 +1,21 @@
+[package]
+name = "ferrolex-oxc"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "OXC-based JavaScript and TypeScript source candidate extraction for Ferrolex."
+documentation = "https://docs.rs/ferrolex-oxc"
+keywords = ["oxc", "javascript", "typescript", "spellcheck"]
+categories = ["development-tools", "text-processing"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrolex-core = { version = "0.1.0", path = "../ferrolex-core" }
+
+[lints]
+workspace = true

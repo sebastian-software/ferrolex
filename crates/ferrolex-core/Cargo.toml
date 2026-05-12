@@ -1,0 +1,18 @@
+[package]
+name = "ferrolex-core"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Core types and traits for Ferrolex."
+documentation = "https://docs.rs/ferrolex-core"
+keywords = ["spellcheck", "dictionary", "tokens", "i18n"]
+categories = ["internationalization", "text-processing", "development-tools"]
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

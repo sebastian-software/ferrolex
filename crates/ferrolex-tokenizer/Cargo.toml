@@ -1,0 +1,21 @@
+[package]
+name = "ferrolex-tokenizer"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Tokenization and code identifier splitting for Ferrolex."
+documentation = "https://docs.rs/ferrolex-tokenizer"
+keywords = ["spellcheck", "tokenizer", "camelcase", "unicode"]
+categories = ["text-processing", "development-tools"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrolex-core = { version = "0.1.0", path = "../ferrolex-core" }
+
+[lints]
+workspace = true

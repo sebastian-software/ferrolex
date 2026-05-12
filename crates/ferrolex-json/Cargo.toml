@@ -1,0 +1,21 @@
+[package]
+name = "ferrolex-json"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "JSON source candidate extraction for Ferrolex."
+documentation = "https://docs.rs/ferrolex-json"
+keywords = ["json", "spellcheck", "i18n", "serde"]
+categories = ["internationalization", "text-processing"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrolex-core = { version = "0.1.0", path = "../ferrolex-core" }
+
+[lints]
+workspace = true
