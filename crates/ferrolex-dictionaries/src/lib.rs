@@ -37,6 +37,8 @@ pub enum SourceEncoding {
     Iso8859_1,
     /// ISO-8859-2 source bytes.
     Iso8859_2,
+    /// An ASCII-compatible ISO-8859-1 affix file and UTF-8 word list.
+    MixedUtf8AndIso8859_1,
 }
 
 impl SourceEncoding {
@@ -47,6 +49,7 @@ impl SourceEncoding {
             Self::Utf8 => "UTF-8",
             Self::Iso8859_1 => "ISO-8859-1",
             Self::Iso8859_2 => "ISO-8859-2",
+            Self::MixedUtf8AndIso8859_1 => "mixed: AFF ISO-8859-1, DIC UTF-8",
         }
     }
 }
@@ -159,7 +162,7 @@ impl LibreOfficeDictionary {
 /// digests. Use [`find_locale`] and [`LibreOfficeDictionary::manifest`] before
 /// downloading. `CJK` locales are intentionally outside this catalog because
 /// text tokenization for them is a separate future capability.
-pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 14] = [
+pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 17] = [
     LibreOfficeDictionary {
         locale: "en_US",
         aff_path: "en/en_US.aff",
@@ -300,6 +303,36 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 14] = [
         encoding: SourceEncoding::Utf8,
         aff_sha256: "b721c9d44bee912feb182b601a1bc2ae3e7dffef660f4130cf2751867488a9dd",
         dic_sha256: "384a2126eff333f5f6f9790ae892554546f53948d2988c600397cb5ad6ce66e8",
+    },
+    LibreOfficeDictionary {
+        locale: "id_ID",
+        aff_path: "id/id_ID.aff",
+        dic_path: "id/id_ID.dic",
+        license_notice_path: "id/LICENSE-dict",
+        license_label: "Locale-specific notice in LibreOffice/id/LICENSE-dict",
+        encoding: SourceEncoding::MixedUtf8AndIso8859_1,
+        aff_sha256: "c625d5b237a489c452cf1f9c666600103e8093667dff89e7030a24217995dc79",
+        dic_sha256: "775ff17a52801f3d2ee80120952fb44cc9bac6c3cf61740de775e439851a5803",
+    },
+    LibreOfficeDictionary {
+        locale: "hi_IN",
+        aff_path: "hi_IN/hi_IN.aff",
+        dic_path: "hi_IN/hi_IN.dic",
+        license_notice_path: "hi_IN/COPYING",
+        license_label: "Locale-specific notice in LibreOffice/hi_IN/COPYING",
+        encoding: SourceEncoding::Utf8,
+        aff_sha256: "3ab96772dc3d1cdbec4141798efb8b7a091b92c9acbeb5dfd3c4998a5c508302",
+        dic_sha256: "1e01f962a02638ef73e3f8de3c44bfd854f7059d31c9fa96cff0b73a2840f9d9",
+    },
+    LibreOfficeDictionary {
+        locale: "bn_BD",
+        aff_path: "bn_BD/bn_BD.aff",
+        dic_path: "bn_BD/bn_BD.dic",
+        license_notice_path: "bn_BD/COPYING",
+        license_label: "Locale-specific notice in LibreOffice/bn_BD/COPYING",
+        encoding: SourceEncoding::Utf8,
+        aff_sha256: "6beeacefab0f691cb415c9ab8de227091a3be65510c3d8c0479513b261e61b97",
+        dic_sha256: "cfc78b361861a726d22f0654d7c4e0b47f843c4a9e8b605c4c99e91ea683e116",
     },
 ];
 
@@ -812,10 +845,10 @@ mod tests {
 
     #[test]
     fn catalog_pins_all_requested_locales_and_exact_upstream_paths() {
-        assert_eq!(LIBREOFFICE_CATALOG.len(), 14);
+        assert_eq!(LIBREOFFICE_CATALOG.len(), 17);
         for locale in [
             "en_US", "de_DE", "es_ES", "fr_FR", "it_IT", "pt_BR", "pt_PT", "nl_NL", "pl_PL",
-            "ru_RU", "tr_TR", "ar", "uk_UA", "sv_SE",
+            "ru_RU", "tr_TR", "ar", "uk_UA", "sv_SE", "id_ID", "hi_IN", "bn_BD",
         ] {
             let dictionary = find_locale(locale).expect("catalog contains requested locale");
             assert_eq!(dictionary.revision(), LIBREOFFICE_REVISION);

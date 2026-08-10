@@ -55,9 +55,11 @@ recorded in [Native integrations](docs/integrations.md).
 The optional, digest-pinned LibreOffice installer is documented in
 [Dictionary fetching](docs/dictionary-fetching.md). It provides reviewed
 LibreOffice sources for English, German, Spanish, French, Italian, Portuguese,
-Dutch, Polish, Russian, Turkish, Arabic, Ukrainian, and Swedish; it never
-downloads or updates dictionaries implicitly. CJK is intentionally deferred
-until text segmentation has its own contract.
+Dutch, Polish, Russian, Turkish, Arabic, Ukrainian, Swedish, Indonesian,
+Hindi, and Bengali; it never downloads or updates dictionaries implicitly.
+Urdu requires a separately reviewed source because it has no pair in the
+pinned LibreOffice collection. CJK is intentionally deferred until text
+segmentation has its own contract.
 
 `compile` turns the same plain-word-list syntax used by `check` into a
 deterministic native artifact. `validate --compiled` first performs the fast

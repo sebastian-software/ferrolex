@@ -41,6 +41,9 @@ normal reviewed ferrolex release change.
 | `ar` | `ar/ar.aff`, `ar/ar.dic` | `ar/COPYING.txt` |
 | `uk_UA` | `uk_UA/uk_UA.aff`, `uk_UA/uk_UA.dic` | `uk_UA/README_uk_UA.txt` |
 | `sv_SE` | `sv_SE/dictionaries/sv_SE.aff`, `sv_SE/dictionaries/sv_SE.dic` | `sv_SE/LICENSE_sv_SE.txt` |
+| `id_ID` | `id/id_ID.aff`, `id/id_ID.dic` | `id/LICENSE-dict` |
+| `hi_IN` | `hi_IN/hi_IN.aff`, `hi_IN/hi_IN.dic` | `hi_IN/COPYING` |
+| `bn_BD` | `bn_BD/bn_BD.aff`, `bn_BD/bn_BD.dic` | `bn_BD/COPYING` |
 
 All paths and file digests are pinned to LibreOffice/dictionaries commit
 `f2ff99058268502bdcf4cad25c1ca2935ad8aa7d`. The catalog treats the linked
@@ -50,7 +53,8 @@ a claim that all dictionaries share one redistributable license. Consumers must
 review and accept the linked terms for every locale they distribute.
 
 `list` also prints the source encoding. Installation preserves upstream bytes:
-`de_DE` is ISO-8859-1 and `pl_PL` is ISO-8859-2, while the other initial
+`de_DE` is ISO-8859-1, `pl_PL` is ISO-8859-2, and `id_ID` has an
+ISO-8859-1-compatible affix file with a UTF-8 word list; the other initial
 entries are UTF-8. The current `validate` command accepts UTF-8 Hunspell input,
 so legacy pairs need an explicit, lossless transcode before import. Arabic and
 Turkish are deliberately available for compatibility evaluation; recognition
@@ -58,6 +62,9 @@ support remains dependent on the diagnostics from `validate --strict`.
 
 CJK locales are intentionally absent. They need a dedicated text-segmentation
 contract, rather than treating a dictionary fetch as complete language support.
+The pinned LibreOffice collection has no Urdu (`ur`) Hunspell pair, so Urdu is
+not silently substituted with another upstream source; adding it needs a
+separate provenance and license review.
 
 ## Install workflow
 
