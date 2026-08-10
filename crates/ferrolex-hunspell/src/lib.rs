@@ -230,6 +230,7 @@ pub struct HunspellDictionary {
     special_flags: SpecialFlags,
     compound: CompoundConfig,
     break_characters: BTreeSet<char>,
+    sharp_uppercase_forms: BTreeSet<Box<str>>,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -244,6 +245,7 @@ impl Dictionary for HunspellDictionary {
             .any(|index| self.matches_derived_word(&self.lexemes[index], word))
             || self.matches_simple_compound(word)
             || self.matches_break_word(word)
+            || self.sharp_uppercase_forms.contains(word)
     }
 }
 
@@ -262,6 +264,7 @@ impl HunspellDictionary {
         let lexeme_indices_by_flag = lexeme_indices_by_flag(&lexemes);
         let prefix_parent_flags = parent_flags_by_continuation(&prefixes);
         let suffix_parent_flags = parent_flags_by_continuation(&suffixes);
+        let sharp_uppercase_forms = sharp_uppercase_forms(&stems, &special_flags);
         Self {
             stems,
             lexemes,
@@ -275,6 +278,7 @@ impl HunspellDictionary {
             special_flags,
             compound,
             break_characters,
+            sharp_uppercase_forms,
         }
     }
 
@@ -726,6 +730,23 @@ impl HunspellDictionary {
     }
 }
 
+fn sharp_uppercase_forms(
+    stems: &BTreeMap<Box<str>, BTreeSet<Flag>>,
+    special_flags: &SpecialFlags,
+) -> BTreeSet<Box<str>> {
+    if !special_flags.check_sharps {
+        return BTreeSet::new();
+    }
+    let Some(keep_case) = special_flags.keep_case.as_ref() else {
+        return BTreeSet::new();
+    };
+    stems
+        .iter()
+        .filter(|(stem, flags)| flags.contains(keep_case) && stem.contains('ß'))
+        .map(|(stem, _)| Box::<str>::from(stem.to_uppercase()))
+        .collect()
+}
+
 fn rule_indices_by_flag(rules: &[AffixRule]) -> BTreeMap<Flag, Vec<usize>> {
     let mut indices = BTreeMap::<Flag, Vec<usize>>::new();
     for (index, rule) in rules.iter().enumerate() {
@@ -921,6 +942,7 @@ struct SpecialFlags {
     keep_case: Option<Flag>,
     need_affix: Option<Flag>,
     only_in_compound: Option<Flag>,
+    check_sharps: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1406,6 +1428,14 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.special_flags.need_affix,
                 &mut parsed.diagnostics,
             ),
+            "CHECKSHARPS" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.special_flags.check_sharps,
+                &mut parsed.diagnostics,
+            ),
             "ONLYINCOMPOUND" => parse_special_flag(
                 source,
                 line_number,
@@ -1574,6 +1604,35 @@ fn parse_special_flag(
             Severity::Error,
             "directive flag must contain exactly one Unicode scalar",
         ));
+    }
+}
+
+fn parse_marker(
+    source: &str,
+    line: usize,
+    directive: &str,
+    fields: &[&str],
+    target: &mut bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if fields.len() != 1 {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            directive,
+            Severity::Error,
+            "directive does not accept arguments",
+        ));
+    } else if *target {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            directive,
+            Severity::Error,
+            "directive may only be declared once",
+        ));
+    } else {
+        *target = true;
     }
 }
 
@@ -2649,6 +2708,24 @@ mod tests {
         let dictionary = imported.dictionary();
         assert!(dictionary.contains("rootsend"));
         assert!(!dictionary.contains("plainxend"));
+    }
+
+    #[test]
+    fn checksharps_accepts_only_the_keepcase_ss_uppercase_form() {
+        let imported = import(
+            "test.aff",
+            "CHECKSHARPS\nKEEPCASE K\n",
+            "test.dic",
+            "2\nStraße/K\nMaße\n",
+            ImportMode::Strict,
+        )
+        .expect("CHECKSHARPS imports");
+
+        let dictionary = imported.dictionary();
+        assert!(dictionary.contains("Straße"));
+        assert!(dictionary.contains("STRASSE"));
+        assert!(!dictionary.contains("STRAẞE"));
+        assert!(!dictionary.contains("MASSE"));
     }
 
     #[test]

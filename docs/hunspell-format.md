@@ -56,7 +56,7 @@ The current compatibility level recognizes `SET`, `FLAG`, `PFX`, `SFX`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
 `ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded literal `COMPOUNDRULE` patterns, and bounded
-literal `BREAK` characters.
+literal `BREAK` characters, and `CHECKSHARPS`.
 `PFX`/`SFX` headers declare a flag, whether rules cross-product, and a rule
 count. Each following rule belongs to that header and has:
 
@@ -81,3 +81,7 @@ rather than silently interpreted as simple affixes.
 characters. A recognized word containing one of those characters is accepted
 when every non-empty component is independently recognized. Anchored and
 multi-scalar break patterns are strict errors rather than approximated.
+
+With `CHECKSHARPS`, a `KEEPCASE` stem containing `ß` additionally recognizes
+its all-uppercase spelling with `SS`. No other case fallback is implied, and
+an uppercase-sharp-S spelling is not accepted as that variant.

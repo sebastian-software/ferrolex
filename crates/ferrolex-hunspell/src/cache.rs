@@ -33,7 +33,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 6;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 7;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -517,7 +517,9 @@ fn write_special_flags(
     write_optional_flag(output, special_flags.forbidden_word.as_ref())?;
     write_optional_flag(output, special_flags.keep_case.as_ref())?;
     write_optional_flag(output, special_flags.need_affix.as_ref())?;
-    write_optional_flag(output, special_flags.only_in_compound.as_ref())
+    write_optional_flag(output, special_flags.only_in_compound.as_ref())?;
+    output.push(u8::from(special_flags.check_sharps));
+    Ok(())
 }
 
 fn write_optional_flag(output: &mut Vec<u8>, flag: Option<&Flag>) -> Result<(), RuntimeCacheError> {
@@ -689,6 +691,15 @@ fn read_special_flags(reader: &mut Reader<'_>) -> Result<SpecialFlags, RuntimeCa
         keep_case: read_optional_flag(reader)?,
         need_affix: read_optional_flag(reader)?,
         only_in_compound: read_optional_flag(reader)?,
+        check_sharps: match reader.byte()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "invalid CHECKSHARPS marker",
+                ))
+            }
+        },
     })
 }
 
@@ -886,9 +897,9 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
     const DIC: &str =
-        "9\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/Z\nTeil/XO\nMail\n";
+        "9\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())
@@ -921,6 +932,7 @@ mod tests {
             "rootedly",
             "BahnHofStraße",
             "Bahn-Mail",
+            "STRASSE",
             "Teil",
             "unknown",
         ] {
@@ -935,6 +947,7 @@ mod tests {
         assert!(loaded.contains("fixedly"));
         assert!(loaded.contains("BahnHofStraße"));
         assert!(loaded.contains("Bahn-Mail"));
+        assert!(loaded.contains("STRASSE"));
         assert!(!loaded.contains("Teil"));
     }
 
