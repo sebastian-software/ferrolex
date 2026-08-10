@@ -93,13 +93,34 @@ impl WordList {
             entries.push(Box::<str>::from(word));
         }
 
-        entries.sort_unstable();
-        entries.dedup();
+        Ok(Self::from_entries(normalization, entries))
+    }
 
-        Ok(Self {
-            words: entries,
-            normalization,
-        })
+    /// Builds a dictionary from UTF-8 plain-word-list text.
+    ///
+    /// Each non-empty, non-comment line supplies one word. Leading and
+    /// trailing whitespace is ignored, and comments begin with `#` after that
+    /// whitespace is removed. This deliberately small syntax is independent
+    /// of Hunspell dictionary files.
+    #[must_use]
+    pub fn from_text(normalization: Normalization, text: &str) -> Self {
+        let entries = text
+            .lines()
+            .enumerate()
+            .filter_map(|(line_number, line)| {
+                let line = if line_number == 0 {
+                    line.strip_prefix('\u{feff}').unwrap_or(line)
+                } else {
+                    line
+                };
+                let word = line.trim();
+
+                (!word.is_empty() && !word.starts_with('#')).then_some(word)
+            })
+            .map(Box::<str>::from)
+            .collect();
+
+        Self::from_entries(normalization, entries)
     }
 
     /// Returns the number of unique words in this dictionary.
@@ -123,6 +144,16 @@ impl WordList {
     /// Returns an iterator over entries in deterministic lexical order.
     pub fn words(&self) -> impl ExactSizeIterator<Item = &str> + DoubleEndedIterator + '_ {
         self.words.iter().map(Box::as_ref)
+    }
+
+    fn from_entries(normalization: Normalization, mut entries: Vec<Box<str>>) -> Self {
+        entries.sort_unstable();
+        entries.dedup();
+
+        Self {
+            words: entries,
+            normalization,
+        }
     }
 }
 
@@ -176,5 +207,15 @@ mod tests {
             .expect("all test entries are non-empty");
 
         assert_eq!(dictionary.normalization(), Normalization::Exact);
+    }
+
+    #[test]
+    fn parses_a_plain_word_list_with_comments_and_crlf() {
+        let dictionary = WordList::from_text(
+            Normalization::Exact,
+            "\u{feff}# German and Japanese\r\n Straße \r\n\r\n# Comment\n東京\n",
+        );
+
+        assert_eq!(dictionary.words().collect::<Vec<_>>(), ["Straße", "東京"]);
     }
 }
