@@ -39,6 +39,24 @@ methods use the same deterministic UTF-8 word-list syntax as base lists, so a
 caller can atomically persist an overlay without imposing filesystem policy on
 the core crate.
 
+## Persistent project policy
+
+`ferrolex analyze --config .ferrolex/config` reads a deliberately small,
+line-oriented policy file. Blank lines and `#` comments are ignored. Its
+canonical entries are:
+
+```text
+ignore-word = OAuth
+ignore-pattern = ^generated_[a-z]+$
+minimum-word-length = 3
+single-letter-prefix = separate
+```
+
+Keys are strict and values are validated with their source line. The file is
+not a general TOML/YAML compatibility layer; keeping this contract small makes
+the library, CLI, and future editor integrations share the same policy without
+an ambient parser or silent configuration drift.
+
 ## Inline directives
 
 Directives are only interpreted in the comment syntax supplied with a

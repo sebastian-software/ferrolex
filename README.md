@@ -26,6 +26,7 @@ ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
 ferrolex suggest --dictionary words.txt Strase
 ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
+ferrolex analyze --dictionary words.txt --config .ferrolex/config src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
 ferrolex validate --compiled words.flex

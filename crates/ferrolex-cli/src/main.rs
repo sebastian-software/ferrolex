@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ferrolex_code::{Analyzer, CommentSyntax, Document};
+use ferrolex_code::{
+    Analyzer, AnalyzerConfigError, CommentSyntax, Document, ProjectConfig, ProjectConfigError,
+};
 use ferrolex_compiler::{
     compile_words, CompileError, CompiledDictionary, LoadError, ValidationError,
     MAX_COMPILED_ARTIFACT_BYTES,
@@ -31,7 +33,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -314,7 +316,26 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
         Some(prefix) => Document::new(&source).with_comment_syntax(CommentSyntax::line(prefix)),
         None => Document::new(&source),
     };
-    let analysis = Analyzer::builder(&checker).build().check(&document);
+    let mut builder = Analyzer::builder(&checker);
+    if let Some(config_path) = &command.config_path {
+        let text =
+            fs::read_to_string(config_path).map_err(|source| CliError::ReadProjectConfig {
+                path: config_path.clone(),
+                source,
+            })?;
+        let config = ProjectConfig::from_text(&text).map_err(|source| CliError::ProjectConfig {
+            path: config_path.clone(),
+            source,
+        })?;
+        builder =
+            builder
+                .project_config(&config)
+                .map_err(|source| CliError::ApplyProjectConfig {
+                    path: config_path.clone(),
+                    source,
+                })?;
+    }
+    let analysis = builder.build().check(&document);
     let mut has_diagnostic = false;
 
     for finding in analysis.findings() {
@@ -845,6 +866,7 @@ fn parse_analyze_arguments(
     let mut dictionary_paths = Vec::new();
     let mut compiled_paths = Vec::new();
     let mut hunspell_affix_paths = Vec::new();
+    let mut config_path = None;
     let mut comment_prefix = None;
     let mut path = None;
     let mut arguments = arguments.into_iter();
@@ -859,6 +881,7 @@ fn parse_analyze_arguments(
                 hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
+            "--config" => set_once_path(&mut config_path, &mut arguments, "--config")?,
             "--comment-prefix" => {
                 let prefix = arguments.next().ok_or_else(|| {
                     CliError::Usage("`--comment-prefix` requires a prefix".to_owned())
@@ -898,6 +921,7 @@ fn parse_analyze_arguments(
         dictionary_paths,
         compiled_paths,
         hunspell_affix_paths,
+        config_path,
         comment_prefix,
         path,
     }))
@@ -1053,6 +1077,7 @@ struct AnalyzeCommand {
     dictionary_paths: Vec<PathBuf>,
     compiled_paths: Vec<PathBuf>,
     hunspell_affix_paths: Vec<PathBuf>,
+    config_path: Option<PathBuf>,
     comment_prefix: Option<String>,
     path: PathBuf,
 }
@@ -1123,11 +1148,27 @@ enum CliError {
         path: PathBuf,
         source: io::Error,
     },
+    ReadProjectConfig {
+        path: PathBuf,
+        source: io::Error,
+    },
+    ProjectConfig {
+        path: PathBuf,
+        source: ProjectConfigError,
+    },
+    ApplyProjectConfig {
+        path: PathBuf,
+        source: AnalyzerConfigError,
+    },
     DictionaryManifest(DictionaryManifestError),
     FetchDictionary(DictionaryFetchError),
 }
 
 impl fmt::Display for CliError {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each error variant keeps its path-aware diagnostic adjacent to its definition"
+    )]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Usage(message) => formatter.write_str(message),
@@ -1202,6 +1243,27 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::ReadProjectConfig { path, source } => {
+                write!(
+                    formatter,
+                    "could not read project config `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::ProjectConfig { path, source } => {
+                write!(
+                    formatter,
+                    "invalid project config `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::ApplyProjectConfig { path, source } => {
+                write!(
+                    formatter,
+                    "could not apply project config `{}`: {source}",
+                    path.display()
+                )
+            }
             Self::DictionaryManifest(source) => {
                 write!(formatter, "invalid dictionary review manifest: {source}")
             }
@@ -1220,13 +1282,16 @@ impl Error for CliError {
             | Self::ReadInput { source, .. }
             | Self::ReadHunspellCache { source, .. }
             | Self::WriteArtifact { source, .. }
-            | Self::WriteHunspellCache { source, .. } => Some(source),
+            | Self::WriteHunspellCache { source, .. }
+            | Self::ReadProjectConfig { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),
             Self::CompileHunspellCache(source) | Self::LoadHunspellCache { source, .. } => {
                 Some(source)
             }
+            Self::ProjectConfig { source, .. } => Some(source),
+            Self::ApplyProjectConfig { source, .. } => Some(source),
             Self::DictionaryManifest(source) => Some(source),
             Self::FetchDictionary(source) => Some(source),
         }
@@ -1317,8 +1382,38 @@ mod tests {
                 dictionary_paths: vec![PathBuf::from("words.txt")],
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
+                config_path: None,
                 comment_prefix: Some("//".to_owned()),
                 path: PathBuf::from("lib.rs"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_analyze_with_a_persistent_project_config() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "analyze",
+                "--dictionary",
+                "words.txt",
+                "--config",
+                ".ferrolex/config",
+                "src/lib.rs",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Analyze(AnalyzeCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                config_path: Some(PathBuf::from(".ferrolex/config")),
+                comment_prefix: None,
+                path: PathBuf::from("src/lib.rs"),
             })
         );
     }
@@ -1358,6 +1453,7 @@ mod tests {
                 dictionary_paths: Vec::new(),
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
+                config_path: None,
                 comment_prefix: None,
                 path: PathBuf::from("src/lib.rs"),
             })
@@ -1569,6 +1665,29 @@ mod tests {
 
         assert_eq!(
             run(arguments).expect("dictionary is readable"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn analyzes_with_a_persistent_project_config() {
+        let dictionary = temporary_dictionary("Auth\n");
+        let source = temporary_file("Ferrolex OAuth generated_token\n");
+        let config = temporary_file(
+            "ignore-word = Ferrolex\nignore-pattern = ^generated_[a-z]+$\nsingle-letter-prefix = separate\n",
+        );
+        let arguments = [
+            "ferrolex".to_owned(),
+            "analyze".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "--config".to_owned(),
+            config.path.to_string_lossy().into_owned(),
+            source.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("project policy is readable"),
             RunOutcome::Success
         );
     }

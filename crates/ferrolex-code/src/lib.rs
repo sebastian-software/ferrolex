@@ -206,6 +206,143 @@ impl Default for AnalyzerConfig {
     }
 }
 
+/// A small, deterministic project-level analysis policy.
+///
+/// The text form is deliberately line-oriented so it can be stored as
+/// `.ferrolex/config` without introducing a generic configuration dependency:
+/// `ignore-word = value`, `ignore-pattern = regex`,
+/// `minimum-word-length = number`, and `single-letter-prefix = join|separate`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProjectConfig {
+    ignored_words: BTreeSet<Box<str>>,
+    ignored_patterns: BTreeSet<Box<str>>,
+    minimum_word_length: Option<usize>,
+    single_letter_prefix: Option<SingleLetterPrefix>,
+}
+
+impl ProjectConfig {
+    /// Parses the stable line-oriented project configuration format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProjectConfigError::InvalidLine`] when an entry is malformed,
+    /// empty, or uses an unsupported key or value.
+    pub fn from_text(text: &str) -> Result<Self, ProjectConfigError> {
+        let mut config = Self::default();
+        for (index, line) in text.lines().enumerate() {
+            let line_number = index + 1;
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                return Err(ProjectConfigError::InvalidLine {
+                    line: line_number,
+                    message: "expected `key = value`".to_owned(),
+                });
+            };
+            let key = key.trim();
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(ProjectConfigError::InvalidLine {
+                    line: line_number,
+                    message: "value must not be empty".to_owned(),
+                });
+            }
+            match key {
+                "ignore-word" => {
+                    config.ignored_words.insert(Box::from(value));
+                }
+                "ignore-pattern" => {
+                    config.ignored_patterns.insert(Box::from(value));
+                }
+                "minimum-word-length" => {
+                    let value = value.parse().map_err(|_| ProjectConfigError::InvalidLine {
+                        line: line_number,
+                        message: "minimum-word-length must be a non-negative integer".to_owned(),
+                    })?;
+                    config.minimum_word_length = Some(value);
+                }
+                "single-letter-prefix" => {
+                    let value = match value {
+                        "join" => SingleLetterPrefix::Join,
+                        "separate" => SingleLetterPrefix::Separate,
+                        _ => {
+                            return Err(ProjectConfigError::InvalidLine {
+                                line: line_number,
+                                message: "single-letter-prefix must be `join` or `separate`"
+                                    .to_owned(),
+                            })
+                        }
+                    };
+                    config.single_letter_prefix = Some(value);
+                }
+                _ => {
+                    return Err(ProjectConfigError::InvalidLine {
+                        line: line_number,
+                        message: format!("unknown key `{key}`"),
+                    })
+                }
+            }
+        }
+        Ok(config)
+    }
+
+    /// Serializes this configuration in canonical deterministic order.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let mut text = String::new();
+        for word in &self.ignored_words {
+            text.push_str("ignore-word = ");
+            text.push_str(word);
+            text.push('\n');
+        }
+        for pattern in &self.ignored_patterns {
+            text.push_str("ignore-pattern = ");
+            text.push_str(pattern);
+            text.push('\n');
+        }
+        if let Some(minimum) = self.minimum_word_length {
+            text.push_str("minimum-word-length = ");
+            text.push_str(&minimum.to_string());
+            text.push('\n');
+        }
+        if let Some(prefix) = self.single_letter_prefix {
+            text.push_str("single-letter-prefix = ");
+            text.push_str(match prefix {
+                SingleLetterPrefix::Join => "join",
+                SingleLetterPrefix::Separate => "separate",
+            });
+            text.push('\n');
+        }
+        text
+    }
+}
+
+/// A syntactic error in [`ProjectConfig`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectConfigError {
+    /// A non-comment configuration line was invalid.
+    InvalidLine {
+        /// One-based line number.
+        line: usize,
+        /// A concise diagnostic.
+        message: String,
+    },
+}
+
+impl fmt::Display for ProjectConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLine { line, message } => {
+                write!(formatter, "project config line {line}: {message}")
+            }
+        }
+    }
+}
+
+impl Error for ProjectConfigError {}
+
 /// A configuration error for [`AnalyzerBuilder`].
 #[derive(Debug)]
 pub enum AnalyzerConfigError {
@@ -238,6 +375,27 @@ pub struct AnalyzerBuilder<'dictionary> {
 }
 
 impl<'dictionary> AnalyzerBuilder<'dictionary> {
+    /// Applies a parsed persistent project policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnalyzerConfigError::InvalidIgnorePattern`] when a configured
+    /// `ignore-pattern` is not a valid regular expression.
+    pub fn project_config(mut self, project: &ProjectConfig) -> Result<Self, AnalyzerConfigError> {
+        for word in &project.ignored_words {
+            self = self.ignore_word(word.clone());
+        }
+        for pattern in &project.ignored_patterns {
+            self = self.ignore_pattern(pattern)?;
+        }
+        if let Some(minimum) = project.minimum_word_length {
+            self = self.minimum_word_length(minimum);
+        }
+        if let Some(prefix) = project.single_letter_prefix {
+            self = self.identifier_split(IdentifierSplitConfig::with_single_letter_prefix(prefix));
+        }
+        Ok(self)
+    }
     /// Ignores every token with `class`.
     #[must_use]
     pub fn ignore_class(mut self, class: TokenClass) -> Self {
@@ -796,7 +954,7 @@ mod tests {
 
     use super::{
         classify, split_identifier, Analyzer, CommentSyntax, DirectiveProblem, Document,
-        IdentifierSplitConfig, SingleLetterPrefix, TokenClass,
+        IdentifierSplitConfig, ProjectConfig, ProjectConfigError, SingleLetterPrefix, TokenClass,
     };
 
     #[test]
@@ -833,6 +991,43 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["O", "Auth"]
         );
+    }
+
+    #[test]
+    fn project_configuration_round_trips_and_changes_analysis() {
+        let config = ProjectConfig::from_text(
+            "# project policy\nignore-word = Ferrolex\nignore-pattern = ^generated_[a-z]+$\nminimum-word-length = 3\nsingle-letter-prefix = separate\n",
+        )
+        .expect("configuration is valid");
+        assert_eq!(
+            ProjectConfig::from_text(&config.to_text()),
+            Ok(config.clone())
+        );
+
+        let dictionary = WordList::new(["Auth"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary)
+            .project_config(&config)
+            .expect("pattern compiles")
+            .build();
+        let analysis = analyzer.check(&Document::new("Ferrolex generated_token OAuth"));
+
+        assert!(analysis.findings().is_empty());
+    }
+
+    #[test]
+    fn project_configuration_reports_line_or_pattern_errors() {
+        assert_eq!(
+            ProjectConfig::from_text("unknown = value\n"),
+            Err(ProjectConfigError::InvalidLine {
+                line: 1,
+                message: "unknown key `unknown`".to_owned(),
+            })
+        );
+
+        let config =
+            ProjectConfig::from_text("ignore-pattern = [\n").expect("syntax alone is preserved");
+        let empty = WordList::new(std::iter::empty::<&str>()).expect("empty dictionary is valid");
+        assert!(Analyzer::builder(&empty).project_config(&config).is_err());
     }
 
     #[test]
