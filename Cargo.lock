@@ -214,6 +214,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrolex-suggest"
+version = "0.1.0"
+dependencies = [
+ "ferrolex-core",
+]
+
+[[package]]
 name = "ferrolex-text"
 version = "0.1.0"
 dependencies = [

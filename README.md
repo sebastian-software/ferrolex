@@ -43,6 +43,10 @@ compatibility subset and reports structured diagnostics. It never invokes an
 external spell-checking engine; see the [import contract](docs/hunspell-format.md)
 and [affix semantics](docs/affix-semantics.md).
 
+The `ferrolex-suggest` library crate provides bounded, deterministic
+edit-distance suggestions for enumerable word sources. Its comparison and
+ranking contract is documented in [Suggestions](docs/suggestions.md).
+
 `compile` turns the same plain-word-list syntax used by `check` into a
 deterministic native artifact. `validate --compiled` first performs the fast
 header/checksum load and then fully validates every offset, UTF-8 payload, and

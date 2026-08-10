@@ -4,6 +4,7 @@ members = [
     "crates/ferrolex-text",
     "crates/ferrolex-code",
     "crates/ferrolex-hunspell",
+    "crates/ferrolex-suggest",
     "crates/ferrolex-compiler",
     "crates/ferrolex-cli",
 ]
