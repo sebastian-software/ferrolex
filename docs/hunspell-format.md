@@ -60,6 +60,7 @@ morphology fields are reported and ignored. Conditions are anchored prefix or
 suffix tests, according to the rule kind. See [compound semantics](compound-semantics.md)
 for the deliberately bounded `COMPOUNDFLAG`/`COMPOUNDMIN` subset.
 
-`AF`, aliases, complex prefix modes, capitalization controls, compounds,
-forbidden words, and suggestion directives have their own later feature gates.
-They must be diagnosed rather than silently interpreted as simple affixes.
+`AF`, aliases, complex prefix modes, capitalization fallbacks, compound
+positions and rules, and suggestion directives beyond the documented subset
+have their own later feature gates. They must be diagnosed rather than silently
+interpreted as simple affixes.

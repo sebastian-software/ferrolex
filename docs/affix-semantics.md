@@ -38,11 +38,15 @@ opt-in are never combined merely because both independently match.
 
 ## Advanced flags
 
-Continuation flags following an add field (`add/flags`) remain active for the
-derived form and can unlock another rule. A derivation may apply a particular
-rule only once and is limited to eight transformations; this makes recognition
-deterministic and bounded. Dictionaries requiring a deeper chain are outside
-the current compatibility level and must not be treated as equivalent.
+Continuation flags following an add field (`add/flags`) are the only same-kind
+capabilities retained by the derived form and can unlock another rule. A
+prefix-to-suffix (or inverse) transition additionally requires cross-product
+opt-in on both rules and uses the original lexeme capabilities. A derivation
+may apply a particular rule only once, is limited to eight transformations,
+and examines at most 4,096 derived states per lexeme. Budget exhaustion
+deterministically rejects the lookup. Dictionaries requiring deeper or more
+branching chains are outside the current compatibility level and must not be
+treated as equivalent.
 
 `CIRCUMFIX` is represented by a flag in continuation fields. A form created
 through a circumfix-marked prefix is accepted only after a circumfix-marked

@@ -19,6 +19,7 @@ const MAX_DICTIONARY_ENTRIES: usize = 1_000_000;
 const MAX_FLAGS_PER_ENTRY: usize = 256;
 const MAX_CONDITION_ATOMS: usize = 256;
 const MAX_AFFIX_CHAIN: usize = 8;
+const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 const MAX_COMPOUND_SCALARS: usize = 256;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
@@ -135,6 +136,7 @@ impl ImportResult {
 /// lookup, so importing does not pre-expand a potentially unbounded word set.
 #[derive(Clone, Debug, Default)]
 pub struct HunspellDictionary {
+    stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
@@ -144,32 +146,41 @@ pub struct HunspellDictionary {
 
 impl Dictionary for HunspellDictionary {
     fn contains(&self, word: &str) -> bool {
-        self.lexemes
-            .iter()
-            .any(|lexeme| self.matches_word_from_lexeme(lexeme, word))
+        self.stems
+            .get(word)
+            .is_some_and(|flags| !self.is_forbidden(flags) && !self.requires_affix(flags))
+            || self
+                .lexemes
+                .iter()
+                .any(|lexeme| self.matches_derived_word(lexeme, word))
             || self.matches_simple_compound(word)
     }
 }
 
 impl HunspellDictionary {
-    fn matches_word_from_lexeme(&self, lexeme: &Lexeme, word: &str) -> bool {
+    fn matches_derived_word(&self, lexeme: &Lexeme, word: &str) -> bool {
         if self.is_forbidden(&lexeme.flags) {
             return false;
         }
         let mut states = vec![FormState::new(lexeme)];
+        let mut derivations = 0;
 
         while let Some(state) = states.pop() {
-            if state.form == word && self.is_accepted_state(&state) {
+            if state.depth > 0 && state.form == word && self.is_accepted_state(&state) {
                 return true;
             }
             if state.depth == MAX_AFFIX_CHAIN {
                 continue;
             }
             for rule in self.prefixes.iter().chain(&self.suffixes) {
-                if !state.flags.contains(&rule.flag) || !state.can_apply(rule) {
+                if !state.can_apply(rule) {
                     continue;
                 }
                 if let Some(form) = rule.apply(&state.form) {
+                    if derivations == MAX_DERIVATIONS_PER_LEXEME {
+                        return false;
+                    }
+                    derivations += 1;
                     states.push(state.apply(rule, form, &self.special_flags));
                 }
             }
@@ -211,16 +222,14 @@ impl HunspellDictionary {
             let (left, right) = word.split_at(byte_index);
             left.chars().count() >= minimum
                 && right.chars().count() >= minimum
-                && self.lexemes.iter().any(|lexeme| {
-                    lexeme.stem.as_ref() == left
-                        && lexeme.flags.contains(compound_flag)
-                        && !self.is_forbidden(&lexeme.flags)
-                })
-                && self.lexemes.iter().any(|lexeme| {
-                    lexeme.stem.as_ref() == right
-                        && lexeme.flags.contains(compound_flag)
-                        && !self.is_forbidden(&lexeme.flags)
-                })
+                && self
+                    .stems
+                    .get(left)
+                    .is_some_and(|flags| flags.contains(compound_flag) && !self.is_forbidden(flags))
+                && self
+                    .stems
+                    .get(right)
+                    .is_some_and(|flags| flags.contains(compound_flag) && !self.is_forbidden(flags))
         })
     }
 }
@@ -305,9 +314,15 @@ impl FormState {
 
     fn can_apply(&self, rule: &AffixRule) -> bool {
         !self.used_rules.contains(&rule.id)
-            && (self.last_kind.is_none()
-                || self.last_kind == Some(rule.kind)
-                || (self.last_cross_product && rule.cross_product))
+            && match self.last_kind {
+                None => self.flags.contains(&rule.flag),
+                Some(kind) if kind == rule.kind => self.flags.contains(&rule.flag),
+                Some(_) => {
+                    self.last_cross_product
+                        && rule.cross_product
+                        && self.origin_flags.contains(&rule.flag)
+                }
+            }
     }
 
     fn apply(&self, rule: &AffixRule, form: String, special_flags: &SpecialFlags) -> Self {
@@ -315,13 +330,11 @@ impl FormState {
             .circumfix
             .as_ref()
             .is_some_and(|flag| rule.continuation_flags.contains(flag));
-        let mut flags = self.flags.clone();
-        flags.extend(rule.continuation_flags.iter().cloned());
         let mut used_rules = self.used_rules.clone();
         used_rules.insert(rule.id);
         Self {
             form,
-            flags,
+            flags: rule.continuation_flags.clone(),
             origin_flags: self.origin_flags.clone(),
             depth: self.depth + 1,
             last_kind: Some(rule.kind),
@@ -442,7 +455,12 @@ pub fn import(
     } else {
         Vec::new()
     };
+    let stems = lexemes
+        .iter()
+        .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
+        .collect();
     let dictionary = HunspellDictionary {
+        stems,
         lexemes,
         prefixes: parsed_aff.prefixes,
         suffixes: parsed_aff.suffixes,
@@ -1128,6 +1146,7 @@ fn diagnostic(
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::sync::Arc;
     use std::thread;
 
@@ -1300,6 +1319,42 @@ mod tests {
 
         assert!(result.dictionary().contains("rootx"));
         assert!(result.dictionary().contains("rootxy"));
+    }
+
+    #[test]
+    fn affix_rules_do_not_chain_without_a_continuation_or_cross_product() {
+        let result = import(
+            "test.aff",
+            "SFX A N 1\nSFX A 0 x .\nSFX B N 1\nSFX B 0 y .\n",
+            "test.dic",
+            "1\nroot/AB\n",
+            ImportMode::Strict,
+        )
+        .expect("basic affixes are supported");
+
+        assert!(result.dictionary().contains("rootx"));
+        assert!(result.dictionary().contains("rooty"));
+        assert!(!result.dictionary().contains("rootxy"));
+    }
+
+    #[test]
+    fn pathological_affix_branching_has_a_deterministic_lookup_budget() {
+        let mut rules = String::new();
+        for index in 0..100 {
+            writeln!(rules, "SFX A 0 x{index} .").expect("writing to String does not fail");
+        }
+        let affixes = format!("SFX A N 100\n{rules}");
+        let result = import(
+            "test.aff",
+            &affixes,
+            "test.dic",
+            "1\nroot/A\n",
+            ImportMode::Strict,
+        )
+        .expect("bounded valid rules import");
+
+        assert!(result.dictionary().contains("root"));
+        assert!(!result.dictionary().contains("not-a-generated-form"));
     }
 
     #[test]
