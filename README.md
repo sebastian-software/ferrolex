@@ -26,7 +26,7 @@ ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
 ferrolex validate --compiled words.flex
 ferrolex dictionary list
-ferrolex dictionary fetch pt_BR --cache .ferrolex-dictionaries
+ferrolex dictionary install pt_BR --cache .ferrolex-dictionaries
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -59,7 +59,9 @@ Dutch, Polish, Russian, Turkish, Arabic, Ukrainian, Swedish, Indonesian,
 Hindi, and Bengali; it never downloads or updates dictionaries implicitly.
 Urdu requires a separately reviewed source because it has no pair in the
 pinned LibreOffice collection. CJK is intentionally deferred until text
-segmentation has its own contract.
+segmentation has its own contract. The
+[locale compatibility matrix](docs/locale-compatibility.md) separates safe
+acquisition from strict import and recognition evidence.
 
 `compile` turns the same plain-word-list syntax used by `check` into a
 deterministic native artifact. `validate --compiled` first performs the fast

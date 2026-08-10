@@ -59,6 +59,8 @@ entries are UTF-8. The current `validate` command accepts UTF-8 Hunspell input,
 so legacy pairs need an explicit, lossless transcode before import. Arabic and
 Turkish are deliberately available for compatibility evaluation; recognition
 support remains dependent on the diagnostics from `validate --strict`.
+The [locale compatibility matrix](locale-compatibility.md) records this
+evidence separately for every catalog entry.
 
 CJK locales are intentionally absent. They need a dedicated text-segmentation
 contract, rather than treating a dictionary fetch as complete language support.
@@ -94,3 +96,20 @@ No dictionary data or network fixtures are committed in this repository. Only
 source paths, provenance notices, encodings, and SHA-256 values are stored.
 That preserves the engine's `MIT OR Apache-2.0` licensing while making each
 consuming product responsible for the exact upstream terms it accepts.
+
+## Checked install workflow
+
+For the normal workflow, `install` fetches the same checked source bytes and
+then runs the strict byte-oriented importer in one operation:
+
+```sh
+ferrolex dictionary install de_DE \
+  --cache "$HOME/.cache/ferrolex/dictionaries"
+```
+
+The importer decodes UTF-8, ISO-8859-1, and ISO-8859-2 in memory, without
+rewriting the cache bytes whose digest establishes provenance. It also handles
+the catalogued `id_ID` mixed encoding pair explicitly. An unsupported
+recognition directive makes `install` return exit status `1`, while leaving the
+verified source cache available for diagnostic work. `fetch` remains useful
+when acquisition and validation need to be separate steps.

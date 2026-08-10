@@ -16,15 +16,18 @@ use ferrolex_compiler::{
 };
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
 use ferrolex_dictionaries::{
-    find_locale, DictionaryInstaller, FetchError as DictionaryFetchError,
-    ManifestError as DictionaryManifestError, UreqFetcher, LIBREOFFICE_CATALOG,
+    find_locale, DictionaryInstaller, FetchError as DictionaryFetchError, InstalledDictionary,
+    LibreOfficeDictionary, ManifestError as DictionaryManifestError, SourceEncoding, UreqFetcher,
+    LIBREOFFICE_CATALOG,
 };
 use ferrolex_hunspell::{
-    import as import_hunspell, Diagnostic as ImportDiagnostic, ImportMode, Severity,
+    import_bytes as import_hunspell_bytes,
+    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, ByteEncoding,
+    ByteImportEncodings, Diagnostic as ImportDiagnostic, ImportMode, Severity,
 };
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -67,22 +70,57 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
             Ok(RunOutcome::Success)
         }
         DictionaryCommand::Fetch { locale, cache_path } => {
-            let source = find_locale(locale).ok_or_else(|| {
-                CliError::Usage(format!(
-                    "unsupported LibreOffice locale `{locale}`; run `ferrolex dictionary list`"
-                ))
-            })?;
-            let manifest = source.manifest().map_err(CliError::DictionaryManifest)?;
-            let installed = DictionaryInstaller::new(UreqFetcher)
-                .install(&manifest, cache_path)
-                .map_err(CliError::FetchDictionary)?;
+            let (source, installed) = fetch_catalog_dictionary(locale, cache_path)?;
             println!("installed: {}", installed.aff_path().display());
             println!("installed: {}", installed.dic_path().display());
-            println!("license: {}", manifest.license_label());
-            println!("notice: {}", manifest.license_notice_url());
+            println!("license: {}", source.license_label());
+            println!("notice: {}", source.license_notice_url());
             Ok(RunOutcome::Success)
         }
+        DictionaryCommand::Install { locale, cache_path } => {
+            let (source, installed) = fetch_catalog_dictionary(locale, cache_path)?;
+            println!("installed: {}", installed.aff_path().display());
+            println!("installed: {}", installed.dic_path().display());
+            println!("license: {}", source.license_label());
+            println!("notice: {}", source.license_notice_url());
+            let outcome = validate_hunspell(
+                true,
+                installed.aff_path(),
+                installed.dic_path(),
+                catalog_import_encodings(source.encoding()),
+            )?;
+            if outcome == RunOutcome::Success {
+                println!("ready: {}", source.locale());
+            }
+            Ok(outcome)
+        }
     }
+}
+
+fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodings> {
+    match encoding {
+        SourceEncoding::MixedUtf8AndIso8859_1 => Some(ByteImportEncodings::new(
+            ByteEncoding::Iso8859_1,
+            ByteEncoding::Utf8,
+        )),
+        SourceEncoding::Utf8 | SourceEncoding::Iso8859_1 | SourceEncoding::Iso8859_2 => None,
+    }
+}
+
+fn fetch_catalog_dictionary(
+    locale: &str,
+    cache_path: &Path,
+) -> Result<(LibreOfficeDictionary, InstalledDictionary), CliError> {
+    let source = find_locale(locale).ok_or_else(|| {
+        CliError::Usage(format!(
+            "unsupported LibreOffice locale `{locale}`; run `ferrolex dictionary list`"
+        ))
+    })?;
+    let manifest = source.manifest().map_err(CliError::DictionaryManifest)?;
+    let installed = DictionaryInstaller::new(UreqFetcher)
+        .install(&manifest, cache_path)
+        .map_err(CliError::FetchDictionary)?;
+    Ok((source, installed))
 }
 
 fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
@@ -212,7 +250,7 @@ fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
             strict,
             aff_path,
             dic_path,
-        } => validate_hunspell(*strict, aff_path, dic_path),
+        } => validate_hunspell(*strict, aff_path, dic_path, None),
         ValidateCommand::Compiled { path } => validate_compiled(path),
     }
 }
@@ -221,12 +259,13 @@ fn validate_hunspell(
     strict: bool,
     aff_path: &Path,
     dic_path: &Path,
+    encodings: Option<ByteImportEncodings>,
 ) -> Result<RunOutcome, CliError> {
-    let aff_text = fs::read_to_string(aff_path).map_err(|source| CliError::ReadInput {
+    let aff_bytes = fs::read(aff_path).map_err(|source| CliError::ReadInput {
         path: aff_path.to_path_buf(),
         source,
     })?;
-    let dic_text = fs::read_to_string(dic_path).map_err(|source| CliError::ReadInput {
+    let dic_bytes = fs::read(dic_path).map_err(|source| CliError::ReadInput {
         path: dic_path.to_path_buf(),
         source,
     })?;
@@ -238,7 +277,19 @@ fn validate_hunspell(
     let aff_source = aff_path.display().to_string();
     let dic_source = dic_path.display().to_string();
 
-    match import_hunspell(&aff_source, &aff_text, &dic_source, &dic_text, mode) {
+    let import = match encodings {
+        Some(encodings) => import_hunspell_bytes_with_encodings(
+            &aff_source,
+            &aff_bytes,
+            &dic_source,
+            &dic_bytes,
+            encodings,
+            mode,
+        ),
+        None => import_hunspell_bytes(&aff_source, &aff_bytes, &dic_source, &dic_bytes, mode),
+    };
+
+    match import {
         Ok(result) => {
             let has_errors = result
                 .diagnostics()
@@ -358,19 +409,21 @@ fn parse_dictionary_arguments(
             }
             Ok(Command::Dictionary(DictionaryCommand::List))
         }
-        Some("fetch") => parse_dictionary_fetch_arguments(arguments),
+        Some("fetch") => parse_dictionary_catalog_arguments(arguments, "fetch"),
+        Some("install") => parse_dictionary_catalog_arguments(arguments, "install"),
         Some("--help" | "-h") => Ok(Command::Help),
         Some(subcommand) => Err(CliError::Usage(format!(
             "unknown dictionary subcommand `{subcommand}`"
         ))),
         None => Err(CliError::Usage(
-            "dictionary requires `list` or `fetch`".to_owned(),
+            "dictionary requires `list`, `fetch`, or `install`".to_owned(),
         )),
     }
 }
 
-fn parse_dictionary_fetch_arguments(
+fn parse_dictionary_catalog_arguments(
     arguments: impl IntoIterator<Item = String>,
+    subcommand: &str,
 ) -> Result<Command, CliError> {
     let mut locale = None;
     let mut cache_path = None;
@@ -385,23 +438,31 @@ fn parse_dictionary_fetch_arguments(
             }
             _ => {
                 if locale.replace(argument).is_some() {
-                    return Err(CliError::Usage(
-                        "dictionary fetch accepts exactly one locale".to_owned(),
-                    ));
+                    return Err(CliError::Usage(format!(
+                        "dictionary {subcommand} accepts exactly one locale"
+                    )));
                 }
             }
         }
     }
 
     let locale = locale.ok_or_else(|| {
-        CliError::Usage("dictionary fetch requires exactly one locale".to_owned())
+        CliError::Usage(format!(
+            "dictionary {subcommand} requires exactly one locale"
+        ))
     })?;
     let cache_path = cache_path
-        .ok_or_else(|| CliError::Usage("dictionary fetch requires `--cache`".to_owned()))?;
-    Ok(Command::Dictionary(DictionaryCommand::Fetch {
-        locale,
-        cache_path,
-    }))
+        .ok_or_else(|| CliError::Usage(format!("dictionary {subcommand} requires `--cache`")))?;
+    let command = match subcommand {
+        "fetch" => DictionaryCommand::Fetch { locale, cache_path },
+        "install" => DictionaryCommand::Install { locale, cache_path },
+        _ => {
+            return Err(CliError::Usage(format!(
+                "unknown dictionary subcommand `{subcommand}`"
+            )))
+        }
+    };
+    Ok(Command::Dictionary(command))
 }
 
 fn parse_validate_arguments(
@@ -682,6 +743,7 @@ enum ValidateCommand {
 enum DictionaryCommand {
     List,
     Fetch { locale: String, cache_path: PathBuf },
+    Install { locale: String, cache_path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -790,8 +852,9 @@ mod tests {
     use ferrolex_core::Dictionary;
 
     use super::{
-        line_and_column, parse_arguments, run, AnalyzeCommand, CheckCommand, CheckTarget, CliError,
-        Command, CompileCommand, DictionaryCommand, RunOutcome, ValidateCommand,
+        catalog_import_encodings, line_and_column, parse_arguments, run, validate_hunspell,
+        AnalyzeCommand, CheckCommand, CheckTarget, CliError, Command, CompileCommand,
+        DictionaryCommand, RunOutcome, SourceEncoding, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -919,6 +982,27 @@ mod tests {
         assert_eq!(
             command,
             Command::Dictionary(DictionaryCommand::Fetch {
+                locale: "de_DE".to_owned(),
+                cache_path: PathBuf::from(".dictionary-cache"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_a_catalog_pinned_dictionary_install() {
+        let command = parse_arguments([
+            "ferrolex".to_owned(),
+            "dictionary".to_owned(),
+            "install".to_owned(),
+            "de_DE".to_owned(),
+            "--cache".to_owned(),
+            ".dictionary-cache".to_owned(),
+        ])
+        .expect("the reviewed install command is valid");
+
+        assert_eq!(
+            command,
+            Command::Dictionary(DictionaryCommand::Install {
                 locale: "de_DE".to_owned(),
                 cache_path: PathBuf::from(".dictionary-cache"),
             })
@@ -1069,8 +1153,8 @@ mod tests {
 
     #[test]
     fn strict_hunspell_validation_reports_import_errors_with_a_failure_exit_code() {
-        let affix = temporary_file("SET ISO-8859-1\n");
-        let dictionary = temporary_file("1\nStraße\n");
+        let affix = temporary_file("SET KOI8-R\n");
+        let dictionary = temporary_file("1\nword\n");
         let arguments = [
             "ferrolex".to_owned(),
             "validate".to_owned(),
@@ -1082,6 +1166,41 @@ mod tests {
         assert_eq!(
             run(arguments).expect("validation files are readable"),
             RunOutcome::Misspelled
+        );
+    }
+
+    #[test]
+    fn strict_hunspell_validation_decodes_iso_8859_1_files() {
+        let affix = temporary_file("SET ISO-8859-1\n");
+        let dictionary = temporary_bytes(b"1\ncaf\xe9\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "validate".to_owned(),
+            "--strict".to_owned(),
+            affix.path.to_string_lossy().into_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("legacy-encoded files are readable"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn catalog_mixed_encoding_override_preserves_the_utf8_dictionary_file() {
+        let affix = temporary_file("SET ISO-8859-1\n");
+        let dictionary = temporary_file("1\ncafé\n");
+
+        assert_eq!(
+            validate_hunspell(
+                true,
+                &affix.path,
+                &dictionary.path,
+                catalog_import_encodings(SourceEncoding::MixedUtf8AndIso8859_1),
+            )
+            .expect("mixed-encoding files are readable"),
+            RunOutcome::Success
         );
     }
 
@@ -1157,6 +1276,10 @@ mod tests {
     }
 
     fn temporary_file(contents: &str) -> TemporaryDictionary {
+        temporary_bytes(contents.as_bytes())
+    }
+
+    fn temporary_bytes(contents: &[u8]) -> TemporaryDictionary {
         let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "ferrolex-cli-test-{}-{sequence}.txt",
