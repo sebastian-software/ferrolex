@@ -48,6 +48,50 @@ pub enum CompileError {
     DictionaryTooLarge,
 }
 
+/// A format-neutral exact-word dictionary input for the native compiler.
+///
+/// This deliberately represents only semantics supported by the version-1
+/// `FLEXDIC` runtime: non-empty UTF-8 words with exact recognition. Importers
+/// with morphology must either preserve that richer runtime separately or
+/// explicitly project a reviewed exact-word subset; the compiler never drops
+/// semantic features implicitly.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExactDictionaryIr {
+    words: Vec<Box<str>>,
+}
+
+impl ExactDictionaryIr {
+    /// Builds a deterministic exact-word IR from non-empty UTF-8 input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CompileError::EmptyWord`] for an empty input entry.
+    pub fn new<I, S>(input: I) -> Result<Self, CompileError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut words = Vec::<Box<str>>::new();
+        for (index, word) in input.into_iter().enumerate() {
+            let word = word.as_ref();
+            if word.is_empty() {
+                return Err(CompileError::EmptyWord {
+                    position: index + 1,
+                });
+            }
+            words.push(Box::from(word));
+        }
+        words.sort_unstable();
+        words.dedup();
+        Ok(Self { words })
+    }
+
+    /// Visits normalized IR words in deterministic UTF-8 byte order.
+    pub fn words(&self) -> impl ExactSizeIterator<Item = &str> + DoubleEndedIterator + '_ {
+        self.words.iter().map(Box::as_ref)
+    }
+}
+
 impl fmt::Display for CompileError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -252,18 +296,18 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut sorted_words = Vec::<Box<str>>::new();
-    for (index, word) in words.into_iter().enumerate() {
-        let word = word.as_ref();
-        if word.is_empty() {
-            return Err(CompileError::EmptyWord {
-                position: index + 1,
-            });
-        }
-        sorted_words.push(Box::from(word));
-    }
-    sorted_words.sort_unstable();
-    sorted_words.dedup();
+    let ir = ExactDictionaryIr::new(words)?;
+    compile_exact_ir(&ir)
+}
+
+/// Compiles a format-neutral exact-word IR into `FLEXDIC` version 1.
+///
+/// # Errors
+///
+/// Returns [`CompileError::DictionaryTooLarge`] if the output cannot be
+/// represented by the version-1 layout.
+pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError> {
+    let sorted_words = &ir.words;
 
     let word_count =
         u64::try_from(sorted_words.len()).map_err(|_| CompileError::DictionaryTooLarge)?;
@@ -674,8 +718,8 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use super::{
-        checksum, compile_words, put_u64, CompileError, CompiledDictionary, LoadError,
-        ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
+        checksum, compile_exact_ir, compile_words, put_u64, CompileError, CompiledDictionary,
+        ExactDictionaryIr, LoadError, ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
 
@@ -686,6 +730,18 @@ mod tests {
         let second = compile_words(["東京", "apple", "zebra"]).expect("valid words compile");
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn exact_ir_is_format_neutral_and_compiles_deterministically() {
+        let ir = ExactDictionaryIr::new(["東京", "apple", "apple"])
+            .expect("non-empty UTF-8 words build an IR");
+
+        assert_eq!(ir.words().collect::<Vec<_>>(), ["apple", "東京"]);
+        assert_eq!(
+            compile_exact_ir(&ir).expect("IR compiles"),
+            compile_words(["apple", "東京"]).expect("word list compiles")
+        );
     }
 
     #[test]
