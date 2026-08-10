@@ -6,11 +6,18 @@
 
 #![forbid(unsafe_code)]
 
+mod cache;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
+
+pub use cache::{
+    compile_runtime_cache, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
+    HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+};
 
 const MAX_AFF_BYTES: usize = 32 * 1024 * 1024;
 const MAX_DIC_BYTES: usize = 64 * 1024 * 1024;
