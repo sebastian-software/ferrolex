@@ -67,6 +67,13 @@ cargo bench -p ferrolex-core
 
 See [Performance](docs/performance.md) for the measured contract.
 
+## Robustness testing
+
+The regular test suite contains deterministic adversarial corpora for
+untrusted Hunspell input, compiled artifacts, and bounded suggestions. See
+[Robustness testing](docs/robustness-testing.md) for the covered boundaries
+and focused command.
+
 ## MSRV
 
 ferrolex supports Rust 1.81 and later.
