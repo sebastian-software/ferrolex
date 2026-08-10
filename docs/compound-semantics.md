@@ -12,5 +12,9 @@ scalar values; this is a bounded recognition rule, not a general asymptotic
 performance claim. Longer inputs are not treated as compounds in this
 compatibility level.
 Compound components are exact stems: their affix-derived forms, positional
-restrictions, linking elements, and `COMPOUNDRULE` patterns remain later
-feature gates.
+restrictions, and linking elements remain later feature gates. A
+`COMPOUNDRULE` header may additionally declare up to 1,024 two-flag literal
+patterns such as `AB`; the first component must carry `A` and the second `B`.
+Quantifiers and rules with other component counts are rejected in strict mode
+rather than being interpreted approximately. Runtime caches encode this rule
+subset and reject caches produced by earlier semantics versions.

@@ -15,9 +15,9 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    AffixKind, AffixRule, CompoundConfig, Condition, ConditionAtom, Flag, HunspellDictionary,
-    Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES,
-    MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES,
+    AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag,
+    HunspellDictionary, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_COMPOUND_RULES,
+    MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES,
 };
 
 const MAGIC: [u8; 8] = *b"FLXHSP\0\0";
@@ -32,7 +32,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 1;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 2;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -181,6 +181,15 @@ pub fn compile_runtime_cache(
         output.len().saturating_add(CHECKSUM_BYTES),
         DictionaryError::Compile,
     )?;
+    write_count(
+        &mut output,
+        dictionary.compound.rules.len(),
+        "compound rule count",
+    )?;
+    for rule in &dictionary.compound.rules {
+        write_flag(&mut output, &rule.first)?;
+        write_flag(&mut output, &rule.second)?;
+    }
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -236,10 +245,22 @@ pub fn load_runtime_cache(
     let prefixes = read_rules(&mut reader, AffixKind::Prefix)?;
     let suffixes = read_rules(&mut reader, AffixKind::Suffix)?;
     let special_flags = read_special_flags(&mut reader)?;
+    let flag = read_optional_flag(&mut reader)?;
+    let minimum_length = usize::try_from(reader.u64()?)
+        .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
+    let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
+    reader.require_minimum_items(rule_count, 8, "compound rules")?;
+    let mut rules = Vec::with_capacity(rule_count);
+    for _ in 0..rule_count {
+        rules.push(CompoundRule {
+            first: reader.flag()?,
+            second: reader.flag()?,
+        });
+    }
     let compound = CompoundConfig {
-        flag: read_optional_flag(&mut reader)?,
-        minimum_length: usize::try_from(reader.u64()?)
-            .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?,
+        flag,
+        minimum_length,
+        rules,
     };
     if !reader.is_empty() {
         return Err(RuntimeCacheError::InvalidArtifact(
@@ -883,11 +904,11 @@ mod tests {
         );
 
         let mut semantics = cache.clone();
-        semantics[10..14].copy_from_slice(&2_u32.to_le_bytes());
+        semantics[10..14].copy_from_slice(&3_u32.to_le_bytes());
         rewrite_checksum(&mut semantics);
         assert_eq!(
             load_runtime_cache(&semantics, sources()).expect_err("semantics are rejected"),
-            RuntimeCacheError::UnsupportedSemanticsVersion(2)
+            RuntimeCacheError::UnsupportedSemanticsVersion(3)
         );
 
         let mut excessive_entries = cache;

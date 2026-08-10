@@ -29,6 +29,7 @@ const MAX_CONDITION_ATOMS: usize = 256;
 const MAX_AFFIX_CHAIN: usize = 8;
 const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 const MAX_COMPOUND_SCALARS: usize = 256;
+const MAX_COMPOUND_RULES: usize = 1_024;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -390,7 +391,7 @@ impl HunspellDictionary {
     }
 
     fn matches_simple_compound(&self, word: &str) -> bool {
-        let Some(compound_flag) = &self.compound.flag else {
+        if self.compound.flag.is_none() && self.compound.rules.is_empty() {
             return false;
         };
         // Retain at most the bounded number of split positions.  Building an
@@ -409,15 +410,29 @@ impl HunspellDictionary {
             let (left, right) = word.split_at(byte_index);
             left.chars().count() >= minimum
                 && right.chars().count() >= minimum
-                && self
-                    .stems
-                    .get(left)
-                    .is_some_and(|flags| flags.contains(compound_flag) && !self.is_forbidden(flags))
-                && self
-                    .stems
-                    .get(right)
-                    .is_some_and(|flags| flags.contains(compound_flag) && !self.is_forbidden(flags))
+                && self.matches_compound_components(left, right)
         })
+    }
+
+    fn matches_compound_components(&self, left: &str, right: &str) -> bool {
+        let Some(left_flags) = self.stems.get(left) else {
+            return false;
+        };
+        let Some(right_flags) = self.stems.get(right) else {
+            return false;
+        };
+        if self.is_forbidden(left_flags) || self.is_forbidden(right_flags) {
+            return false;
+        }
+        self.compound
+            .flag
+            .as_ref()
+            .is_some_and(|flag| left_flags.contains(flag) && right_flags.contains(flag))
+            || self
+                .compound
+                .rules
+                .iter()
+                .any(|rule| left_flags.contains(&rule.first) && right_flags.contains(&rule.second))
     }
 }
 
@@ -614,6 +629,7 @@ struct SpecialFlags {
 struct CompoundConfig {
     flag: Option<Flag>,
     minimum_length: usize,
+    rules: Vec<CompoundRule>,
 }
 
 impl Default for CompoundConfig {
@@ -621,8 +637,15 @@ impl Default for CompoundConfig {
         Self {
             flag: None,
             minimum_length: 3,
+            rules: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct CompoundRule {
+    first: Flag,
+    second: Flag,
 }
 
 #[derive(Clone, Debug)]
@@ -1087,6 +1110,9 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.compound,
                 &mut parsed.diagnostics,
             ),
+            "COMPOUNDRULE" => {
+                parse_compound_rules(source, &mut lines, line_number, &fields, &mut parsed);
+            }
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
@@ -1095,25 +1121,31 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &fields,
                 &mut parsed,
             ),
-            _ => parsed.diagnostics.push(diagnostic(
-                source,
-                line_number,
-                directive,
-                if is_suggestion_only_directive(directive) {
-                    Severity::Warning
-                } else {
-                    Severity::Error
-                },
-                if is_suggestion_only_directive(directive) {
-                    "suggestion-only directive is not implemented in the current compatibility level"
-                } else {
-                    "directive may affect recognition and is not implemented in the current compatibility level"
-                },
-            )),
+            _ => parse_unknown_directive(source, line_number, directive, &mut parsed.diagnostics),
         }
     }
 
     parsed
+}
+
+fn parse_unknown_directive(
+    source: &str,
+    line_number: usize,
+    directive: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let suggestion_only = is_suggestion_only_directive(directive);
+    diagnostics.push(diagnostic(
+        source,
+        line_number,
+        directive,
+        if suggestion_only { Severity::Warning } else { Severity::Error },
+        if suggestion_only {
+            "suggestion-only directive is not implemented in the current compatibility level"
+        } else {
+            "directive may affect recognition and is not implemented in the current compatibility level"
+        },
+    ));
 }
 
 fn parse_set(source: &str, line: usize, fields: &[&str], diagnostics: &mut Vec<Diagnostic>) {
@@ -1228,6 +1260,65 @@ fn parse_compound_minimum(
             Severity::Error,
             "COMPOUNDMIN requires a positive integer",
         ));
+    }
+}
+
+fn parse_compound_rules(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Ok(rule_count) = fields.get(1).unwrap_or(&"").parse::<usize>() else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "COMPOUNDRULE",
+            Severity::Error,
+            "COMPOUNDRULE header requires a positive rule count",
+        ));
+        return;
+    };
+    if fields.len() != 2 || rule_count == 0 || rule_count > MAX_COMPOUND_RULES {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "COMPOUNDRULE",
+            Severity::Error,
+            "COMPOUNDRULE count must be between 1 and 1024",
+        ));
+        return;
+    }
+    for _ in 0..rule_count {
+        let Some((index, line)) = lines.next() else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "COMPOUNDRULE",
+                Severity::Error,
+                "COMPOUNDRULE header ended before all declared rules were supplied",
+            ));
+            return;
+        };
+        let line = line.trim();
+        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let pattern = rule_fields.get(1).copied().unwrap_or_default();
+        let flags = pattern.chars().collect::<Vec<_>>();
+        if rule_fields.len() != 2 || rule_fields[0] != "COMPOUNDRULE" || flags.len() != 2 {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "COMPOUNDRULE",
+                Severity::Error,
+                "only two literal single-scalar component flags are supported",
+            ));
+            continue;
+        }
+        parsed.compound.rules.push(CompoundRule {
+            first: Flag(Box::<str>::from(flags[0].to_string())),
+            second: Flag(Box::<str>::from(flags[1].to_string())),
+        });
     }
 }
 
@@ -2054,6 +2145,21 @@ mod tests {
         let query = "ab".repeat(MAX_COMPOUND_SCALARS);
 
         assert!(!imported.dictionary().contains(&query));
+    }
+
+    #[test]
+    fn compound_rules_require_the_documented_component_flag_order() {
+        let imported = import(
+            "test.aff",
+            "COMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE AB\n",
+            "test.dic",
+            "2\nHaus/A\nTür/B\n",
+            ImportMode::Strict,
+        )
+        .expect("two-component compound rule imports");
+
+        assert!(imported.dictionary().contains("HausTür"));
+        assert!(!imported.dictionary().contains("TürHaus"));
     }
 
     #[test]
