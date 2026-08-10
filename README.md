@@ -15,7 +15,7 @@ CLI are intentionally small and may change before a stable release.
 
 ## MSRV
 
-ferrolex supports Rust 1.70 and later.
+ferrolex supports Rust 1.81 and later.
 
 ## License
 
