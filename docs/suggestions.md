@@ -6,6 +6,12 @@ not assumed to be enumerable. The first implementation uses Unicode-scalar
 optimal-string-alignment distance, including adjacent transpositions, and
 ranks by `(distance, byte-lexical spelling)`.
 
+Callers may supply explicit `ReplacementRule` values for known misspellings or
+organization-specific conventions. A rule that transforms the query directly
+into an enumerated candidate gives that candidate ranking distance zero; it
+does not add unverified words, alter `Dictionary::contains`, or emulate a
+third-party suggestion order.
+
 All work is bounded by explicit candidate, word-length, and edit-cell limits.
 The result reports whether it is complete or stopped by a configured budget, so
 partial output is never presented as exhaustive. Case is used only for display:

@@ -56,6 +56,23 @@ pub struct Suggestion {
     distance: usize,
 }
 
+/// An explicit spelling replacement preferred during suggestion ranking.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReplacementRule {
+    from: String,
+    to: String,
+}
+
+impl ReplacementRule {
+    /// Creates a non-empty replacement rule.
+    #[must_use]
+    pub fn new(from: impl Into<String>, to: impl Into<String>) -> Option<Self> {
+        let from = from.into();
+        let to = to.into();
+        (!from.is_empty() && !to.is_empty()).then_some(Self { from, to })
+    }
+}
+
 impl Suggestion {
     /// Returns the display spelling.
     #[must_use]
@@ -102,13 +119,28 @@ impl SuggestionResult {
 pub struct Suggester<'source, S> {
     source: &'source S,
     config: SuggestConfig,
+    replacements: &'source [ReplacementRule],
 }
 
 impl<'source, S: CandidateSource> Suggester<'source, S> {
     /// Creates a suggester with explicit deterministic limits.
     #[must_use]
     pub const fn new(source: &'source S, config: SuggestConfig) -> Self {
-        Self { source, config }
+        Self {
+            source,
+            config,
+            replacements: &[],
+        }
+    }
+
+    /// Adds explicit replacement rules to deterministic candidate ranking.
+    #[must_use]
+    pub const fn with_replacement_rules(
+        mut self,
+        replacements: &'source [ReplacementRule],
+    ) -> Self {
+        self.replacements = replacements;
+        self
     }
     /// Generates ranked suggestions for `query`.
     #[must_use]
@@ -140,11 +172,15 @@ impl<'source, S: CandidateSource> Suggester<'source, S> {
                 return false;
             }
             cells += required;
-            if let Some(distance) = osa_distance(
-                &query_chars,
-                &candidate_chars,
-                self.config.max_edit_distance,
-            ) {
+            let distance = replacement_distance(&query_chars, &candidate_chars, self.replacements)
+                .or_else(|| {
+                    osa_distance(
+                        &query_chars,
+                        &candidate_chars,
+                        self.config.max_edit_distance,
+                    )
+                });
+            if let Some(distance) = distance {
                 suggestions.push(Suggestion {
                     word: present(candidate, query),
                     distance,
@@ -160,6 +196,30 @@ impl<'source, S: CandidateSource> Suggester<'source, S> {
             completeness,
         }
     }
+}
+
+fn replacement_distance(
+    query: &[char],
+    candidate: &[char],
+    replacements: &[ReplacementRule],
+) -> Option<usize> {
+    replacements.iter().find_map(|rule| {
+        let from = lowercase_chars_bounded(&rule.from, query.len())?;
+        let to = lowercase_chars_bounded(&rule.to, candidate.len())?;
+        if from.is_empty() || to.is_empty() || query.len() < from.len() {
+            return None;
+        }
+        (0..=query.len() - from.len()).find_map(|start| {
+            if query[start..start + from.len()] != from {
+                return None;
+            }
+            let mut transformed = Vec::with_capacity(query.len() - from.len() + to.len());
+            transformed.extend_from_slice(&query[..start]);
+            transformed.extend_from_slice(&to);
+            transformed.extend_from_slice(&query[start + from.len()..]);
+            (transformed == candidate).then_some(0)
+        })
+    })
 }
 
 fn compare_suggestions(left: &Suggestion, right: &Suggestion) -> Ordering {
@@ -231,7 +291,7 @@ fn osa_distance(left: &[char], right: &[char], maximum: usize) -> Option<usize> 
 mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{CandidateSource, Completeness, SuggestConfig, Suggester};
+    use super::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
     use ferrolex_core::WordList;
 
     struct TestSource<'candidate> {
@@ -275,6 +335,19 @@ mod tests {
                 .completeness(),
             Completeness::QueryTooLong
         );
+    }
+
+    #[test]
+    fn ranks_explicit_replacements_before_equally_close_candidates() {
+        let words = WordList::new(["the", "tea"]).expect("valid words");
+        let replacements = [ReplacementRule::new("teh", "the").expect("non-empty rule")];
+        let result = Suggester::new(&words, SuggestConfig::default())
+            .with_replacement_rules(&replacements)
+            .suggest("teh");
+
+        assert_eq!(result.suggestions()[0].word(), "the");
+        assert_eq!(result.suggestions()[0].distance(), 0);
+        assert!(ReplacementRule::new("", "the").is_none());
     }
 
     #[test]
