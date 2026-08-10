@@ -5,10 +5,11 @@
 use std::env;
 use std::error::Error;
 use std::fmt;
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ferrolex_code::{Analyzer, CommentSyntax, Document};
 use ferrolex_compiler::{
@@ -21,13 +22,17 @@ use ferrolex_dictionaries::{
     LIBREOFFICE_CATALOG,
 };
 use ferrolex_hunspell::{
-    import_bytes as import_hunspell_bytes,
+    compile_runtime_cache, import_bytes as import_hunspell_bytes,
     import_bytes_with_encodings as import_hunspell_bytes_with_encodings, ByteEncoding,
-    ByteImportEncodings, Diagnostic as ImportDiagnostic, ImportMode, Severity,
+    ByteImportEncodings, Diagnostic as ImportDiagnostic, ImportError, ImportMode, ImportResult,
+    RuntimeCacheError, Severity, SourceDigests,
 };
 use ferrolex_text::check_text;
 
 const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+
+const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
+static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -83,16 +88,12 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
             println!("installed: {}", installed.dic_path().display());
             println!("license: {}", source.license_label());
             println!("notice: {}", source.license_notice_url());
-            let outcome = validate_hunspell(
-                true,
+            install_hunspell_runtime_cache(
+                source.locale(),
                 installed.aff_path(),
                 installed.dic_path(),
                 catalog_import_encodings(source.encoding()),
-            )?;
-            if outcome == RunOutcome::Success {
-                println!("ready: {}", source.locale());
-            }
-            Ok(outcome)
+            )
         }
     }
 }
@@ -261,6 +262,49 @@ fn validate_hunspell(
     dic_path: &Path,
     encodings: Option<ByteImportEncodings>,
 ) -> Result<RunOutcome, CliError> {
+    let (import, _) = import_hunspell_files(aff_path, dic_path, encodings, strict)?;
+    Ok(report_hunspell_import(import, dic_path))
+}
+
+fn install_hunspell_runtime_cache(
+    locale: &str,
+    aff_path: &Path,
+    dic_path: &Path,
+    encodings: Option<ByteImportEncodings>,
+) -> Result<RunOutcome, CliError> {
+    let (import, sources) = import_hunspell_files(aff_path, dic_path, encodings, true)?;
+    let result = match import {
+        Ok(result) => result,
+        Err(error) => {
+            for diagnostic in error.diagnostics() {
+                print_import_diagnostic(diagnostic);
+            }
+            return Ok(RunOutcome::Misspelled);
+        }
+    };
+    for diagnostic in result.diagnostics() {
+        print_import_diagnostic(diagnostic);
+    }
+    let cache = compile_runtime_cache(result.dictionary(), sources)
+        .map_err(CliError::CompileHunspellCache)?;
+    let cache_path = runtime_cache_path(aff_path);
+    atomic_write_runtime_cache(&cache_path, &cache)?;
+    println!("valid: {}", dic_path.display());
+    println!("runtime-cache: {}", cache_path.display());
+    println!("ready: {locale}");
+    Ok(RunOutcome::Success)
+}
+
+fn runtime_cache_path(aff_path: &Path) -> PathBuf {
+    aff_path.with_extension(HUNSPELL_RUNTIME_CACHE_EXTENSION)
+}
+
+fn import_hunspell_files(
+    aff_path: &Path,
+    dic_path: &Path,
+    encodings: Option<ByteImportEncodings>,
+    strict: bool,
+) -> Result<(Result<ImportResult, ImportError>, SourceDigests), CliError> {
     let aff_bytes = fs::read(aff_path).map_err(|source| CliError::ReadInput {
         path: aff_path.to_path_buf(),
         source,
@@ -289,6 +333,16 @@ fn validate_hunspell(
         None => import_hunspell_bytes(&aff_source, &aff_bytes, &dic_source, &dic_bytes, mode),
     };
 
+    Ok((
+        import,
+        SourceDigests::from_source_bytes(&aff_bytes, &dic_bytes),
+    ))
+}
+
+fn report_hunspell_import(
+    import: Result<ImportResult, ImportError>,
+    dic_path: &Path,
+) -> RunOutcome {
     match import {
         Ok(result) => {
             let has_errors = result
@@ -299,19 +353,57 @@ fn validate_hunspell(
                 print_import_diagnostic(diagnostic);
             }
             if has_errors {
-                Ok(RunOutcome::Misspelled)
+                RunOutcome::Misspelled
             } else {
                 println!("valid: {}", dic_path.display());
-                Ok(RunOutcome::Success)
+                RunOutcome::Success
             }
         }
         Err(error) => {
             for diagnostic in error.diagnostics() {
                 print_import_diagnostic(diagnostic);
             }
-            Ok(RunOutcome::Misspelled)
+            RunOutcome::Misspelled
         }
     }
+}
+
+fn atomic_write_runtime_cache(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
+    let temporary = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        CACHE_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut created = false;
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|source| CliError::WriteHunspellCache {
+                path: temporary.clone(),
+                source,
+            })?;
+        created = true;
+        file.write_all(bytes)
+            .map_err(|source| CliError::WriteHunspellCache {
+                path: temporary.clone(),
+                source,
+            })?;
+        file.sync_all()
+            .map_err(|source| CliError::WriteHunspellCache {
+                path: temporary.clone(),
+                source,
+            })?;
+        fs::rename(&temporary, path).map_err(|source| CliError::WriteHunspellCache {
+            path: path.to_path_buf(),
+            source,
+        })
+    })();
+    if result.is_err() && created {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
@@ -770,6 +862,11 @@ enum CliError {
         path: PathBuf,
         source: ValidationError,
     },
+    CompileHunspellCache(RuntimeCacheError),
+    WriteHunspellCache {
+        path: PathBuf,
+        source: io::Error,
+    },
     DictionaryManifest(DictionaryManifestError),
     FetchDictionary(DictionaryFetchError),
 }
@@ -816,6 +913,19 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::CompileHunspellCache(source) => {
+                write!(
+                    formatter,
+                    "could not compile Hunspell runtime cache: {source}"
+                )
+            }
+            Self::WriteHunspellCache { path, source } => {
+                write!(
+                    formatter,
+                    "could not atomically write Hunspell runtime cache `{}`: {source}",
+                    path.display()
+                )
+            }
             Self::DictionaryManifest(source) => {
                 write!(formatter, "invalid dictionary review manifest: {source}")
             }
@@ -832,10 +942,12 @@ impl Error for CliError {
             Self::Usage(_) => None,
             Self::ReadDictionary { source, .. }
             | Self::ReadInput { source, .. }
-            | Self::WriteArtifact { source, .. } => Some(source),
+            | Self::WriteArtifact { source, .. }
+            | Self::WriteHunspellCache { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),
+            Self::CompileHunspellCache(source) => Some(source),
             Self::DictionaryManifest(source) => Some(source),
             Self::FetchDictionary(source) => Some(source),
         }
@@ -850,11 +962,13 @@ mod tests {
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError};
     use ferrolex_core::Dictionary;
+    use ferrolex_hunspell::{load_runtime_cache, SourceDigests};
 
     use super::{
-        catalog_import_encodings, line_and_column, parse_arguments, run, validate_hunspell,
-        AnalyzeCommand, CheckCommand, CheckTarget, CliError, Command, CompileCommand,
-        DictionaryCommand, RunOutcome, SourceEncoding, ValidateCommand,
+        catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
+        run, runtime_cache_path, validate_hunspell, AnalyzeCommand, CheckCommand, CheckTarget,
+        CliError, Command, CompileCommand, DictionaryCommand, RunOutcome, SourceEncoding,
+        ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -1202,6 +1316,31 @@ mod tests {
             .expect("mixed-encoding files are readable"),
             RunOutcome::Success
         );
+    }
+
+    #[test]
+    fn install_builds_a_provenance_bound_runtime_cache() {
+        let affix = temporary_file("SET UTF-8\nSFX S N 1\nSFX S 0 s .\n");
+        let dictionary = temporary_file("1\nword/S\n");
+        let cache_path = runtime_cache_path(&affix.path);
+
+        assert_eq!(
+            install_hunspell_runtime_cache("test", &affix.path, &dictionary.path, None)
+                .expect("fixture sources are readable"),
+            RunOutcome::Success
+        );
+
+        let affix_bytes = fs::read(&affix.path).expect("affix source remains available");
+        let dictionary_bytes =
+            fs::read(&dictionary.path).expect("dictionary source remains available");
+        let cache = fs::read(&cache_path).expect("runtime cache is written beside the affix file");
+        let loaded = load_runtime_cache(
+            &cache,
+            SourceDigests::from_source_bytes(&affix_bytes, &dictionary_bytes),
+        )
+        .expect("runtime cache matches the exact sources");
+        assert!(loaded.contains("words"));
+        fs::remove_file(cache_path).expect("test removes its derived cache");
     }
 
     #[test]
