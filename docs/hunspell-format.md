@@ -1,15 +1,23 @@
 # Hunspell import contract
 
-This document describes the ferrolex import boundary for UTF-8 Hunspell-style
-`.aff` and `.dic` inputs. It defines behavior, not the behavior of any other
+This document describes the ferrolex import boundary for Hunspell-style `.aff`
+and `.dic` inputs. It defines behavior, not the behavior of any other
 implementation.
 
 ## Input and diagnostics
 
-The importer receives the two source texts independently and records a source
-name and one-based line number for every diagnostic. It never exposes legacy
-encoded bytes to the runtime dictionary: a declared legacy `SET` encoding is
-decoded during import or reported as unsupported.
+[`import`] receives already-decoded Rust strings. [`import_bytes`] reads an
+ASCII `SET` declaration from the affix bytes and decodes both files as UTF-8,
+ISO-8859-1, or ISO-8859-2. A missing `SET` uses the established UTF-8 default;
+a UTF-8 BOM before `SET` is ignored. UTF-8 is decoded without replacement, and
+the two ISO encodings use their defined one-byte mappings. An unsupported
+declared encoding or malformed UTF-8 becomes a source-aware error diagnostic.
+
+[`import_bytes_with_encodings`] accepts independently reviewed affix and
+dictionary encodings for exceptional mixed pairs. Its affix encoding must still
+match a present `SET` declaration. All public paths retain decoded UTF-8 text
+inside the runtime dictionary and record a source name and one-based line
+number for every diagnostic.
 
 Parsing supports blank lines and lines beginning with `#`. A directive is a
 whitespace-separated keyword followed by its arguments. Unknown directives are

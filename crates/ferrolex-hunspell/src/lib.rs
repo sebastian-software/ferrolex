@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
 
 const MAX_AFF_BYTES: usize = 32 * 1024 * 1024;
@@ -30,6 +31,77 @@ pub enum ImportMode {
     Lenient,
     /// Reject an import that has an error diagnostic.
     Strict,
+}
+
+/// A byte encoding accepted by the byte-oriented Hunspell importer.
+///
+/// [`import_bytes`] discovers this encoding from the `SET` declaration in the
+/// affix file. [`import_bytes_with_encodings`] accepts an explicit pair for a
+/// reviewed source whose files use different encodings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ByteEncoding {
+    /// UTF-8, decoded without replacement.
+    Utf8,
+    /// ISO-8859-1, decoded with its one-code-point-per-byte mapping.
+    Iso8859_1,
+    /// ISO-8859-2, decoded with the standard ISO-8859-2 mapping.
+    Iso8859_2,
+}
+
+impl ByteEncoding {
+    fn from_set_label(label: &str) -> Option<Self> {
+        match label.to_ascii_uppercase().as_str() {
+            "UTF-8" | "UTF8" => Some(Self::Utf8),
+            "ISO-8859-1" | "ISO8859-1" => Some(Self::Iso8859_1),
+            "ISO-8859-2" | "ISO8859-2" => Some(Self::Iso8859_2),
+            _ => None,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Iso8859_1 => "ISO-8859-1",
+            Self::Iso8859_2 => "ISO-8859-2",
+        }
+    }
+}
+
+/// Independent byte encodings for an affix file and its word list.
+///
+/// Most Hunspell pairs use one encoding declared by the affix file, so callers
+/// should prefer [`import_bytes`]. This type exists for reviewed exceptional
+/// pairs where the word list's encoding is known independently.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ByteImportEncodings {
+    aff: ByteEncoding,
+    dic: ByteEncoding,
+}
+
+impl ByteImportEncodings {
+    /// Creates a byte encoding pair for one Hunspell affix and dictionary file.
+    #[must_use]
+    pub const fn new(aff: ByteEncoding, dic: ByteEncoding) -> Self {
+        Self { aff, dic }
+    }
+
+    /// Creates a pair where both files use the same encoding.
+    #[must_use]
+    pub const fn same(encoding: ByteEncoding) -> Self {
+        Self::new(encoding, encoding)
+    }
+
+    /// Returns the configured affix-file encoding.
+    #[must_use]
+    pub const fn aff(self) -> ByteEncoding {
+        self.aff
+    }
+
+    /// Returns the configured dictionary-file encoding.
+    #[must_use]
+    pub const fn dic(self) -> ByteEncoding {
+        self.dic
+    }
 }
 
 /// The severity assigned to an import diagnostic.
@@ -449,7 +521,134 @@ pub fn import(
     dic_text: &str,
     mode: ImportMode,
 ) -> Result<ImportResult, ImportError> {
+    import_decoded(aff_source, aff_text, dic_source, dic_text, mode, Vec::new())
+}
+
+/// Imports a raw `.aff`/`.dic` pair after discovering its shared byte encoding
+/// from the affix file's `SET` declaration.
+///
+/// `UTF-8`, `ISO-8859-1`, and `ISO-8859-2` declarations are supported. UTF-8
+/// decoding rejects malformed byte sequences. The ISO encodings use their
+/// defined one-byte mappings and therefore never replace or discard bytes.
+///
+/// # Errors
+///
+/// A missing `SET` declaration uses the existing Hunspell-compatible UTF-8
+/// default. In strict mode, returns [`ImportError`] if a declared encoding is
+/// unsupported, decoding fails, or parsing produces another error diagnostic.
+/// Lenient mode retains only the safely decoded subset.
+pub fn import_bytes(
+    aff_source: &str,
+    aff_bytes: &[u8],
+    dic_source: &str,
+    dic_bytes: &[u8],
+    mode: ImportMode,
+) -> Result<ImportResult, ImportError> {
     let mut diagnostics = Vec::new();
+    let Some(encoding) = declared_encoding(aff_source, aff_bytes, &mut diagnostics) else {
+        return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
+    };
+    import_bytes_with_declared_encodings(
+        aff_source,
+        aff_bytes,
+        dic_source,
+        dic_bytes,
+        ByteImportEncodings::same(encoding),
+        mode,
+        diagnostics,
+    )
+}
+
+/// Imports a raw `.aff`/`.dic` pair with independently reviewed file encodings.
+///
+/// The affix file's `SET` declaration must still name the configured affix
+/// encoding. This prevents an override from silently interpreting a pair with
+/// an incompatible declared format. Use this only when a source catalog
+/// establishes a dictionary-file exception to the normal shared encoding.
+///
+/// # Errors
+///
+/// In strict mode, returns [`ImportError`] if a present declaration is
+/// unsupported, disagrees with `encodings.aff()`, decoding fails, or parsing
+/// produces another error diagnostic.
+pub fn import_bytes_with_encodings(
+    aff_source: &str,
+    aff_bytes: &[u8],
+    dic_source: &str,
+    dic_bytes: &[u8],
+    encodings: ByteImportEncodings,
+    mode: ImportMode,
+) -> Result<ImportResult, ImportError> {
+    let mut diagnostics = Vec::new();
+    let Some(declared) = declared_encoding(aff_source, aff_bytes, &mut diagnostics) else {
+        return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
+    };
+    if declared != encodings.aff() {
+        diagnostics.push(diagnostic(
+            aff_source,
+            1,
+            "SET",
+            Severity::Error,
+            &format!(
+                "SET declares {} but the configured affix encoding is {}",
+                declared.label(),
+                encodings.aff().label()
+            ),
+        ));
+        return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
+    }
+    import_bytes_with_declared_encodings(
+        aff_source,
+        aff_bytes,
+        dic_source,
+        dic_bytes,
+        encodings,
+        mode,
+        diagnostics,
+    )
+}
+
+fn import_bytes_with_declared_encodings(
+    aff_source: &str,
+    aff_bytes: &[u8],
+    dic_source: &str,
+    dic_bytes: &[u8],
+    encodings: ByteImportEncodings,
+    mode: ImportMode,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Result<ImportResult, ImportError> {
+    let aff_text = decode_bytes(
+        aff_source,
+        aff_bytes,
+        encodings.aff(),
+        true,
+        &mut diagnostics,
+    );
+    let dic_text = decode_bytes(
+        dic_source,
+        dic_bytes,
+        encodings.dic(),
+        false,
+        &mut diagnostics,
+    );
+    import_decoded(
+        aff_source,
+        &aff_text,
+        dic_source,
+        &dic_text,
+        mode,
+        diagnostics,
+    )
+}
+
+fn import_decoded(
+    aff_source: &str,
+    aff_text: &str,
+    dic_source: &str,
+    dic_text: &str,
+    mode: ImportMode,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Result<ImportResult, ImportError> {
     let parsed_aff = if enforce_input_limit(aff_source, aff_text, MAX_AFF_BYTES, &mut diagnostics) {
         parse_aff(aff_source, aff_text)
     } else {
@@ -486,6 +685,133 @@ pub fn import(
         dictionary,
         diagnostics,
     })
+}
+
+fn declared_encoding(
+    source: &str,
+    bytes: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ByteEncoding> {
+    for (index, raw_line) in bytes.split(|byte| *byte == b'\n').enumerate() {
+        let raw_line = if index == 0 {
+            raw_line.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(raw_line)
+        } else {
+            raw_line
+        };
+        let line = trim_ascii_whitespace(raw_line);
+        if line.is_empty() || line.starts_with(b"#") {
+            continue;
+        }
+        let fields = line
+            .split(u8::is_ascii_whitespace)
+            .filter(|field| !field.is_empty())
+            .collect::<Vec<_>>();
+        if fields.first() != Some(&b"SET".as_slice()) {
+            continue;
+        }
+        let line_number = index + 1;
+        if fields.len() != 2 {
+            diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "SET",
+                Severity::Error,
+                "SET requires exactly one supported encoding name",
+            ));
+            return None;
+        }
+        let Ok(label) = std::str::from_utf8(fields[1]) else {
+            diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "SET",
+                Severity::Error,
+                "SET encoding name must be ASCII",
+            ));
+            return None;
+        };
+        if let Some(encoding) = ByteEncoding::from_set_label(label) {
+            return Some(encoding);
+        }
+        diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "SET",
+            Severity::Error,
+            "SET must name UTF-8, ISO-8859-1, or ISO-8859-2",
+        ));
+        return None;
+    }
+    Some(ByteEncoding::Utf8)
+}
+
+fn trim_ascii_whitespace(mut bytes: &[u8]) -> &[u8] {
+    while bytes.first().is_some_and(u8::is_ascii_whitespace) {
+        bytes = &bytes[1..];
+    }
+    while bytes.last().is_some_and(u8::is_ascii_whitespace) {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    bytes
+}
+
+fn decode_bytes(
+    source: &str,
+    bytes: &[u8],
+    encoding: ByteEncoding,
+    strip_utf8_bom: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> String {
+    match encoding {
+        ByteEncoding::Utf8 => match std::str::from_utf8(bytes) {
+            Ok(text) => {
+                if strip_utf8_bom {
+                    text.strip_prefix('\u{feff}').unwrap_or(text).to_owned()
+                } else {
+                    text.to_owned()
+                }
+            }
+            Err(error) => {
+                diagnostics.push(diagnostic(
+                    source,
+                    byte_line_number(bytes, error.valid_up_to()),
+                    "encoding",
+                    Severity::Error,
+                    &format!(
+                        "UTF-8 decoding failed at byte {} without replacement",
+                        error.valid_up_to()
+                    ),
+                ));
+                String::new()
+            }
+        },
+        ByteEncoding::Iso8859_1 => bytes.iter().map(|byte| char::from(*byte)).collect(),
+        ByteEncoding::Iso8859_2 => {
+            let (text, had_errors) = ISO_8859_2.decode_without_bom_handling(bytes);
+            if had_errors {
+                diagnostics.push(diagnostic(
+                    source,
+                    1,
+                    "encoding",
+                    Severity::Error,
+                    "ISO-8859-2 decoding would replace malformed input",
+                ));
+                String::new()
+            } else {
+                text.into_owned()
+            }
+        }
+    }
+}
+
+fn byte_line_number(bytes: &[u8], byte_index: usize) -> usize {
+    let mut line_number = 1;
+    for byte in &bytes[..byte_index] {
+        if *byte == b'\n' {
+            line_number += 1;
+        }
+    }
+    line_number
 }
 
 #[derive(Default)]
@@ -609,13 +935,13 @@ fn parse_set(source: &str, line: usize, fields: &[&str], diagnostics: &mut Vec<D
             Severity::Error,
             "SET requires exactly one encoding name",
         ));
-    } else if !matches!(fields[1].to_ascii_uppercase().as_str(), "UTF-8" | "UTF8") {
+    } else if ByteEncoding::from_set_label(fields[1]).is_none() {
         diagnostics.push(diagnostic(
             source,
             line,
             "SET",
             Severity::Error,
-            "only UTF-8 input is supported by this importer",
+            "SET must name UTF-8, ISO-8859-1, or ISO-8859-2",
         ));
     }
 }
@@ -1157,7 +1483,10 @@ mod tests {
 
     use ferrolex_core::Dictionary;
 
-    use super::{import, ImportMode, Severity, MAX_COMPOUND_SCALARS};
+    use super::{
+        import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
+        ImportMode, Severity, MAX_COMPOUND_SCALARS,
+    };
 
     const AFFIXES: &str =
         "SET UTF-8\nFLAG UTF-8\nPFX A Y 1\nPFX A 0 un .\nSFX B Y 1\nSFX B y ies [^aeiou]y\n";
@@ -1213,7 +1542,7 @@ mod tests {
 
     #[test]
     fn lenient_mode_retains_the_safe_subset_while_strict_mode_rejects_errors() {
-        let affixes = "SET ISO-8859-1\nCOMPOUNDMIN 3\n";
+        let affixes = "SET KOI8-R\nCOMPOUNDMIN 3\n";
         let lenient = import(
             "test.aff",
             affixes,
@@ -1233,6 +1562,111 @@ mod tests {
             ImportMode::Strict
         )
         .is_err());
+    }
+
+    #[test]
+    fn byte_import_decodes_iso_8859_1_from_the_affix_declaration() {
+        let result = import_bytes(
+            "latin1.aff",
+            b"SET ISO8859-1\n",
+            "latin1.dic",
+            b"1\ncaf\xe9\n",
+            ImportMode::Strict,
+        )
+        .expect("ISO-8859-1 bytes decode without replacement");
+
+        assert!(result.dictionary().contains("café"));
+    }
+
+    #[test]
+    fn byte_import_decodes_iso_8859_2_from_the_affix_declaration() {
+        let result = import_bytes(
+            "latin2.aff",
+            b"SET ISO-8859-2\n",
+            "latin2.dic",
+            b"1\nza\xbf\xf3\xb3\xe6\n",
+            ImportMode::Strict,
+        )
+        .expect("ISO-8859-2 bytes decode without replacement");
+
+        assert!(result.dictionary().contains("zażółć"));
+    }
+
+    #[test]
+    fn byte_import_uses_the_existing_utf8_default_without_set() {
+        let result = import_bytes(
+            "default.aff",
+            b"SFX S N 1\nSFX S 0 s .\n",
+            "default.dic",
+            "1\nstraße/S\n".as_bytes(),
+            ImportMode::Strict,
+        )
+        .expect("missing SET defaults to UTF-8");
+
+        assert!(result.dictionary().contains("straßes"));
+    }
+
+    #[test]
+    fn byte_import_accepts_a_utf8_bom_before_set() {
+        let result = import_bytes(
+            "bom.aff",
+            b"\xef\xbb\xbfSET UTF-8\n",
+            "bom.dic",
+            "1\nMünchen\n".as_bytes(),
+            ImportMode::Strict,
+        )
+        .expect("a UTF-8 BOM is normalized before parsing the affix file");
+
+        assert!(result.dictionary().contains("München"));
+    }
+
+    #[test]
+    fn byte_import_allows_a_reviewed_mixed_encoding_pair() {
+        let result = import_bytes_with_encodings(
+            "mixed.aff",
+            b"SET ISO-8859-1\n",
+            "mixed.dic",
+            "1\ncafé\n".as_bytes(),
+            ByteImportEncodings::new(ByteEncoding::Iso8859_1, ByteEncoding::Utf8),
+            ImportMode::Strict,
+        )
+        .expect("the per-file override decodes the reviewed mixed pair");
+
+        assert!(result.dictionary().contains("café"));
+    }
+
+    #[test]
+    fn byte_import_rejects_unsupported_set_without_parsing_a_subset() {
+        let error = import_bytes(
+            "unsupported.aff",
+            b"SET KOI8-R\n",
+            "unsupported.dic",
+            b"1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect_err("unsupported byte encodings are strict import failures");
+
+        assert_eq!(error.diagnostics()[0].source(), "unsupported.aff");
+        assert_eq!(error.diagnostics()[0].line(), 1);
+        assert_eq!(error.diagnostics()[0].directive(), "SET");
+    }
+
+    #[test]
+    fn byte_import_rejects_malformed_utf8_with_a_source_diagnostic() {
+        let error = import_bytes(
+            "utf8.aff",
+            b"SET UTF-8\n",
+            "utf8.dic",
+            b"1\nword\n\xff",
+            ImportMode::Strict,
+        )
+        .expect_err("malformed UTF-8 must not be replaced");
+
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.source() == "utf8.dic"
+                && diagnostic.line() == 3
+                && diagnostic.directive() == "encoding"
+        }));
     }
 
     #[test]
