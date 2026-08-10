@@ -10,12 +10,13 @@ plain word list / Hunspell / compiled dictionary
                     ▼
              ferrolex-core
                     │
-          ┌─────────┴─────────┐
-          ▼                   ▼
-    ferrolex-text       future analyzers
-          │              (source, markup)
-          ▼
-       ferrolex CLI
+          ┌─────────┴──────────┐
+          ▼                    ▼
+    ferrolex-text         ferrolex-code
+          │                    │
+          └─────────┬──────────┘
+                    ▼
+                ferrolex CLI
 ```
 
 ## Current crates
@@ -26,6 +27,9 @@ plain word list / Hunspell / compiled dictionary
 - `ferrolex-text` owns natural-language tokenization. It returns original token
   slices and UTF-8 byte ranges, without encoding file-format semantics in the
   dictionary layer.
+- `ferrolex-code` owns generic source token classification, identifier
+  segmentation, inline directives, and diagnostics. It remains parser- and
+  language-agnostic; future adapters supply document and comment context.
 - `ferrolex-cli` owns process I/O, exit codes, and rendering diagnostics.
 
 Base dictionaries are immutable, `Send`, and `Sync`. A mutable user overlay,

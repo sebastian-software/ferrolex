@@ -21,12 +21,19 @@ one word or a plain-text file:
 ```sh
 ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
+ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
 lines beginning with `#`. Exact matching is the default. Library users can
 opt into NFC or NFKC normalization explicitly; case folding remains a separate
 future policy.
+
+`analyze` is the generic source-code path. It splits camelCase, PascalCase,
+snake_case, kebab-case, and Unicode identifiers; ignores URLs, email addresses,
+numbers, and hashes by default; and recognizes `ferrolex:ignore`,
+`ferrolex:disable`, and `ferrolex:enable` only inside the declared comment
+syntax. See [source-code analysis](docs/source-code-analysis.md).
 
 ## Benchmarks
 
