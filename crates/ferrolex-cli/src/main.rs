@@ -31,7 +31,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{Completeness, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest --dictionary <PLAIN_WORD_LIST> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest --dictionary <PLAIN_WORD_LIST> [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -70,7 +70,14 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
         }
     })?;
     let dictionary = WordList::from_text(Normalization::Exact, &text);
-    let result = Suggester::new(&dictionary, SuggestConfig::default()).suggest(&command.word);
+    let mut config = SuggestConfig::default();
+    if let Some(max_results) = command.max_results {
+        config.max_results = max_results;
+    }
+    if let Some(max_edit_distance) = command.max_edit_distance {
+        config.max_edit_distance = max_edit_distance;
+    }
+    let result = Suggester::new(&dictionary, config).suggest(&command.word);
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",
@@ -587,11 +594,24 @@ fn parse_suggest_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
     let mut dictionary_path = None;
+    let mut max_results = None;
+    let mut max_edit_distance = None;
     let mut word = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--dictionary" => set_once_path(&mut dictionary_path, &mut arguments, "--dictionary")?,
+            "--max-results" => {
+                set_once_usize(&mut max_results, &mut arguments, "--max-results", true)?;
+            }
+            "--max-edit-distance" => {
+                set_once_usize(
+                    &mut max_edit_distance,
+                    &mut arguments,
+                    "--max-edit-distance",
+                    false,
+                )?;
+            }
             "--help" | "-h" => return Ok(Command::Help),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
@@ -610,6 +630,8 @@ fn parse_suggest_arguments(
         word.ok_or_else(|| CliError::Usage("suggest requires exactly one word".to_owned()))?;
     Ok(Command::Suggest(SuggestCommand {
         dictionary_path,
+        max_results,
+        max_edit_distance,
         word,
     }))
 }
@@ -916,6 +938,31 @@ fn set_once_path(
     Ok(())
 }
 
+fn set_once_usize(
+    destination: &mut Option<usize>,
+    arguments: &mut impl Iterator<Item = String>,
+    option: &str,
+    must_be_positive: bool,
+) -> Result<(), CliError> {
+    let value = arguments
+        .next()
+        .ok_or_else(|| CliError::Usage(format!("`{option}` requires an integer")))?;
+    let value = value
+        .parse::<usize>()
+        .map_err(|_| CliError::Usage(format!("`{option}` requires a non-negative integer")))?;
+    if must_be_positive && value == 0 {
+        return Err(CliError::Usage(format!(
+            "`{option}` requires a positive integer"
+        )));
+    }
+    if destination.replace(value).is_some() {
+        return Err(CliError::Usage(format!(
+            "`{option}` may only be supplied once"
+        )));
+    }
+    Ok(())
+}
+
 fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<(), CliError> {
     if target.replace(value).is_some() {
         return Err(CliError::Usage(
@@ -948,6 +995,8 @@ struct CheckCommand {
 #[derive(Debug, Eq, PartialEq)]
 struct SuggestCommand {
     dictionary_path: PathBuf,
+    max_results: Option<usize>,
+    max_edit_distance: Option<usize>,
     word: String,
 }
 
@@ -1332,9 +1381,79 @@ mod tests {
             command,
             Command::Suggest(SuggestCommand {
                 dictionary_path: PathBuf::from("words.txt"),
+                max_results: None,
+                max_edit_distance: None,
                 word: "recieve".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn parses_explicit_suggestion_limits() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "words.txt",
+                "--max-results",
+                "3",
+                "--max-edit-distance",
+                "0",
+                "recieve",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Suggest(SuggestCommand {
+                dictionary_path: PathBuf::from("words.txt"),
+                max_results: Some(3),
+                max_edit_distance: Some(0),
+                word: "recieve".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_suggestion_limits() {
+        for arguments in [
+            &[
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "words.txt",
+                "--max-results",
+                "0",
+                "recieve",
+            ] as &[&str],
+            &[
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "words.txt",
+                "--max-edit-distance",
+                "two",
+                "recieve",
+            ] as &[&str],
+            &[
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "words.txt",
+                "--max-results",
+                "3",
+                "--max-results",
+                "4",
+                "recieve",
+            ] as &[&str],
+        ] {
+            assert!(
+                parse_arguments(arguments.iter().map(|argument| (*argument).to_owned())).is_err()
+            );
+        }
     }
 
     #[test]
