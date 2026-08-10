@@ -33,7 +33,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 5;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 6;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -176,6 +176,7 @@ pub fn compile_runtime_cache(
     write_optional_flag(&mut output, dictionary.compound.begin.as_ref())?;
     write_optional_flag(&mut output, dictionary.compound.middle.as_ref())?;
     write_optional_flag(&mut output, dictionary.compound.end.as_ref())?;
+    write_optional_flag(&mut output, dictionary.compound.permit.as_ref())?;
     write_u64(
         &mut output,
         u64::try_from(dictionary.compound.minimum_length)
@@ -223,6 +224,10 @@ pub fn compile_runtime_cache(
 /// Returns a structured [`RuntimeCacheError`] for stale, unsupported, corrupt,
 /// or malformed artifacts. Callers should rebuild the derived cache instead of
 /// attempting to repair it in place.
+#[allow(
+    clippy::too_many_lines,
+    reason = "validation and reconstruction share one bounded reader to keep the artifact boundary auditable"
+)]
 pub fn load_runtime_cache(
     bytes: &[u8],
     sources: SourceDigests,
@@ -267,6 +272,7 @@ pub fn load_runtime_cache(
     let begin = read_optional_flag(&mut reader)?;
     let middle = read_optional_flag(&mut reader)?;
     let end = read_optional_flag(&mut reader)?;
+    let permit = read_optional_flag(&mut reader)?;
     let minimum_length = usize::try_from(reader.u64()?)
         .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
@@ -306,6 +312,7 @@ pub fn load_runtime_cache(
         begin,
         middle,
         end,
+        permit,
         minimum_length,
         rules,
     };
@@ -404,6 +411,7 @@ fn validate_dictionary(
     validate_optional_flag(dictionary.compound.begin.as_ref(), error)?;
     validate_optional_flag(dictionary.compound.middle.as_ref(), error)?;
     validate_optional_flag(dictionary.compound.end.as_ref(), error)?;
+    validate_optional_flag(dictionary.compound.permit.as_ref(), error)?;
     if dictionary.compound.minimum_length == 0 {
         return Err(error.error("compound minimum must be greater than zero"));
     }

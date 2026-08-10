@@ -346,6 +346,110 @@ impl HunspellDictionary {
         false
     }
 
+    fn matches_derived_compound_component(
+        &self,
+        lexeme: &Lexeme,
+        word: &str,
+        position_flag: &Flag,
+        position: CompoundPosition,
+    ) -> bool {
+        if self.is_forbidden(&lexeme.flags) {
+            return false;
+        }
+        let mut states = vec![FormState::new(lexeme)];
+        let mut derivations = 0;
+
+        while let Some(state) = states.pop() {
+            if state.depth > 0
+                && state.form == word
+                && !self.is_forbidden(&state.flags)
+                && state.has_complete_circumfix()
+                && self.state_has_compound_flag(&state, position_flag)
+            {
+                return true;
+            }
+            if state.depth == MAX_AFFIX_CHAIN {
+                continue;
+            }
+            if !self.expand_compound_rules(
+                &state,
+                AffixKind::Prefix,
+                position,
+                &mut states,
+                &mut derivations,
+            ) || !self.expand_compound_rules(
+                &state,
+                AffixKind::Suffix,
+                position,
+                &mut states,
+                &mut derivations,
+            ) {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn state_has_compound_flag(&self, state: &FormState, position_flag: &Flag) -> bool {
+        (state.flags.contains(position_flag) || state.origin_flags.contains(position_flag))
+            || self
+                .compound
+                .flag
+                .as_ref()
+                .is_some_and(|flag| state.flags.contains(flag) || state.origin_flags.contains(flag))
+    }
+
+    fn expand_compound_rules(
+        &self,
+        state: &FormState,
+        kind: AffixKind,
+        position: CompoundPosition,
+        states: &mut Vec<FormState>,
+        derivations: &mut usize,
+    ) -> bool {
+        let flags = state.flags_for(kind);
+        let rule_indices_by_flag = match kind {
+            AffixKind::Prefix => &self.prefix_rules_by_flag,
+            AffixKind::Suffix => &self.suffix_rules_by_flag,
+        };
+        let rules = match kind {
+            AffixKind::Prefix => &self.prefixes,
+            AffixKind::Suffix => &self.suffixes,
+        };
+        for flag in flags {
+            let Some(rule_indices) = rule_indices_by_flag.get(flag) else {
+                continue;
+            };
+            for index in rule_indices {
+                let rule = &rules[*index];
+                if !state.can_apply(rule) || !self.compound_rule_is_allowed(rule, position) {
+                    continue;
+                }
+                if let Some(form) = rule.apply(&state.form) {
+                    if *derivations == MAX_DERIVATIONS_PER_LEXEME {
+                        return false;
+                    }
+                    *derivations += 1;
+                    states.push(state.apply(rule, form, &self.special_flags));
+                }
+            }
+        }
+        true
+    }
+
+    fn compound_rule_is_allowed(&self, rule: &AffixRule, position: CompoundPosition) -> bool {
+        let permit = self
+            .compound
+            .permit
+            .as_ref()
+            .is_some_and(|flag| rule.continuation_flags.contains(flag));
+        match position {
+            CompoundPosition::Begin => rule.kind == AffixKind::Prefix || permit,
+            CompoundPosition::Middle => permit,
+            CompoundPosition::End => rule.kind == AffixKind::Suffix || permit,
+        }
+    }
+
     fn expand_matching_rules(
         &self,
         state: &FormState,
@@ -517,16 +621,34 @@ impl HunspellDictionary {
         };
         let mut reachable = vec![false; boundaries.len()];
         reachable[0] = true;
-        reachable = self.extend_positioned_components(word, boundaries, &reachable, begin);
+        reachable = self.extend_positioned_components(
+            word,
+            boundaries,
+            &reachable,
+            begin,
+            CompoundPosition::Begin,
+        );
         for _ in 2..boundaries.len() {
-            let terminal = self.extend_positioned_components(word, boundaries, &reachable, end);
+            let terminal = self.extend_positioned_components(
+                word,
+                boundaries,
+                &reachable,
+                end,
+                CompoundPosition::End,
+            );
             if terminal.last() == Some(&true) {
                 return true;
             }
             let Some(middle) = self.compound.middle.as_ref() else {
                 return false;
             };
-            reachable = self.extend_positioned_components(word, boundaries, &reachable, middle);
+            reachable = self.extend_positioned_components(
+                word,
+                boundaries,
+                &reachable,
+                middle,
+                CompoundPosition::Middle,
+            );
         }
         false
     }
@@ -537,6 +659,7 @@ impl HunspellDictionary {
         boundaries: &[usize],
         reachable: &[bool],
         position_flag: &Flag,
+        position: CompoundPosition,
     ) -> Vec<bool> {
         let mut next = vec![false; boundaries.len()];
         for start in 0..boundaries.len().saturating_sub(1) {
@@ -546,7 +669,7 @@ impl HunspellDictionary {
             let first_end = start.saturating_add(self.compound.minimum_length);
             for end in first_end..boundaries.len() {
                 let candidate = &word[boundaries[start]..boundaries[end]];
-                if self.matches_positioned_component(candidate, position_flag) {
+                if self.matches_positioned_component(candidate, position_flag, position) {
                     next[end] = true;
                 }
             }
@@ -554,7 +677,12 @@ impl HunspellDictionary {
         next
     }
 
-    fn matches_positioned_component(&self, word: &str, position_flag: &Flag) -> bool {
+    fn matches_positioned_component(
+        &self,
+        word: &str,
+        position_flag: &Flag,
+        position: CompoundPosition,
+    ) -> bool {
         self.stems.get(word).is_some_and(|flags| {
             !self.is_forbidden(flags)
                 && (flags.contains(position_flag)
@@ -563,7 +691,17 @@ impl HunspellDictionary {
                         .flag
                         .as_ref()
                         .is_some_and(|flag| flags.contains(flag)))
-        })
+        }) || self
+            .derived_candidate_indices(word)
+            .into_iter()
+            .any(|index| {
+                self.matches_derived_compound_component(
+                    &self.lexemes[index],
+                    word,
+                    position_flag,
+                    position,
+                )
+            })
     }
 
     fn matches_break_word(&self, word: &str) -> bool {
@@ -650,6 +788,13 @@ struct Flag(Box<str>);
 enum AffixKind {
     Prefix,
     Suffix,
+}
+
+#[derive(Clone, Copy)]
+enum CompoundPosition {
+    Begin,
+    Middle,
+    End,
 }
 
 #[derive(Clone, Debug)]
@@ -784,6 +929,7 @@ struct CompoundConfig {
     begin: Option<Flag>,
     middle: Option<Flag>,
     end: Option<Flag>,
+    permit: Option<Flag>,
     minimum_length: usize,
     rules: Vec<CompoundRule>,
 }
@@ -795,6 +941,7 @@ impl Default for CompoundConfig {
             begin: None,
             middle: None,
             end: None,
+            permit: None,
             minimum_length: 3,
             rules: Vec::new(),
         }
@@ -1297,6 +1444,14 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 directive,
                 &fields,
                 &mut parsed.compound.end,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDPERMITFLAG" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.permit,
                 &mut parsed.diagnostics,
             ),
             "COMPOUNDMIN" => parse_compound_minimum(
@@ -2478,6 +2633,22 @@ mod tests {
         assert!(dictionary.contains("E-Mail.Adresse"));
         assert!(!dictionary.contains("E-Mail.unbekannt"));
         assert!(!dictionary.contains(".Adresse"));
+    }
+
+    #[test]
+    fn compound_permit_affixes_are_limited_to_their_declared_positions() {
+        let imported = import(
+            "test.aff",
+            "COMPOUNDBEGIN B\nCOMPOUNDEND E\nCOMPOUNDPERMITFLAG P\nCOMPOUNDMIN 1\nSFX A N 1\nSFX A 0 s/P .\nSFX C N 1\nSFX C 0 x .\n",
+            "test.dic",
+            "3\nroot/BA\nplain/BC\nend/E\n",
+            ImportMode::Strict,
+        )
+        .expect("compound permit directives import");
+
+        let dictionary = imported.dictionary();
+        assert!(dictionary.contains("rootsend"));
+        assert!(!dictionary.contains("plainxend"));
     }
 
     #[test]

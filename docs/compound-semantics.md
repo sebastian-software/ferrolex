@@ -10,13 +10,18 @@ The check uses bounded dynamic segmentation over UTF-8 character boundaries
 and sorted stem-index lookups. It considers at most 256 Unicode scalar values;
 this is a bounded recognition rule, not a general asymptotic performance
 claim. Longer inputs are not treated as compounds in this compatibility level.
-Compound components are exact stems: their affix-derived forms, positional
-linking elements, and permit-affixes remain later feature gates.
+Compound components are exact stems unless an explicitly permitted affix
+derives a positioned component; linking elements beyond those affix rules
+remain a later feature gate.
 `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, and `COMPOUNDEND` can instead mark exact
 stems for their respective positions. A two-component compound needs a begin
 and an end stem; longer compounds use zero or more middle stems. A stem with
 `ONLYINCOMPOUND` is rejected alone but may participate in an otherwise valid
 compound. A
+`COMPOUNDPERMITFLAG` on an affix rule's continuation flags also permits that
+affix inside a compound: prefixes are otherwise limited to initial components,
+suffixes to final components, and neither is allowed in a middle component.
+A permit-affix remains valid as an ordinary affix outside a compound. A
 `COMPOUNDRULE` header may additionally declare up to 1,024 literal patterns
 with two through sixteen single-scalar flags, such as `AB` or `XYZ`; components
 must carry the corresponding flags in order. Quantifiers and patterns outside
