@@ -16,9 +16,9 @@ use sha2::{Digest as _, Sha256};
 
 use super::{
     AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag,
-    HunspellDictionary, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_COMPOUND_RULES,
-    MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY,
-    MAX_LINE_BYTES,
+    HunspellDictionary, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
+    MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES,
+    MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES,
 };
 
 const MAGIC: [u8; 8] = *b"FLXHSP\0\0";
@@ -33,7 +33,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 4;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 5;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -200,6 +200,14 @@ pub fn compile_runtime_cache(
             write_flag(&mut output, flag)?;
         }
     }
+    write_count(
+        &mut output,
+        dictionary.break_characters.len(),
+        "break character count",
+    )?;
+    for character in &dictionary.break_characters {
+        write_u32(&mut output, u32::from(*character));
+    }
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -280,6 +288,19 @@ pub fn load_runtime_cache(
         }
         rules.push(CompoundRule { flags });
     }
+    let break_count = reader.count(MAX_BREAK_PATTERNS, "break character count")?;
+    reader.require_minimum_items(break_count, 4, "break characters")?;
+    let mut break_characters = BTreeSet::new();
+    for _ in 0..break_count {
+        let character = char::from_u32(reader.u32()?).ok_or(RuntimeCacheError::InvalidArtifact(
+            "break character is invalid",
+        ))?;
+        if !break_characters.insert(character) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "duplicate break character",
+            ));
+        }
+    }
     let compound = CompoundConfig {
         flag,
         begin,
@@ -298,8 +319,15 @@ pub fn load_runtime_cache(
         .iter()
         .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
         .collect();
-    let dictionary =
-        HunspellDictionary::from_parts(stems, lexemes, prefixes, suffixes, special_flags, compound);
+    let dictionary = HunspellDictionary::from_parts(
+        stems,
+        lexemes,
+        prefixes,
+        suffixes,
+        special_flags,
+        compound,
+        break_characters,
+    );
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)
 }
@@ -389,6 +417,9 @@ fn validate_dictionary(
         for flag in &rule.flags {
             validate_flag(flag, error)?;
         }
+    }
+    if dictionary.break_characters.len() > MAX_BREAK_PATTERNS {
+        return Err(error.error("break character count exceeds importer limit"));
     }
     Ok(())
 }
@@ -847,8 +878,9 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
-    const DIC: &str = "8\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/Z\nTeil/XO\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const DIC: &str =
+        "9\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/Z\nTeil/XO\nMail\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())
@@ -880,6 +912,7 @@ mod tests {
             "rooted",
             "rootedly",
             "BahnHofStraße",
+            "Bahn-Mail",
             "Teil",
             "unknown",
         ] {
@@ -893,6 +926,7 @@ mod tests {
         assert!(!loaded.contains("unword"));
         assert!(loaded.contains("fixedly"));
         assert!(loaded.contains("BahnHofStraße"));
+        assert!(loaded.contains("Bahn-Mail"));
         assert!(!loaded.contains("Teil"));
     }
 

@@ -31,6 +31,7 @@ const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 const MAX_COMPOUND_SCALARS: usize = 256;
 const MAX_COMPOUND_RULES: usize = 1_024;
 const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
+const MAX_BREAK_PATTERNS: usize = 256;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -228,6 +229,7 @@ pub struct HunspellDictionary {
     suffix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
     special_flags: SpecialFlags,
     compound: CompoundConfig,
+    break_characters: BTreeSet<char>,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -241,6 +243,7 @@ impl Dictionary for HunspellDictionary {
             .into_iter()
             .any(|index| self.matches_derived_word(&self.lexemes[index], word))
             || self.matches_simple_compound(word)
+            || self.matches_break_word(word)
     }
 }
 
@@ -252,6 +255,7 @@ impl HunspellDictionary {
         suffixes: Vec<AffixRule>,
         special_flags: SpecialFlags,
         compound: CompoundConfig,
+        break_characters: BTreeSet<char>,
     ) -> Self {
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
@@ -270,6 +274,7 @@ impl HunspellDictionary {
             suffix_parent_flags,
             special_flags,
             compound,
+            break_characters,
         }
     }
 
@@ -559,6 +564,27 @@ impl HunspellDictionary {
                         .as_ref()
                         .is_some_and(|flag| flags.contains(flag)))
         })
+    }
+
+    fn matches_break_word(&self, word: &str) -> bool {
+        if self.break_characters.is_empty() || word.chars().count() > MAX_COMPOUND_SCALARS {
+            return false;
+        }
+        let mut parts = word.split(|character| self.break_characters.contains(&character));
+        let Some(first) = parts.next() else {
+            return false;
+        };
+        if first.is_empty() {
+            return false;
+        }
+        let mut had_break = false;
+        for part in parts {
+            had_break = true;
+            if part.is_empty() || !self.contains(part) {
+                return false;
+            }
+        }
+        had_break && self.contains(first)
     }
 }
 
@@ -1016,6 +1042,7 @@ fn import_decoded(
         parsed_aff.suffixes,
         parsed_aff.special_flags,
         parsed_aff.compound,
+        parsed_aff.break_characters,
     );
 
     if mode == ImportMode::Strict
@@ -1167,6 +1194,7 @@ struct ParsedAff {
     rule_count: usize,
     special_flags: SpecialFlags,
     compound: CompoundConfig,
+    break_characters: BTreeSet<char>,
 }
 
 #[allow(
@@ -1281,6 +1309,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
             "COMPOUNDRULE" => {
                 parse_compound_rules(source, &mut lines, line_number, &fields, &mut parsed);
             }
+            "BREAK" => parse_break_patterns(source, &mut lines, line_number, &fields, &mut parsed),
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
@@ -1493,6 +1522,68 @@ fn parse_compound_rules(
                 .map(|flag| Flag(Box::<str>::from(flag.to_string())))
                 .collect(),
         });
+    }
+}
+
+fn parse_break_patterns(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Ok(pattern_count) = fields.get(1).unwrap_or(&"").parse::<usize>() else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "BREAK",
+            Severity::Error,
+            "BREAK header requires a positive pattern count",
+        ));
+        return;
+    };
+    if fields.len() != 2 || pattern_count == 0 || pattern_count > MAX_BREAK_PATTERNS {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "BREAK",
+            Severity::Error,
+            "BREAK count must be between 1 and 256",
+        ));
+        return;
+    }
+    for _ in 0..pattern_count {
+        let Some((index, line)) = lines.next() else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "BREAK",
+                Severity::Error,
+                "BREAK header ended before all declared patterns were supplied",
+            ));
+            return;
+        };
+        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let pattern = rule_fields.get(1).copied().unwrap_or_default();
+        let mut characters = pattern.chars();
+        let character = characters.next();
+        if rule_fields.len() != 2
+            || rule_fields[0] != "BREAK"
+            || character.is_none()
+            || characters.next().is_some()
+        {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "BREAK",
+                Severity::Error,
+                "only one literal Unicode-scalar break character is supported",
+            ));
+            continue;
+        }
+        parsed
+            .break_characters
+            .insert(character.expect("checked above"));
     }
 }
 
@@ -2370,6 +2461,40 @@ mod tests {
         assert!(dictionary.contains("TeilStraße"));
         assert!(!dictionary.contains("HofStraße"));
         assert!(!dictionary.contains("BahnHof"));
+    }
+
+    #[test]
+    fn literal_break_characters_join_recognized_components() {
+        let imported = import(
+            "test.aff",
+            "BREAK 2\nBREAK -\nBREAK .\n",
+            "test.dic",
+            "3\nE\nMail\nAdresse\n",
+            ImportMode::Strict,
+        )
+        .expect("literal breaks import");
+
+        let dictionary = imported.dictionary();
+        assert!(dictionary.contains("E-Mail.Adresse"));
+        assert!(!dictionary.contains("E-Mail.unbekannt"));
+        assert!(!dictionary.contains(".Adresse"));
+    }
+
+    #[test]
+    fn complex_break_patterns_remain_explicit_strict_errors() {
+        let error = import(
+            "test.aff",
+            "BREAK 1\nBREAK ^-\n",
+            "test.dic",
+            "1\nWort\n",
+            ImportMode::Strict,
+        )
+        .expect_err("complex BREAK patterns are not approximated");
+
+        assert!(error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "BREAK"));
     }
 
     #[test]
