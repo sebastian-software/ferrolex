@@ -113,3 +113,8 @@ the catalogued `id_ID` mixed encoding pair explicitly. An unsupported
 recognition directive makes `install` return exit status `1`, while leaving the
 verified source cache available for diagnostic work. `fetch` remains useful
 when acquisition and validation need to be separate steps.
+
+After a successful strict import, `install` also writes a versioned,
+provenance-bound runtime cache beside the affix source. See
+[Hunspell runtime cache](hunspell-runtime-cache.md) for its validity and
+rebuild contract.

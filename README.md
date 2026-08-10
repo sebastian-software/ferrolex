@@ -61,7 +61,8 @@ Urdu requires a separately reviewed source because it has no pair in the
 pinned LibreOffice collection. CJK is intentionally deferred until text
 segmentation has its own contract. The
 [locale compatibility matrix](docs/locale-compatibility.md) separates safe
-acquisition from strict import and recognition evidence.
+acquisition from strict import and recognition evidence. Successful strict
+installs also create a [versioned Hunspell runtime cache](docs/hunspell-runtime-cache.md).
 
 `compile` turns the same plain-word-list syntax used by `check` into a
 deterministic native artifact. `validate --compiled` first performs the fast
