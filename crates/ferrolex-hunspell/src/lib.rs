@@ -240,10 +240,11 @@ impl Dictionary for HunspellDictionary {
             !self.is_forbidden(flags)
                 && !self.requires_affix(flags)
                 && !self.is_only_in_compound(flags)
-        }) || self
-            .derived_candidate_indices(word)
-            .into_iter()
-            .any(|index| self.matches_derived_word(&self.lexemes[index], word))
+        }) || self.matches_single_affix_word(word)
+            || self
+                .derived_candidate_indices(word)
+                .into_iter()
+                .any(|index| self.matches_derived_word(&self.lexemes[index], word))
             || self.matches_simple_compound(word)
             || self.matches_break_word(word)
             || self.sharp_uppercase_forms.contains(word)
@@ -295,6 +296,29 @@ impl HunspellDictionary {
     /// receives an already segmented string and therefore does not apply it.
     pub fn word_characters(&self) -> impl Iterator<Item = char> + '_ {
         self.word_characters.iter().copied()
+    }
+
+    fn matches_single_affix_word(&self, word: &str) -> bool {
+        self.prefixes.iter().chain(&self.suffixes).any(|rule| {
+            rule.could_generate(word)
+                && rule.reverse_apply(word).is_some_and(|stem| {
+                    self.stems.get(stem.as_str()).is_some_and(|flags| {
+                        if self.is_forbidden(flags) || !flags.contains(&rule.flag) {
+                            return false;
+                        }
+                        let lexeme = Lexeme {
+                            stem: Box::from(stem),
+                            flags: flags.clone(),
+                        };
+                        let state = FormState::new(&lexeme).apply(
+                            rule,
+                            word.to_owned(),
+                            &self.special_flags,
+                        );
+                        self.is_accepted_state(&state)
+                    })
+                })
+        })
     }
 
     fn derived_candidate_indices(&self, word: &str) -> BTreeSet<usize> {
