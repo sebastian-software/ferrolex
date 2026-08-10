@@ -28,10 +28,10 @@ use ferrolex_hunspell::{
     ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic, HunspellDictionary,
     ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity, SourceDigests,
 };
-use ferrolex_suggest::{Completeness, SuggestConfig, Suggester};
+use ferrolex_suggest::{CandidateSource, Completeness, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest --dictionary <PLAIN_WORD_LIST> [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -63,13 +63,20 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
 }
 
 fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
-    let text = fs::read_to_string(&command.dictionary_path).map_err(|source| {
-        CliError::ReadDictionary {
-            path: command.dictionary_path.clone(),
-            source,
+    let source: Box<dyn CandidateSource> = match (
+        command.dictionary_path.as_ref(),
+        command.hunspell_affix_path.as_ref(),
+    ) {
+        (Some(path), None) => {
+            let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
+                path: path.clone(),
+                source,
+            })?;
+            Box::new(WordList::from_text(Normalization::Exact, &text))
         }
-    })?;
-    let dictionary = WordList::from_text(Normalization::Exact, &text);
+        (None, Some(path)) => Box::new(load_installed_hunspell_dictionary(path)?),
+        _ => unreachable!("suggest command parsing requires exactly one source"),
+    };
     let mut config = SuggestConfig::default();
     if let Some(max_results) = command.max_results {
         config.max_results = max_results;
@@ -77,7 +84,13 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     if let Some(max_edit_distance) = command.max_edit_distance {
         config.max_edit_distance = max_edit_distance;
     }
-    let result = Suggester::new(&dictionary, config).suggest(&command.word);
+    if let Some(max_candidates) = command.max_candidates {
+        config.max_candidates = max_candidates;
+    }
+    if let Some(max_edit_cells) = command.max_edit_cells {
+        config.max_edit_cells = max_edit_cells;
+    }
+    let result = Suggester::new(source.as_ref(), config).suggest(&command.word);
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",
@@ -594,13 +607,17 @@ fn parse_suggest_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
     let mut dictionary_path = None;
+    let mut hunspell_affix_path = None;
     let mut max_results = None;
     let mut max_edit_distance = None;
+    let mut max_candidates = None;
+    let mut max_edit_cells = None;
     let mut word = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--dictionary" => set_once_path(&mut dictionary_path, &mut arguments, "--dictionary")?,
+            "--hunspell" => set_once_path(&mut hunspell_affix_path, &mut arguments, "--hunspell")?,
             "--max-results" => {
                 set_once_usize(&mut max_results, &mut arguments, "--max-results", true)?;
             }
@@ -610,6 +627,22 @@ fn parse_suggest_arguments(
                     &mut arguments,
                     "--max-edit-distance",
                     false,
+                )?;
+            }
+            "--max-candidates" => {
+                set_once_usize(
+                    &mut max_candidates,
+                    &mut arguments,
+                    "--max-candidates",
+                    true,
+                )?;
+            }
+            "--max-edit-cells" => {
+                set_once_usize(
+                    &mut max_edit_cells,
+                    &mut arguments,
+                    "--max-edit-cells",
+                    true,
                 )?;
             }
             "--help" | "-h" => return Ok(Command::Help),
@@ -624,14 +657,20 @@ fn parse_suggest_arguments(
             _ => word = Some(argument),
         }
     }
-    let dictionary_path = dictionary_path
-        .ok_or_else(|| CliError::Usage("suggest requires a `--dictionary` path".to_owned()))?;
+    if dictionary_path.is_some() == hunspell_affix_path.is_some() {
+        return Err(CliError::Usage(
+            "suggest requires exactly one `--dictionary` or `--hunspell` path".to_owned(),
+        ));
+    }
     let word =
         word.ok_or_else(|| CliError::Usage("suggest requires exactly one word".to_owned()))?;
     Ok(Command::Suggest(SuggestCommand {
         dictionary_path,
+        hunspell_affix_path,
         max_results,
         max_edit_distance,
+        max_candidates,
+        max_edit_cells,
         word,
     }))
 }
@@ -994,9 +1033,12 @@ struct CheckCommand {
 
 #[derive(Debug, Eq, PartialEq)]
 struct SuggestCommand {
-    dictionary_path: PathBuf,
+    dictionary_path: Option<PathBuf>,
+    hunspell_affix_path: Option<PathBuf>,
     max_results: Option<usize>,
     max_edit_distance: Option<usize>,
+    max_candidates: Option<usize>,
+    max_edit_cells: Option<usize>,
     word: String,
 }
 
@@ -1380,9 +1422,12 @@ mod tests {
         assert_eq!(
             command,
             Command::Suggest(SuggestCommand {
-                dictionary_path: PathBuf::from("words.txt"),
+                dictionary_path: Some(PathBuf::from("words.txt")),
+                hunspell_affix_path: None,
                 max_results: None,
                 max_edit_distance: None,
+                max_candidates: None,
+                max_edit_cells: None,
                 word: "recieve".to_owned(),
             })
         );
@@ -1400,6 +1445,10 @@ mod tests {
                 "3",
                 "--max-edit-distance",
                 "0",
+                "--max-candidates",
+                "300",
+                "--max-edit-cells",
+                "12000",
                 "recieve",
             ]
             .map(str::to_owned),
@@ -1409,10 +1458,34 @@ mod tests {
         assert_eq!(
             command,
             Command::Suggest(SuggestCommand {
-                dictionary_path: PathBuf::from("words.txt"),
+                dictionary_path: Some(PathBuf::from("words.txt")),
+                hunspell_affix_path: None,
                 max_results: Some(3),
                 max_edit_distance: Some(0),
+                max_candidates: Some(300),
+                max_edit_cells: Some(12_000),
                 word: "recieve".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_installed_hunspell_suggestions() {
+        let command = parse_arguments(
+            ["ferrolex", "suggest", "--hunspell", "de.aff", "Hauser"].map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Suggest(SuggestCommand {
+                dictionary_path: None,
+                hunspell_affix_path: Some(PathBuf::from("de.aff")),
+                max_results: None,
+                max_edit_distance: None,
+                max_candidates: None,
+                max_edit_cells: None,
+                word: "Hauser".to_owned(),
             })
         );
     }
@@ -1427,6 +1500,15 @@ mod tests {
                 "words.txt",
                 "--max-results",
                 "0",
+                "recieve",
+            ] as &[&str],
+            &[
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "words.txt",
+                "--hunspell",
+                "de.aff",
                 "recieve",
             ] as &[&str],
             &[

@@ -34,6 +34,7 @@ ferrolex dictionary list
 ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
 ferrolex analyze --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff src/lib.rs
+ferrolex suggest --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff --max-candidates 300000 --max-edit-cells 20000000 slowami
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -56,11 +57,12 @@ invokes an external spell-checking engine; see the
 [affix semantics](docs/affix-semantics.md).
 
 `suggest` exposes bounded, deterministic edit-distance suggestions for one
-plain-word-list dictionary. It reports when its configured work limits prevent
-a complete search, but still returns any stable partial results. Hunspell and
-other non-enumerable sources are deliberately not candidate sources yet;
-`UserDictionary` project overlays can be used through the library API. The
-comparison and ranking contract is documented in [Suggestions](docs/suggestions.md).
+plain-word-list dictionary or one installed Hunspell runtime cache. It reports
+when its configured work limits prevent a complete search, but still returns
+any stable partial results. Hunspell suggestions use stored stems only and do
+not expand affix or compound forms. `UserDictionary` project overlays can be
+used through the library API. The comparison and ranking contract is documented
+in [Suggestions](docs/suggestions.md).
 
 The current native integration boundary and explicit LSP/FFI deferral are
 recorded in [Native integrations](docs/integrations.md).

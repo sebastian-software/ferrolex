@@ -129,13 +129,13 @@ impl SuggestionResult {
 }
 
 /// Generates deterministic edit-distance suggestions from a candidate source.
-pub struct Suggester<'source, S> {
+pub struct Suggester<'source, S: ?Sized> {
     source: &'source S,
     config: SuggestConfig,
     replacements: &'source [ReplacementRule],
 }
 
-impl<'source, S: CandidateSource> Suggester<'source, S> {
+impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
     /// Creates a suggester with explicit deterministic limits.
     #[must_use]
     pub const fn new(source: &'source S, config: SuggestConfig) -> Self {

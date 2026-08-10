@@ -13,6 +13,7 @@ use std::fmt;
 
 use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
+use ferrolex_suggest::CandidateSource;
 
 pub use cache::{
     compile_runtime_cache, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
@@ -296,6 +297,16 @@ impl HunspellDictionary {
     /// receives an already segmented string and therefore does not apply it.
     pub fn word_characters(&self) -> impl Iterator<Item = char> + '_ {
         self.word_characters.iter().copied()
+    }
+
+    /// Visits stored stem spellings in deterministic UTF-8 byte order.
+    ///
+    /// This deliberately does not enumerate affix-derived or compound forms:
+    /// their number is not statically bounded by a Hunspell source. Consumers
+    /// such as suggestions can use the stable base vocabulary without turning
+    /// a lookup dictionary into an unbounded expansion engine.
+    pub fn stems(&self) -> impl Iterator<Item = &str> + '_ {
+        self.stems.keys().map(Box::as_ref)
     }
 
     fn matches_single_affix_word(&self, word: &str) -> bool {
@@ -691,6 +702,16 @@ impl HunspellDictionary {
             }
         }
         had_break && self.contains(first)
+    }
+}
+
+impl CandidateSource for HunspellDictionary {
+    fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        for stem in self.stems() {
+            if !visitor(stem) {
+                break;
+            }
+        }
     }
 }
 
@@ -2301,6 +2322,7 @@ mod tests {
     use std::thread;
 
     use ferrolex_core::Dictionary;
+    use ferrolex_suggest::CandidateSource;
 
     use super::{
         import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
@@ -2328,6 +2350,27 @@ mod tests {
         assert!(!dictionary.contains("unkinds"));
         assert!(!dictionary.contains("partys"));
         assert!(!dictionary.contains("Strasse"));
+    }
+
+    #[test]
+    fn exposes_only_stored_stems_as_suggestion_candidates() {
+        let result = import(
+            "test.aff",
+            AFFIXES,
+            "test.dic",
+            "2\nkind/A\nparty/B\n",
+            ImportMode::Strict,
+        )
+        .expect("the supported subset imports cleanly");
+        let mut candidates = Vec::new();
+
+        result.dictionary().visit_candidates(&mut |candidate| {
+            candidates.push(candidate.to_owned());
+            true
+        });
+
+        assert_eq!(candidates, ["kind", "party"]);
+        assert!(!candidates.contains(&"parties".to_owned()));
     }
 
     #[test]
