@@ -7,7 +7,7 @@ for the Hunspell dictionary ecosystem. It is not a Hunspell port. It currently
 provides immutable UTF-8 plain-word-list dictionaries, generic source-code
 analysis, bounded deterministic suggestions, and a documented Hunspell
 `.aff`/`.dic` recognition subset. That subset includes lazy affixes,
-continuations, circumfixes, special-word flags, and simple two-part compounds;
+continuations, circumfixes, special-word flags, and bounded compound rules;
 unsupported directives remain explicit diagnostics rather than compatibility
 claims.
 

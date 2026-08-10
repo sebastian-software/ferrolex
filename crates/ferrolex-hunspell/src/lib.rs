@@ -30,6 +30,7 @@ const MAX_AFFIX_CHAIN: usize = 8;
 const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 const MAX_COMPOUND_SCALARS: usize = 256;
 const MAX_COMPOUND_RULES: usize = 1_024;
+const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -394,45 +395,102 @@ impl HunspellDictionary {
         if self.compound.flag.is_none() && self.compound.rules.is_empty() {
             return false;
         };
-        // Retain at most the bounded number of split positions.  Building an
+        // Retain at most the bounded number of split positions. Building an
         // index for an arbitrarily long untrusted query would defeat the
         // compound-evaluation limit before it can reject the query.
-        let characters = word
+        let mut boundaries = word
             .char_indices()
             .take(MAX_COMPOUND_SCALARS.saturating_add(1))
+            .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        if characters.len() > MAX_COMPOUND_SCALARS {
+        if boundaries.len() > MAX_COMPOUND_SCALARS {
             return false;
         }
-        let minimum = self.compound.minimum_length;
-        (1..characters.len()).any(|split| {
-            let byte_index = characters[split].0;
-            let (left, right) = word.split_at(byte_index);
-            left.chars().count() >= minimum
-                && right.chars().count() >= minimum
-                && self.matches_compound_components(left, right)
-        })
-    }
+        boundaries.push(word.len());
 
-    fn matches_compound_components(&self, left: &str, right: &str) -> bool {
-        let Some(left_flags) = self.stems.get(left) else {
-            return false;
-        };
-        let Some(right_flags) = self.stems.get(right) else {
-            return false;
-        };
-        if self.is_forbidden(left_flags) || self.is_forbidden(right_flags) {
-            return false;
-        }
         self.compound
             .flag
             .as_ref()
-            .is_some_and(|flag| left_flags.contains(flag) && right_flags.contains(flag))
-            || self
-                .compound
-                .rules
-                .iter()
-                .any(|rule| left_flags.contains(&rule.first) && right_flags.contains(&rule.second))
+            .is_some_and(|flag| self.matches_compound_pattern(word, &boundaries, None, Some(flag)))
+            || self.compound.rules.iter().any(|rule| {
+                self.matches_compound_pattern(word, &boundaries, Some(&rule.flags), None)
+            })
+    }
+
+    fn matches_compound_pattern(
+        &self,
+        word: &str,
+        boundaries: &[usize],
+        pattern: Option<&[Flag]>,
+        generic_flag: Option<&Flag>,
+    ) -> bool {
+        if let Some(pattern) = pattern {
+            return self.matches_fixed_compound_pattern(word, boundaries, pattern);
+        }
+        let Some(flag) = generic_flag else {
+            return false;
+        };
+
+        let mut reachable = vec![false; boundaries.len()];
+        reachable[0] = true;
+        for component_count in 1..boundaries.len() {
+            let next = self.extend_compound_components(word, boundaries, &reachable, flag);
+            if component_count >= 2 && next.last() == Some(&true) {
+                return true;
+            }
+            reachable = next;
+        }
+        false
+    }
+
+    fn matches_fixed_compound_pattern(
+        &self,
+        word: &str,
+        boundaries: &[usize],
+        pattern: &[Flag],
+    ) -> bool {
+        if pattern.len() < 2 {
+            return false;
+        }
+        let mut reachable = vec![false; boundaries.len()];
+        reachable[0] = true;
+        for flag in pattern {
+            let next = self.extend_compound_components(word, boundaries, &reachable, flag);
+            if next.iter().all(|reachable| !reachable) {
+                return false;
+            }
+            reachable = next;
+        }
+        reachable.last() == Some(&true)
+    }
+
+    fn extend_compound_components(
+        &self,
+        word: &str,
+        boundaries: &[usize],
+        reachable: &[bool],
+        flag: &Flag,
+    ) -> Vec<bool> {
+        let mut next = vec![false; boundaries.len()];
+        for start in 0..boundaries.len().saturating_sub(1) {
+            if !reachable[start] {
+                continue;
+            }
+            let first_end = start.saturating_add(self.compound.minimum_length);
+            for end in first_end..boundaries.len() {
+                let candidate = &word[boundaries[start]..boundaries[end]];
+                if self.matches_compound_component(candidate, flag) {
+                    next[end] = true;
+                }
+            }
+        }
+        next
+    }
+
+    fn matches_compound_component(&self, word: &str, required_flag: &Flag) -> bool {
+        self.stems
+            .get(word)
+            .is_some_and(|flags| !self.is_forbidden(flags) && flags.contains(required_flag))
     }
 }
 
@@ -644,8 +702,7 @@ impl Default for CompoundConfig {
 
 #[derive(Clone, Debug)]
 struct CompoundRule {
-    first: Flag,
-    second: Flag,
+    flags: Vec<Flag>,
 }
 
 #[derive(Clone, Debug)]
@@ -1305,19 +1362,25 @@ fn parse_compound_rules(
         let rule_fields = line.split_whitespace().collect::<Vec<_>>();
         let pattern = rule_fields.get(1).copied().unwrap_or_default();
         let flags = pattern.chars().collect::<Vec<_>>();
-        if rule_fields.len() != 2 || rule_fields[0] != "COMPOUNDRULE" || flags.len() != 2 {
+        if rule_fields.len() != 2
+            || rule_fields[0] != "COMPOUNDRULE"
+            || flags.iter().any(|flag| matches!(flag, '*' | '+' | '?'))
+            || !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len())
+        {
             parsed.diagnostics.push(diagnostic(
                 source,
                 index + 1,
                 "COMPOUNDRULE",
                 Severity::Error,
-                "only two literal single-scalar component flags are supported",
+                "only 2–16 literal single-scalar component flags are supported",
             ));
             continue;
         }
         parsed.compound.rules.push(CompoundRule {
-            first: Flag(Box::<str>::from(flags[0].to_string())),
-            second: Flag(Box::<str>::from(flags[1].to_string())),
+            flags: flags
+                .into_iter()
+                .map(|flag| Flag(Box::<str>::from(flag.to_string())))
+                .collect(),
         });
     }
 }
@@ -2160,6 +2223,39 @@ mod tests {
 
         assert!(imported.dictionary().contains("HausTür"));
         assert!(!imported.dictionary().contains("TürHaus"));
+    }
+
+    #[test]
+    fn compound_rules_support_bounded_three_component_patterns() {
+        let imported = import(
+            "test.aff",
+            "COMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE ABC\n",
+            "test.dic",
+            "3\nBahn/A\nHof/B\nStraße/C\n",
+            ImportMode::Strict,
+        )
+        .expect("three-component compound rule imports");
+
+        assert!(imported.dictionary().contains("BahnHofStraße"));
+        assert!(!imported.dictionary().contains("BahnStraßeHof"));
+        assert!(!imported.dictionary().contains("BahnHof"));
+    }
+
+    #[test]
+    fn compound_rule_quantifiers_remain_explicit_strict_errors() {
+        let error = import(
+            "test.aff",
+            "COMPOUNDRULE 1\nCOMPOUNDRULE A*B\n",
+            "test.dic",
+            "2\na/A\nb/B\n",
+            ImportMode::Strict,
+        )
+        .expect_err("quantifier syntax is not silently approximated");
+
+        assert!(error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "COMPOUNDRULE"));
     }
 
     #[test]

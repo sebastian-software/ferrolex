@@ -17,7 +17,8 @@ use sha2::{Digest as _, Sha256};
 use super::{
     AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag,
     HunspellDictionary, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_COMPOUND_RULES,
-    MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES,
+    MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY,
+    MAX_LINE_BYTES,
 };
 
 const MAGIC: [u8; 8] = *b"FLXHSP\0\0";
@@ -32,7 +33,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 2;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 3;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -187,8 +188,14 @@ pub fn compile_runtime_cache(
         "compound rule count",
     )?;
     for rule in &dictionary.compound.rules {
-        write_flag(&mut output, &rule.first)?;
-        write_flag(&mut output, &rule.second)?;
+        write_count(
+            &mut output,
+            rule.flags.len(),
+            "compound rule component count",
+        )?;
+        for flag in &rule.flags {
+            write_flag(&mut output, flag)?;
+        }
     }
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
@@ -249,13 +256,23 @@ pub fn load_runtime_cache(
     let minimum_length = usize::try_from(reader.u64()?)
         .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
-    reader.require_minimum_items(rule_count, 8, "compound rules")?;
     let mut rules = Vec::with_capacity(rule_count);
     for _ in 0..rule_count {
-        rules.push(CompoundRule {
-            first: reader.flag()?,
-            second: reader.flag()?,
-        });
+        let component_count = reader.count(
+            MAX_COMPOUND_RULE_COMPONENTS,
+            "compound rule component count",
+        )?;
+        if component_count < 2 {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "compound rule has fewer than two components",
+            ));
+        }
+        reader.require_minimum_items(component_count, 4, "compound rule components")?;
+        let mut flags = Vec::with_capacity(component_count);
+        for _ in 0..component_count {
+            flags.push(reader.flag()?);
+        }
+        rules.push(CompoundRule { flags });
     }
     let compound = CompoundConfig {
         flag,
@@ -348,6 +365,17 @@ fn validate_dictionary(
     validate_optional_flag(dictionary.compound.flag.as_ref(), error)?;
     if dictionary.compound.minimum_length == 0 {
         return Err(error.error("compound minimum must be greater than zero"));
+    }
+    if dictionary.compound.rules.len() > MAX_COMPOUND_RULES {
+        return Err(error.error("compound rule count exceeds importer limit"));
+    }
+    for rule in &dictionary.compound.rules {
+        if !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&rule.flags.len()) {
+            return Err(error.error("compound rule has an invalid component count"));
+        }
+        for flag in &rule.flags {
+            validate_flag(flag, error)?;
+        }
     }
     Ok(())
 }
@@ -804,8 +832,8 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nCOMPOUNDFLAG M\nCOMPOUNDMIN 2\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
-    const DIC: &str = "4\nword/AB\nbad/AF\nfix/DN\nroot/D\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nCOMPOUNDFLAG M\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const DIC: &str = "7\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/Z\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())
@@ -825,8 +853,19 @@ mod tests {
         let loaded = load_runtime_cache(&cache, sources()).expect("cache loads");
 
         for word in [
-            "word", "unwords", "unword", "words", "bad", "unbad", "fix", "fixed", "fixedly",
-            "rooted", "rootedly", "unknown",
+            "word",
+            "unwords",
+            "unword",
+            "words",
+            "bad",
+            "unbad",
+            "fix",
+            "fixed",
+            "fixedly",
+            "rooted",
+            "rootedly",
+            "BahnHofStraße",
+            "unknown",
         ] {
             assert_eq!(
                 loaded.contains(word),
@@ -837,6 +876,7 @@ mod tests {
         assert!(loaded.contains("unwords"));
         assert!(!loaded.contains("unword"));
         assert!(loaded.contains("fixedly"));
+        assert!(loaded.contains("BahnHofStraße"));
     }
 
     #[test]
@@ -904,11 +944,12 @@ mod tests {
         );
 
         let mut semantics = cache.clone();
-        semantics[10..14].copy_from_slice(&3_u32.to_le_bytes());
+        let unsupported_semantics = HUNSPELL_CACHE_SEMANTICS_VERSION.saturating_add(1);
+        semantics[10..14].copy_from_slice(&unsupported_semantics.to_le_bytes());
         rewrite_checksum(&mut semantics);
         assert_eq!(
             load_runtime_cache(&semantics, sources()).expect_err("semantics are rejected"),
-            RuntimeCacheError::UnsupportedSemanticsVersion(3)
+            RuntimeCacheError::UnsupportedSemanticsVersion(unsupported_semantics)
         );
 
         let mut excessive_entries = cache;

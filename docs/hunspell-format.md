@@ -54,7 +54,7 @@ is an error for that entry, not a panic.
 
 The current compatibility level recognizes `SET`, `FLAG`, `PFX`, `SFX`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
-`COMPOUNDMIN`.
+`COMPOUNDMIN`, and bounded literal `COMPOUNDRULE` patterns.
 `PFX`/`SFX` headers declare a flag, whether rules cross-product, and a rule
 count. Each following rule belongs to that header and has:
 
@@ -68,9 +68,9 @@ can name continuation flags after `/`; those flags remain active on the
 generated form under the [affix semantics](affix-semantics.md). Extra affix
 morphology fields are reported and ignored. Conditions are anchored prefix or
 suffix tests, according to the rule kind. See [compound semantics](compound-semantics.md)
-for the deliberately bounded `COMPOUNDFLAG`/`COMPOUNDMIN` subset.
+for the deliberately bounded compound subset.
 
 `AF`, aliases, complex prefix modes, capitalization fallbacks, compound
-positions and rules, and suggestion directives beyond the documented subset
-have their own later feature gates. They must be diagnosed rather than silently
-interpreted as simple affixes.
+positions, compound quantifiers, and suggestion directives beyond the
+documented subset have their own later feature gates. They must be diagnosed
+rather than silently interpreted as simple affixes.
