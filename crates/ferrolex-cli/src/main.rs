@@ -23,13 +23,13 @@ use ferrolex_dictionaries::{
 };
 use ferrolex_hunspell::{
     compile_runtime_cache, import_bytes as import_hunspell_bytes,
-    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, ByteEncoding,
-    ByteImportEncodings, Diagnostic as ImportDiagnostic, ImportError, ImportMode, ImportResult,
-    RuntimeCacheError, Severity, SourceDigests,
+    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, load_runtime_cache,
+    ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic, HunspellDictionary,
+    ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity, SourceDigests,
 };
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -147,7 +147,7 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
 }
 
 fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
-    let checker = load_checker(&command.dictionary_paths)?;
+    let checker = load_checker(&command.dictionary_paths, &command.hunspell_affix_paths)?;
 
     match &command.target {
         CheckTarget::Word(word) => Ok(check_word(&checker, word)),
@@ -155,26 +155,49 @@ fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
     }
 }
 
-fn load_checker(dictionary_paths: &[PathBuf]) -> Result<Checker, CliError> {
-    let dictionaries = dictionary_paths
-        .iter()
-        .map(|path| {
-            fs::read_to_string(path)
-                .map(|text| WordList::from_text(Normalization::Exact, &text))
-                .map_err(|source| CliError::ReadDictionary {
-                    path: path.clone(),
-                    source,
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let checker = dictionaries
-        .into_iter()
-        .fold(Checker::builder(), |builder, dictionary| {
-            builder.dictionary(dictionary)
-        })
-        .build();
+fn load_checker(
+    dictionary_paths: &[PathBuf],
+    hunspell_affix_paths: &[PathBuf],
+) -> Result<Checker, CliError> {
+    let mut builder = Checker::builder();
+    for path in dictionary_paths {
+        let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
+            path: path.clone(),
+            source,
+        })?;
+        builder = builder.dictionary(WordList::from_text(Normalization::Exact, &text));
+    }
+    for aff_path in hunspell_affix_paths {
+        builder = builder.dictionary(load_installed_hunspell_dictionary(aff_path)?);
+    }
 
-    Ok(checker)
+    Ok(builder.build())
+}
+
+fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDictionary, CliError> {
+    let dic_path = aff_path.with_extension("dic");
+    let cache_path = runtime_cache_path(aff_path);
+    let aff_bytes = fs::read(aff_path).map_err(|source| CliError::ReadInput {
+        path: aff_path.to_path_buf(),
+        source,
+    })?;
+    let dic_bytes = fs::read(&dic_path).map_err(|source| CliError::ReadInput {
+        path: dic_path,
+        source,
+    })?;
+    let cache = fs::read(&cache_path).map_err(|source| CliError::ReadHunspellCache {
+        path: cache_path.clone(),
+        source,
+    })?;
+
+    load_runtime_cache(
+        &cache,
+        SourceDigests::from_source_bytes(&aff_bytes, &dic_bytes),
+    )
+    .map_err(|source| CliError::LoadHunspellCache {
+        path: cache_path,
+        source,
+    })
 }
 
 fn check_word(checker: &Checker, word: &str) -> RunOutcome {
@@ -207,7 +230,7 @@ fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
 }
 
 fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
-    let checker = load_checker(&command.dictionary_paths)?;
+    let checker = load_checker(&command.dictionary_paths, &command.hunspell_affix_paths)?;
     let source = fs::read_to_string(&command.path).map_err(|source| CliError::ReadInput {
         path: command.path.clone(),
         source,
@@ -656,6 +679,7 @@ fn parse_analyze_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
     let mut dictionary_paths = Vec::new();
+    let mut hunspell_affix_paths = Vec::new();
     let mut comment_prefix = None;
     let mut path = None;
     let mut arguments = arguments.into_iter();
@@ -665,6 +689,9 @@ fn parse_analyze_arguments(
             "--dictionary" => {
                 let dictionary_path = required_path(&mut arguments, "--dictionary")?;
                 dictionary_paths.push(dictionary_path);
+            }
+            "--hunspell" => {
+                hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
             "--comment-prefix" => {
                 let prefix = arguments.next().ok_or_else(|| {
@@ -694,15 +721,16 @@ fn parse_analyze_arguments(
         }
     }
 
-    if dictionary_paths.is_empty() {
+    if dictionary_paths.is_empty() && hunspell_affix_paths.is_empty() {
         return Err(CliError::Usage(
-            "analyze requires at least one `--dictionary` path".to_owned(),
+            "analyze requires at least one `--dictionary` or `--hunspell` path".to_owned(),
         ));
     }
     let path = path.ok_or_else(|| CliError::Usage("analyze requires a path".to_owned()))?;
 
     Ok(Command::Analyze(AnalyzeCommand {
         dictionary_paths,
+        hunspell_affix_paths,
         comment_prefix,
         path,
     }))
@@ -710,6 +738,7 @@ fn parse_analyze_arguments(
 
 fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Command, CliError> {
     let mut dictionary_paths = Vec::new();
+    let mut hunspell_affix_paths = Vec::new();
     let mut target = None;
     let mut arguments = arguments.into_iter();
 
@@ -717,6 +746,9 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
         match argument.as_str() {
             "--dictionary" => {
                 dictionary_paths.push(required_path(&mut arguments, "--dictionary")?);
+            }
+            "--hunspell" => {
+                hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
             "--file" => {
                 set_target(
@@ -734,14 +766,15 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
 
     let target =
         target.ok_or_else(|| CliError::Usage("check requires a word or `--file`".to_owned()))?;
-    if dictionary_paths.is_empty() {
+    if dictionary_paths.is_empty() && hunspell_affix_paths.is_empty() {
         return Err(CliError::Usage(
-            "check requires at least one `--dictionary` path".to_owned(),
+            "check requires at least one `--dictionary` or `--hunspell` path".to_owned(),
         ));
     }
 
     Ok(Command::Check(CheckCommand {
         dictionary_paths,
+        hunspell_affix_paths,
         target,
     }))
 }
@@ -797,6 +830,7 @@ enum Command {
 #[derive(Debug, Eq, PartialEq)]
 struct CheckCommand {
     dictionary_paths: Vec<PathBuf>,
+    hunspell_affix_paths: Vec<PathBuf>,
     target: CheckTarget,
 }
 
@@ -809,6 +843,7 @@ enum CheckTarget {
 #[derive(Debug, Eq, PartialEq)]
 struct AnalyzeCommand {
     dictionary_paths: Vec<PathBuf>,
+    hunspell_affix_paths: Vec<PathBuf>,
     comment_prefix: Option<String>,
     path: PathBuf,
 }
@@ -849,6 +884,10 @@ enum CliError {
         path: PathBuf,
         source: io::Error,
     },
+    ReadHunspellCache {
+        path: PathBuf,
+        source: io::Error,
+    },
     WriteArtifact {
         path: PathBuf,
         source: io::Error,
@@ -863,6 +902,10 @@ enum CliError {
         source: ValidationError,
     },
     CompileHunspellCache(RuntimeCacheError),
+    LoadHunspellCache {
+        path: PathBuf,
+        source: RuntimeCacheError,
+    },
     WriteHunspellCache {
         path: PathBuf,
         source: io::Error,
@@ -886,6 +929,13 @@ impl fmt::Display for CliError {
                 write!(
                     formatter,
                     "could not read input `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::ReadHunspellCache { path, source } => {
+                write!(
+                    formatter,
+                    "could not read Hunspell runtime cache `{}`: {source}",
                     path.display()
                 )
             }
@@ -919,6 +969,13 @@ impl fmt::Display for CliError {
                     "could not compile Hunspell runtime cache: {source}"
                 )
             }
+            Self::LoadHunspellCache { path, source } => {
+                write!(
+                    formatter,
+                    "invalid or stale Hunspell runtime cache `{}`: {source}; rerun `ferrolex dictionary install`",
+                    path.display()
+                )
+            }
             Self::WriteHunspellCache { path, source } => {
                 write!(
                     formatter,
@@ -942,12 +999,15 @@ impl Error for CliError {
             Self::Usage(_) => None,
             Self::ReadDictionary { source, .. }
             | Self::ReadInput { source, .. }
+            | Self::ReadHunspellCache { source, .. }
             | Self::WriteArtifact { source, .. }
             | Self::WriteHunspellCache { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),
-            Self::CompileHunspellCache(source) => Some(source),
+            Self::CompileHunspellCache(source) | Self::LoadHunspellCache { source, .. } => {
+                Some(source)
+            }
             Self::DictionaryManifest(source) => Some(source),
             Self::FetchDictionary(source) => Some(source),
         }
@@ -962,7 +1022,7 @@ mod tests {
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError};
     use ferrolex_core::Dictionary;
-    use ferrolex_hunspell::{load_runtime_cache, SourceDigests};
+    use ferrolex_hunspell::{load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests};
 
     use super::{
         catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
@@ -993,6 +1053,7 @@ mod tests {
             command,
             Command::Check(CheckCommand {
                 dictionary_paths: vec![PathBuf::from("en.txt"), PathBuf::from("technical.txt")],
+                hunspell_affix_paths: Vec::new(),
                 target: CheckTarget::Word("OAuth".to_owned()),
             })
         );
@@ -1034,8 +1095,48 @@ mod tests {
             command,
             Command::Analyze(AnalyzeCommand {
                 dictionary_paths: vec![PathBuf::from("words.txt")],
+                hunspell_affix_paths: Vec::new(),
                 comment_prefix: Some("//".to_owned()),
                 path: PathBuf::from("lib.rs"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_hunspell_cache_inputs_for_check_and_analysis() {
+        let check = parse_arguments(
+            [
+                "ferrolex",
+                "check",
+                "--hunspell",
+                "de.aff",
+                "--hunspell",
+                "en.aff",
+                "Wort",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the cached Hunspell command is valid");
+        let analyze = parse_arguments(
+            ["ferrolex", "analyze", "--hunspell", "de.aff", "src/lib.rs"].map(str::to_owned),
+        )
+        .expect("the cached Hunspell command is valid");
+
+        assert_eq!(
+            check,
+            Command::Check(CheckCommand {
+                dictionary_paths: Vec::new(),
+                hunspell_affix_paths: vec![PathBuf::from("de.aff"), PathBuf::from("en.aff")],
+                target: CheckTarget::Word("Wort".to_owned()),
+            })
+        );
+        assert_eq!(
+            analyze,
+            Command::Analyze(AnalyzeCommand {
+                dictionary_paths: Vec::new(),
+                hunspell_affix_paths: vec![PathBuf::from("de.aff")],
+                comment_prefix: None,
+                path: PathBuf::from("src/lib.rs"),
             })
         );
     }
@@ -1344,6 +1445,56 @@ mod tests {
     }
 
     #[test]
+    fn check_and_analyze_load_an_installed_hunspell_runtime_cache() {
+        let sources =
+            temporary_hunspell_sources("SET UTF-8\nSFX S N 1\nSFX S 0 s .\n", "1\nword/S\n");
+        install_hunspell_runtime_cache("test", &sources.affix_path, &sources.dictionary_path, None)
+            .expect("fixture sources are readable");
+
+        let check_arguments = [
+            "ferrolex".to_owned(),
+            "check".to_owned(),
+            "--hunspell".to_owned(),
+            sources.affix_path.to_string_lossy().into_owned(),
+            "words".to_owned(),
+        ];
+        assert_eq!(
+            run(check_arguments).expect("the matching runtime cache loads"),
+            RunOutcome::Success
+        );
+
+        let source = temporary_file("words\n");
+        let analyze_arguments = [
+            "ferrolex".to_owned(),
+            "analyze".to_owned(),
+            "--hunspell".to_owned(),
+            sources.affix_path.to_string_lossy().into_owned(),
+            source.path.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(
+            run(analyze_arguments).expect("the matching runtime cache loads"),
+            RunOutcome::Success
+        );
+
+        fs::write(&sources.dictionary_path, "1\nother/S\n")
+            .expect("fixture dictionary is writable");
+        let stale_arguments = [
+            "ferrolex".to_owned(),
+            "check".to_owned(),
+            "--hunspell".to_owned(),
+            sources.affix_path.to_string_lossy().into_owned(),
+            "words".to_owned(),
+        ];
+        assert!(matches!(
+            run(stale_arguments),
+            Err(CliError::LoadHunspellCache {
+                source: RuntimeCacheError::SourceDigestMismatch(CacheSource::Dic),
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn rejects_an_option_where_a_dictionary_path_is_required() {
         let error = parse_arguments(
             ["ferrolex", "check", "--dictionary", "--unknown", "word"].map(str::to_owned),
@@ -1404,6 +1555,19 @@ mod tests {
         path: PathBuf,
     }
 
+    struct TemporaryHunspellSources {
+        affix_path: PathBuf,
+        dictionary_path: PathBuf,
+    }
+
+    impl Drop for TemporaryHunspellSources {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(runtime_cache_path(&self.affix_path));
+            let _ = fs::remove_file(&self.affix_path);
+            let _ = fs::remove_file(&self.dictionary_path);
+        }
+    }
+
     impl Drop for TemporaryDictionary {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
@@ -1426,6 +1590,22 @@ mod tests {
         ));
         fs::write(&path, contents).expect("the temporary directory is writable");
         TemporaryDictionary { path }
+    }
+
+    fn temporary_hunspell_sources(affix: &str, dictionary: &str) -> TemporaryHunspellSources {
+        let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
+        let stem = std::env::temp_dir().join(format!(
+            "ferrolex-cli-hunspell-test-{}-{sequence}",
+            std::process::id()
+        ));
+        let affix_path = stem.with_extension("aff");
+        let dictionary_path = stem.with_extension("dic");
+        fs::write(&affix_path, affix).expect("the temporary directory is writable");
+        fs::write(&dictionary_path, dictionary).expect("the temporary directory is writable");
+        TemporaryHunspellSources {
+            affix_path,
+            dictionary_path,
+        }
     }
 
     fn refresh_compiled_checksum(bytes: &mut [u8]) {
