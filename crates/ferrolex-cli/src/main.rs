@@ -67,16 +67,25 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
 fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     let source: Box<dyn CandidateSource> = match (
         command.dictionary_path.as_ref(),
+        command.compiled_path.as_ref(),
         command.hunspell_affix_path.as_ref(),
     ) {
-        (Some(path), None) => {
+        (Some(path), None, None) => {
             let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
                 path: path.clone(),
                 source,
             })?;
             Box::new(WordList::from_text(Normalization::Exact, &text))
         }
-        (None, Some(path)) => Box::new(load_installed_hunspell_dictionary(path)?),
+        (None, Some(path), None) => Box::new(
+            CompiledDictionary::load(read_compiled_artifact(path)?).map_err(|source| {
+                CliError::LoadArtifact {
+                    path: path.clone(),
+                    source,
+                }
+            })?,
+        ),
+        (None, None, Some(path)) => Box::new(load_installed_hunspell_dictionary(path)?),
         _ => unreachable!("suggest command parsing requires exactly one source"),
     };
     let mut config = SuggestConfig::default();
@@ -628,6 +637,7 @@ fn parse_suggest_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
     let mut dictionary_path = None;
+    let mut compiled_path = None;
     let mut hunspell_affix_path = None;
     let mut max_results = None;
     let mut max_edit_distance = None;
@@ -639,6 +649,7 @@ fn parse_suggest_arguments(
         match argument.as_str() {
             "--dictionary" => set_once_path(&mut dictionary_path, &mut arguments, "--dictionary")?,
             "--hunspell" => set_once_path(&mut hunspell_affix_path, &mut arguments, "--hunspell")?,
+            "--compiled" => set_once_path(&mut compiled_path, &mut arguments, "--compiled")?,
             "--max-results" => {
                 set_once_usize(&mut max_results, &mut arguments, "--max-results", true)?;
             }
@@ -678,15 +689,21 @@ fn parse_suggest_arguments(
             _ => word = Some(argument),
         }
     }
-    if dictionary_path.is_some() == hunspell_affix_path.is_some() {
+    if usize::from(dictionary_path.is_some())
+        + usize::from(compiled_path.is_some())
+        + usize::from(hunspell_affix_path.is_some())
+        != 1
+    {
         return Err(CliError::Usage(
-            "suggest requires exactly one `--dictionary` or `--hunspell` path".to_owned(),
+            "suggest requires exactly one `--dictionary`, `--compiled`, or `--hunspell` path"
+                .to_owned(),
         ));
     }
     let word =
         word.ok_or_else(|| CliError::Usage("suggest requires exactly one word".to_owned()))?;
     Ok(Command::Suggest(SuggestCommand {
         dictionary_path,
+        compiled_path,
         hunspell_affix_path,
         max_results,
         max_edit_distance,
@@ -1058,6 +1075,7 @@ struct CheckCommand {
 #[derive(Debug, Eq, PartialEq)]
 struct SuggestCommand {
     dictionary_path: Option<PathBuf>,
+    compiled_path: Option<PathBuf>,
     hunspell_affix_path: Option<PathBuf>,
     max_results: Option<usize>,
     max_edit_distance: Option<usize>,
@@ -1519,6 +1537,7 @@ mod tests {
             command,
             Command::Suggest(SuggestCommand {
                 dictionary_path: Some(PathBuf::from("words.txt")),
+                compiled_path: None,
                 hunspell_affix_path: None,
                 max_results: None,
                 max_edit_distance: None,
@@ -1555,6 +1574,7 @@ mod tests {
             command,
             Command::Suggest(SuggestCommand {
                 dictionary_path: Some(PathBuf::from("words.txt")),
+                compiled_path: None,
                 hunspell_affix_path: None,
                 max_results: Some(3),
                 max_edit_distance: Some(0),
@@ -1576,6 +1596,7 @@ mod tests {
             command,
             Command::Suggest(SuggestCommand {
                 dictionary_path: None,
+                compiled_path: None,
                 hunspell_affix_path: Some(PathBuf::from("de.aff")),
                 max_results: None,
                 max_edit_distance: None,
