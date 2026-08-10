@@ -263,6 +263,14 @@ The engine targets native execution. Architecture, dependency, and data-structur
 
 ---
 
+## 4.6 Brand-term validation tooling
+
+Brand-term validation (checking the correct usage of product and brand names such as Lexios in code, documentation, and localization content — previously explored as `ferrolex-brand` in the earlier ferrolex workspace) is out of scope for this project and shall live in a separate project.
+
+The engine's public capabilities — custom dictionaries, dictionary layering, and forbidden words — should make such tooling straightforward to build as a downstream consumer.
+
+---
+
 # 5. Licensing and Code Provenance Requirements
 
 Code provenance is a fundamental project requirement.
