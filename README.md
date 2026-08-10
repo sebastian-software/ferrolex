@@ -47,6 +47,9 @@ The `ferrolex-suggest` library crate provides bounded, deterministic
 edit-distance suggestions for enumerable word sources. Its comparison and
 ranking contract is documented in [Suggestions](docs/suggestions.md).
 
+The current native integration boundary and explicit LSP/FFI deferral are
+recorded in [Native integrations](docs/integrations.md).
+
 `compile` turns the same plain-word-list syntax used by `check` into a
 deterministic native artifact. `validate --compiled` first performs the fast
 header/checksum load and then fully validates every offset, UTF-8 payload, and
