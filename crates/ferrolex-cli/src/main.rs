@@ -11,13 +11,16 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use ferrolex_code::{Analyzer, CommentSyntax, Document};
+use ferrolex_compiler::{
+    compile_words, CompileError, CompiledDictionary, LoadError, ValidationError,
+};
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
 use ferrolex_hunspell::{
     import as import_hunspell, Diagnostic as ImportDiagnostic, ImportMode, Severity,
 };
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>";
+const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>";
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -38,8 +41,31 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
         }
         Command::Check(command) => check(&command),
         Command::Analyze(command) => analyze(&command),
+        Command::Compile(command) => compile(&command),
         Command::Validate(command) => validate(&command),
     }
+}
+
+fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
+    let text = fs::read_to_string(&command.dictionary_path).map_err(|source| {
+        CliError::ReadDictionary {
+            path: command.dictionary_path.clone(),
+            source,
+        }
+    })?;
+    let dictionary = WordList::from_text(Normalization::Exact, &text);
+    let compiled = compile_words(dictionary.words()).map_err(CliError::CompileDictionary)?;
+    fs::write(&command.output_path, compiled).map_err(|source| CliError::WriteArtifact {
+        path: command.output_path.clone(),
+        source,
+    })?;
+
+    println!(
+        "compiled: {} ({} words)",
+        command.output_path.display(),
+        dictionary.len()
+    );
+    Ok(RunOutcome::Success)
 }
 
 fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
@@ -142,21 +168,36 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
 }
 
 fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
-    let aff_text = fs::read_to_string(&command.aff_path).map_err(|source| CliError::ReadInput {
-        path: command.aff_path.clone(),
+    match command {
+        ValidateCommand::Hunspell {
+            strict,
+            aff_path,
+            dic_path,
+        } => validate_hunspell(*strict, aff_path, dic_path),
+        ValidateCommand::Compiled { path } => validate_compiled(path),
+    }
+}
+
+fn validate_hunspell(
+    strict: bool,
+    aff_path: &Path,
+    dic_path: &Path,
+) -> Result<RunOutcome, CliError> {
+    let aff_text = fs::read_to_string(aff_path).map_err(|source| CliError::ReadInput {
+        path: aff_path.to_path_buf(),
         source,
     })?;
-    let dic_text = fs::read_to_string(&command.dic_path).map_err(|source| CliError::ReadInput {
-        path: command.dic_path.clone(),
+    let dic_text = fs::read_to_string(dic_path).map_err(|source| CliError::ReadInput {
+        path: dic_path.to_path_buf(),
         source,
     })?;
-    let mode = if command.strict {
+    let mode = if strict {
         ImportMode::Strict
     } else {
         ImportMode::Lenient
     };
-    let aff_source = command.aff_path.display().to_string();
-    let dic_source = command.dic_path.display().to_string();
+    let aff_source = aff_path.display().to_string();
+    let dic_source = dic_path.display().to_string();
 
     match import_hunspell(&aff_source, &aff_text, &dic_source, &dic_text, mode) {
         Ok(result) => {
@@ -170,7 +211,7 @@ fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
             if has_errors {
                 Ok(RunOutcome::Misspelled)
             } else {
-                println!("valid: {}", command.dic_path.display());
+                println!("valid: {}", dic_path.display());
                 Ok(RunOutcome::Success)
             }
         }
@@ -181,6 +222,25 @@ fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
             Ok(RunOutcome::Misspelled)
         }
     }
+}
+
+fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
+    let bytes = fs::read(path).map_err(|source| CliError::ReadInput {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let dictionary = CompiledDictionary::load(bytes).map_err(|source| CliError::LoadArtifact {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    dictionary
+        .validate()
+        .map_err(|source| CliError::ValidateArtifact {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    println!("valid: {}", path.display());
+    Ok(RunOutcome::Success)
 }
 
 fn print_import_diagnostic(diagnostic: &ImportDiagnostic) {
@@ -238,6 +298,7 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some("--help" | "-h") => Ok(Command::Help),
         Some("check") => parse_check_arguments(arguments),
         Some("analyze") => parse_analyze_arguments(arguments),
+        Some("compile") => parse_compile_arguments(arguments),
         Some("validate") => parse_validate_arguments(arguments),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
@@ -248,11 +309,21 @@ fn parse_validate_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
     let mut strict = false;
+    let mut compiled_path = None;
     let mut paths = Vec::new();
+    let mut arguments = arguments.into_iter();
 
-    for argument in arguments {
+    while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--strict" => strict = true,
+            "--compiled" => {
+                let path = required_path(&mut arguments, "--compiled")?;
+                if compiled_path.replace(path).is_some() {
+                    return Err(CliError::Usage(
+                        "`--compiled` may only be supplied once".to_owned(),
+                    ));
+                }
+            }
             "--help" | "-h" => return Ok(Command::Help),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
@@ -260,16 +331,72 @@ fn parse_validate_arguments(
             _ => paths.push(PathBuf::from(argument)),
         }
     }
+    if let Some(path) = compiled_path {
+        if strict || !paths.is_empty() {
+            return Err(CliError::Usage(
+                "`validate --compiled` accepts only one compiled artifact path".to_owned(),
+            ));
+        }
+        return Ok(Command::Validate(ValidateCommand::Compiled { path }));
+    }
     if paths.len() != 2 {
         return Err(CliError::Usage(
             "validate requires exactly an AFF path and a DIC path".to_owned(),
         ));
     }
 
-    Ok(Command::Validate(ValidateCommand {
+    Ok(Command::Validate(ValidateCommand::Hunspell {
         strict,
         aff_path: paths.remove(0),
         dic_path: paths.remove(0),
+    }))
+}
+
+fn parse_compile_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut dictionary_path = None;
+    let mut output_path = None;
+    let mut arguments = arguments.into_iter();
+
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--dictionary" => {
+                let path = required_path(&mut arguments, "--dictionary")?;
+                if dictionary_path.replace(path).is_some() {
+                    return Err(CliError::Usage(
+                        "`compile` accepts exactly one `--dictionary` path".to_owned(),
+                    ));
+                }
+            }
+            "-o" => {
+                let path = required_path(&mut arguments, "-o")?;
+                if output_path.replace(path).is_some() {
+                    return Err(CliError::Usage(
+                        "`compile` accepts exactly one `-o` path".to_owned(),
+                    ));
+                }
+            }
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
+            }
+            _ => {
+                return Err(CliError::Usage(
+                    "compile does not accept positional arguments".to_owned(),
+                ));
+            }
+        }
+    }
+
+    let dictionary_path = dictionary_path
+        .ok_or_else(|| CliError::Usage("compile requires a `--dictionary` path".to_owned()))?;
+    let output_path = output_path
+        .ok_or_else(|| CliError::Usage("compile requires an `-o` artifact path".to_owned()))?;
+
+    Ok(Command::Compile(CompileCommand {
+        dictionary_path,
+        output_path,
     }))
 }
 
@@ -395,6 +522,7 @@ fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<()
 enum Command {
     Check(CheckCommand),
     Analyze(AnalyzeCommand),
+    Compile(CompileCommand),
     Validate(ValidateCommand),
     Help,
 }
@@ -419,17 +547,47 @@ struct AnalyzeCommand {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct ValidateCommand {
-    strict: bool,
-    aff_path: PathBuf,
-    dic_path: PathBuf,
+struct CompileCommand {
+    dictionary_path: PathBuf,
+    output_path: PathBuf,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ValidateCommand {
+    Hunspell {
+        strict: bool,
+        aff_path: PathBuf,
+        dic_path: PathBuf,
+    },
+    Compiled {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug)]
 enum CliError {
     Usage(String),
-    ReadDictionary { path: PathBuf, source: io::Error },
-    ReadInput { path: PathBuf, source: io::Error },
+    ReadDictionary {
+        path: PathBuf,
+        source: io::Error,
+    },
+    ReadInput {
+        path: PathBuf,
+        source: io::Error,
+    },
+    WriteArtifact {
+        path: PathBuf,
+        source: io::Error,
+    },
+    CompileDictionary(CompileError),
+    LoadArtifact {
+        path: PathBuf,
+        source: LoadError,
+    },
+    ValidateArtifact {
+        path: PathBuf,
+        source: ValidationError,
+    },
 }
 
 impl fmt::Display for CliError {
@@ -450,6 +608,30 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::WriteArtifact { path, source } => {
+                write!(
+                    formatter,
+                    "could not write artifact `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::CompileDictionary(source) => {
+                write!(formatter, "could not compile dictionary: {source}")
+            }
+            Self::LoadArtifact { path, source } => {
+                write!(
+                    formatter,
+                    "invalid compiled artifact `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::ValidateArtifact { path, source } => {
+                write!(
+                    formatter,
+                    "invalid compiled artifact `{}`: {source}",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -458,7 +640,12 @@ impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Usage(_) => None,
-            Self::ReadDictionary { source, .. } | Self::ReadInput { source, .. } => Some(source),
+            Self::ReadDictionary { source, .. }
+            | Self::ReadInput { source, .. }
+            | Self::WriteArtifact { source, .. } => Some(source),
+            Self::CompileDictionary(source) => Some(source),
+            Self::LoadArtifact { source, .. } => Some(source),
+            Self::ValidateArtifact { source, .. } => Some(source),
         }
     }
 }
@@ -469,9 +656,12 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use ferrolex_compiler::{CompiledDictionary, ValidationError};
+    use ferrolex_core::Dictionary;
+
     use super::{
         line_and_column, parse_arguments, run, AnalyzeCommand, CheckCommand, CheckTarget, CliError,
-        Command, RunOutcome, ValidateCommand,
+        Command, CompileCommand, RunOutcome, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -552,10 +742,151 @@ mod tests {
 
         assert_eq!(
             command,
-            Command::Validate(ValidateCommand {
+            Command::Validate(ValidateCommand::Hunspell {
                 strict: true,
                 aff_path: PathBuf::from("de.aff"),
                 dic_path: PathBuf::from("de.dic"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_plain_word_list_compilation() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "compile",
+                "--dictionary",
+                "words.txt",
+                "-o",
+                "words.flex",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Compile(CompileCommand {
+                dictionary_path: PathBuf::from("words.txt"),
+                output_path: PathBuf::from("words.flex"),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_compile_without_an_output_path() {
+        let error = parse_arguments(
+            ["ferrolex", "compile", "--dictionary", "words.txt"].map(str::to_owned),
+        )
+        .expect_err("an output artifact is required");
+
+        assert!(matches!(error, CliError::Usage(message) if message.contains("-o")));
+    }
+
+    #[test]
+    fn compiles_plain_word_list_semantics_into_an_artifact() {
+        let dictionary = temporary_dictionary("# ignored\n Straße \n\n東京\n");
+        let output = temporary_file("");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            output.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("dictionary and output are usable"),
+            RunOutcome::Success
+        );
+        let compiled = CompiledDictionary::load(
+            fs::read(&output.path).expect("the compiler wrote the artifact"),
+        )
+        .expect("the compiler wrote a valid fast-load header");
+        assert!(compiled.contains("Straße"));
+        assert!(compiled.contains("東京"));
+        compiled.validate().expect("the artifact is fully valid");
+    }
+
+    #[test]
+    fn validates_a_compiled_artifact_with_the_paranoid_check() {
+        let source = temporary_dictionary("Straße\n");
+        let artifact = temporary_file("");
+        let compile_arguments = [
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            source.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            artifact.path.to_string_lossy().into_owned(),
+        ];
+        run(compile_arguments).expect("compiler inputs are usable");
+        let validate_arguments = [
+            "ferrolex".to_owned(),
+            "validate".to_owned(),
+            "--compiled".to_owned(),
+            artifact.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(validate_arguments).expect("artifact is readable"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn compiled_validation_runs_the_full_structural_check_after_fast_loading() {
+        let source = temporary_dictionary("word\n");
+        let artifact = temporary_file("");
+        let compile_arguments = [
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            source.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            artifact.path.to_string_lossy().into_owned(),
+        ];
+        run(compile_arguments).expect("compiler inputs are usable");
+
+        let mut bytes = fs::read(&artifact.path).expect("the artifact exists");
+        let data_offset = u64::from_le_bytes(
+            bytes[40..48]
+                .try_into()
+                .expect("compiled header has a data offset"),
+        );
+        let data_offset = usize::try_from(data_offset).expect("test platform supports offsets");
+        bytes[data_offset] = 0xff;
+        refresh_compiled_checksum(&mut bytes);
+        fs::write(&artifact.path, bytes).expect("the artifact is writable");
+        let validate_arguments = [
+            "ferrolex".to_owned(),
+            "validate".to_owned(),
+            "--compiled".to_owned(),
+            artifact.path.to_string_lossy().into_owned(),
+        ];
+
+        assert!(matches!(
+            run(validate_arguments),
+            Err(CliError::ValidateArtifact {
+                source: ValidationError::InvalidUtf8 { entry: 0 },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_compiled_artifact_validation_without_changing_hunspell_syntax() {
+        let command = parse_arguments(
+            ["ferrolex", "validate", "--compiled", "words.flex"].map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Validate(ValidateCommand::Compiled {
+                path: PathBuf::from("words.flex"),
             })
         );
     }
@@ -665,5 +996,25 @@ mod tests {
         ));
         fs::write(&path, contents).expect("the temporary directory is writable");
         TemporaryDictionary { path }
+    }
+
+    fn refresh_compiled_checksum(bytes: &mut [u8]) {
+        const CHECKSUM_OFFSET: usize = 16;
+        const CHECKSUM_END: usize = 24;
+        const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+        let checksum = bytes
+            .iter()
+            .enumerate()
+            .fold(OFFSET_BASIS, |hash, (index, byte)| {
+                let byte = if (CHECKSUM_OFFSET..CHECKSUM_END).contains(&index) {
+                    0
+                } else {
+                    *byte
+                };
+                (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+            });
+        bytes[CHECKSUM_OFFSET..CHECKSUM_END].copy_from_slice(&checksum.to_le_bytes());
     }
 }

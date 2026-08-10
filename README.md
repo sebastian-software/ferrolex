@@ -23,6 +23,8 @@ ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
 ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
+ferrolex compile --dictionary words.txt -o words.flex
+ferrolex validate --compiled words.flex
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -40,6 +42,12 @@ syntax. See [source-code analysis](docs/source-code-analysis.md).
 compatibility subset and reports structured diagnostics. It never invokes an
 external spell-checking engine; see the [import contract](docs/hunspell-format.md)
 and [affix semantics](docs/affix-semantics.md).
+
+`compile` turns the same plain-word-list syntax used by `check` into a
+deterministic native artifact. `validate --compiled` first performs the fast
+header/checksum load and then fully validates every offset, UTF-8 payload, and
+sort-order invariant. The [binary format](docs/binary-format.md) documents the
+artifact layout and compatibility policy.
 
 ## Benchmarks
 

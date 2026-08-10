@@ -177,6 +177,7 @@ name = "ferrolex-cli"
 version = "0.1.0"
 dependencies = [
  "ferrolex-code",
+ "ferrolex-compiler",
  "ferrolex-core",
  "ferrolex-hunspell",
  "ferrolex-text",
