@@ -236,6 +236,8 @@ Language dictionaries should be distributed separately so that:
 - individual dictionary licenses remain explicit
 - applications can select dictionaries appropriate to their licensing requirements
 
+Dictionary distribution happens through a companion repository (`ferrolex-dictionaries`) that fetches upstream dictionaries, tracks their licenses, compiles them deterministically in CI, and publishes versioned compiled artifacts via releases (ADR-0007). A fetch command in the CLI may build on this later.
+
 ---
 
 ## 4.4 Natural-language grammar checking
@@ -365,13 +367,13 @@ A possible workspace structure is:
 ```text
 crates/
 
-  spell-core/
-  spell-morphology/
-  spell-hunspell/
-  spell-compiler/
-  spell-suggest/
-  spell-code/
-  spell-cli/
+  ferrolex-core/
+  ferrolex-morphology/
+  ferrolex-hunspell/
+  ferrolex-compiler/
+  ferrolex-suggest/
+  ferrolex-code/
+  ferrolex-cli/
 ```
 
 Exact crate names may change, but separation of concerns should remain.
@@ -479,6 +481,8 @@ Dictionary
 
 The exact representation should be designed around efficient compilation and lookup rather than around preserving the textual `.aff` representation.
 
+The IR is internal and unstable until 1.0. Its expressiveness shall be validated early with a spike against the hardest constructs from real dictionaries (`hu_HU`, `ar`) before the design freezes (see Phase 2).
+
 ---
 
 # 10. Hunspell Importer
@@ -563,7 +567,7 @@ A major architectural goal shall be the ability to compile source dictionaries i
 For example:
 
 ```bash
-spell compile de_DE.aff de_DE.dic -o de_DE.spell
+ferrolex compile de_DE.aff de_DE.dic -o de_DE.spell
 ```
 
 The resulting format should:
@@ -618,7 +622,9 @@ ready
 
 The compiled format should therefore avoid unnecessary pointer-heavy structures and favor representations suitable for serialization and memory mapping.
 
-Memory mapping interacts with the security requirements (§39): a mapped file can be modified by other processes while in use, and its bytes must be treated as untrusted at all times. The design must choose explicitly between full validation at load time and a representation that tolerates arbitrary bytes without undefined behavior — corrupted input may at worst produce wrong results, never memory unsafety. Endianness and alignment of the compiled format must be specified as part of the format definition.
+Memory mapping interacts with the security requirements (§39): a mapped file can be modified by other processes while in use, and its bytes must be treated as untrusted at all times. The format is therefore designed to tolerate arbitrary bytes without undefined behavior (ADR-0006): every access is bounds-checked, and corrupted input may at worst produce wrong results, never memory unsafety. Loading performs only a fast header and checksum check; full structural validation is available as an opt-in (`ferrolex validate`, CI, paranoid mode).
+
+The compiled format is little-endian, uses 8-byte-aligned sections addressed by offsets rather than pointers, and is byte-identical across platforms for the same input, compiler version, and options.
 
 ---
 
@@ -993,11 +999,11 @@ The analyzer should support ignoring:
 The analyzer shall additionally support inline comment directives in checked files, for example:
 
 ```text
-spell:ignore <words>
-spell:disable / spell:enable
+ferrolex:ignore <words>
+ferrolex:disable / ferrolex:enable
 ```
 
-Compatibility with the widely used cspell directive family should be considered, as it lowers migration cost for existing projects.
+The directive format is ferrolex's own. Compatibility with other checkers' directive families or configuration formats (e.g., cspell) is explicitly not promised (ADR-0008).
 
 Users should also be able to add words to:
 
@@ -1129,30 +1135,30 @@ A CLI shall be provided for development, validation, and general use.
 Potential commands:
 
 ```text
-spell check
-spell suggest
-spell analyze
-spell compile
-spell inspect
-spell benchmark
-spell validate
+ferrolex check
+ferrolex suggest
+ferrolex analyze
+ferrolex compile
+ferrolex inspect
+ferrolex benchmark
+ferrolex validate
 ```
 
 Examples:
 
 ```bash
-spell check README.md
+ferrolex check README.md
 
-spell suggest authentcation
+ferrolex suggest authentcation
 
-spell compile de_DE.aff de_DE.dic -o de_DE.spell
+ferrolex compile de_DE.aff de_DE.dic -o de_DE.spell
 
-spell validate de_DE.aff de_DE.dic
+ferrolex validate de_DE.aff de_DE.dic
 
-spell inspect de_DE.spell
+ferrolex inspect de_DE.spell
 ```
 
-The binary name is an open question (§61): `spell` collides with the classic Unix tool of the same name, and the repository's working title is `ferrolex`. Examples in this document use `spell` as a placeholder.
+The CLI binary and the project share the name `ferrolex` (ADR-0005); this avoids the name collision with the classic Unix `spell` tool.
 
 ---
 
@@ -1400,7 +1406,7 @@ Given:
 - the same compiler version
 - the same relevant options
 
-the compiler should generate identical output.
+the compiler shall generate byte-identical output on every platform.
 
 This facilitates:
 
@@ -1555,7 +1561,7 @@ Potential future importers include:
 Hunspell
 plain word list
 word-frequency list
-CSpell dictionaries (the MIT-licensed cspell-dicts collection of technical vocabularies)
+technical vocabulary word lists (e.g., the MIT-licensed cspell-dicts collection, imported as plain data — see ADR-0008)
 custom binary lexicon
 application-specific dictionary
 ```
@@ -1644,7 +1650,7 @@ Or:
 
 The wording "Hunspell port" should be avoided because it is technically inaccurate and creates unnecessary licensing ambiguity.
 
-The repository's working title is `ferrolex`; the final public name is an open question (§61).
+The project is named `ferrolex` (ADR-0005).
 
 ---
 
@@ -1679,6 +1685,7 @@ Implement:
 - basic suffixes
 - conditions
 - cross-product behavior
+- IR expressiveness spike against the hardest constructs from `hu_HU` and `ar`
 
 Success criterion:
 
@@ -1977,9 +1984,12 @@ The key technical principle is:
 
 # 61. Open Questions
 
-- Final project and binary naming (working title: `ferrolex`; the CLI name `spell` collides with the classic Unix tool).
-- Memory-mapping strategy: full validation at load time versus a representation that tolerates arbitrary bytes without undefined behavior (§13, §39).
-- Expressiveness of the neutral IR against the hardest real dictionaries (`hu_HU`, `ar`) — to be validated during Phases 2–3, not afterwards.
-- Compiled-format details: endianness, alignment, and cross-platform reproducibility of compiler output.
-- Distribution story for dictionaries (packaging, registries, versioning).
-- Scope of cspell ecosystem interoperability (inline directives, `cspell.json` configuration, cspell-dicts import).
+The initial open questions have been resolved and are recorded as decision records:
+
+- Naming → ADR-0005
+- Memory-mapping strategy and compiled-format details → ADR-0006
+- Dictionary distribution → ADR-0007
+- cspell interoperability scope → ADR-0008
+- Neutral-IR expressiveness → validated via the Phase 2 spike (§9, §54)
+
+New open questions are collected here as they arise.
