@@ -3,6 +3,7 @@ members = [
     "crates/ferrolex-core",
     "crates/ferrolex-text",
     "crates/ferrolex-code",
+    "crates/ferrolex-hunspell",
     "crates/ferrolex-cli",
 ]
 resolver = "2"

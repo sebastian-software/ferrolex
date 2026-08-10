@@ -1,0 +1,17 @@
+[package]
+name = "ferrolex-hunspell"
+version = "0.1.0"
+description = "Hunspell-compatible dictionary importer for ferrolex"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
+
+[lints]
+workspace = true

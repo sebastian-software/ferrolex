@@ -178,6 +178,7 @@ version = "0.1.0"
 dependencies = [
  "ferrolex-code",
  "ferrolex-core",
+ "ferrolex-hunspell",
  "ferrolex-text",
 ]
 
@@ -195,6 +196,13 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "unicode-normalization",
+]
+
+[[package]]
+name = "ferrolex-hunspell"
+version = "0.1.0"
+dependencies = [
+ "ferrolex-core",
 ]
 
 [[package]]
