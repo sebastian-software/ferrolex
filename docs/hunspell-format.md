@@ -31,8 +31,10 @@ directive is a warning.
 The public importer treats files as untrusted input. Its initial fixed limits
 are 32 MiB for `.aff`, 64 MiB for `.dic`, 16 KiB per line, 100,000 parsed
 affix rules, 1,000,000 parsed dictionary entries, 256 flags per entry, and 256
-condition atoms. Exceeding a limit reports an error and discards the affected
-input or entry; later configuration can make these limits explicit per caller.
+condition atoms. The byte-oriented entry points reject an oversized source
+before scanning its `SET` declaration or decoding it. Exceeding any limit
+reports an error and discards the affected input or entry; later configuration
+can make these limits explicit per caller.
 
 ## Dictionary entries
 

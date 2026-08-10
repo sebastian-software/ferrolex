@@ -552,6 +552,15 @@ pub fn import_bytes(
     mode: ImportMode,
 ) -> Result<ImportResult, ImportError> {
     let mut diagnostics = Vec::new();
+    if !enforce_byte_input_limits(
+        aff_source,
+        aff_bytes,
+        dic_source,
+        dic_bytes,
+        &mut diagnostics,
+    ) {
+        return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
+    }
     let Some(encoding) = declared_encoding(aff_source, aff_bytes, &mut diagnostics) else {
         return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
     };
@@ -587,6 +596,15 @@ pub fn import_bytes_with_encodings(
     mode: ImportMode,
 ) -> Result<ImportResult, ImportError> {
     let mut diagnostics = Vec::new();
+    if !enforce_byte_input_limits(
+        aff_source,
+        aff_bytes,
+        dic_source,
+        dic_bytes,
+        &mut diagnostics,
+    ) {
+        return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
+    }
     let Some(declared) = declared_encoding(aff_source, aff_bytes, &mut diagnostics) else {
         return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
     };
@@ -1447,6 +1465,42 @@ fn enforce_input_limit(
     false
 }
 
+fn enforce_byte_input_limits(
+    aff_source: &str,
+    aff_bytes: &[u8],
+    dic_source: &str,
+    dic_bytes: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let aff_in_limit =
+        enforce_byte_input_limit(aff_source, aff_bytes.len(), MAX_AFF_BYTES, diagnostics);
+    let dic_in_limit =
+        enforce_byte_input_limit(dic_source, dic_bytes.len(), MAX_DIC_BYTES, diagnostics);
+    aff_in_limit && dic_in_limit
+}
+
+fn enforce_byte_input_limit(
+    source: &str,
+    byte_length: usize,
+    limit: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    if byte_length <= limit {
+        return true;
+    }
+    diagnostics.push(diagnostic(
+        source,
+        1,
+        "input",
+        Severity::Error,
+        &format!(
+            "input exceeds the configured {} MiB importer limit",
+            limit / (1024 * 1024)
+        ),
+    ));
+    false
+}
+
 fn is_suggestion_only_directive(directive: &str) -> bool {
     matches!(
         directive,
@@ -1492,7 +1546,7 @@ mod tests {
 
     use super::{
         import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
-        ImportMode, Severity, MAX_COMPOUND_SCALARS,
+        ImportMode, Severity, MAX_AFF_BYTES, MAX_COMPOUND_SCALARS, MAX_DIC_BYTES,
     };
 
     const AFFIXES: &str =
@@ -1673,6 +1727,48 @@ mod tests {
             diagnostic.source() == "utf8.dic"
                 && diagnostic.line() == 3
                 && diagnostic.directive() == "encoding"
+        }));
+    }
+
+    #[test]
+    fn byte_import_rejects_an_oversized_affix_before_scanning_or_decoding_it() {
+        let oversized_affix = vec![0xff; MAX_AFF_BYTES + 1];
+        let error = import_bytes(
+            "too-large.aff",
+            &oversized_affix,
+            "small.dic",
+            b"1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect_err("the raw affix limit is enforced before decoding");
+
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.source() == "too-large.aff"
+                && diagnostic.directive() == "input"
+                && diagnostic.severity() == Severity::Error
+        }));
+        assert!(!error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "encoding"));
+    }
+
+    #[test]
+    fn byte_import_rejects_an_oversized_dictionary_before_decoding_it() {
+        let oversized_dictionary = vec![b'x'; MAX_DIC_BYTES + 1];
+        let error = import_bytes(
+            "small.aff",
+            b"SET UTF-8\n",
+            "too-large.dic",
+            &oversized_dictionary,
+            ImportMode::Strict,
+        )
+        .expect_err("the raw dictionary limit is enforced before decoding");
+
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.source() == "too-large.dic"
+                && diagnostic.directive() == "input"
+                && diagnostic.severity() == Severity::Error
         }));
     }
 
