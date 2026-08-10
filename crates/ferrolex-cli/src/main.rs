@@ -30,7 +30,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{Completeness, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest --dictionary <PLAIN_WORD_LIST> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest --dictionary <PLAIN_WORD_LIST> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -183,7 +183,11 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
 }
 
 fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
-    let checker = load_checker(&command.dictionary_paths, &command.hunspell_affix_paths)?;
+    let checker = load_checker(
+        &command.dictionary_paths,
+        &command.compiled_paths,
+        &command.hunspell_affix_paths,
+    )?;
 
     match &command.target {
         CheckTarget::Word(word) => Ok(check_word(&checker, word)),
@@ -193,6 +197,7 @@ fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
 
 fn load_checker(
     dictionary_paths: &[PathBuf],
+    compiled_paths: &[PathBuf],
     hunspell_affix_paths: &[PathBuf],
 ) -> Result<Checker, CliError> {
     let mut builder = Checker::builder();
@@ -202,6 +207,18 @@ fn load_checker(
             source,
         })?;
         builder = builder.dictionary(WordList::from_text(Normalization::Exact, &text));
+    }
+    for path in compiled_paths {
+        let bytes = fs::read(path).map_err(|source| CliError::ReadInput {
+            path: path.clone(),
+            source,
+        })?;
+        let dictionary =
+            CompiledDictionary::load(bytes).map_err(|source| CliError::LoadArtifact {
+                path: path.clone(),
+                source,
+            })?;
+        builder = builder.dictionary(dictionary);
     }
     for aff_path in hunspell_affix_paths {
         builder = builder.dictionary(load_installed_hunspell_dictionary(aff_path)?);
@@ -266,7 +283,11 @@ fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
 }
 
 fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
-    let checker = load_checker(&command.dictionary_paths, &command.hunspell_affix_paths)?;
+    let checker = load_checker(
+        &command.dictionary_paths,
+        &command.compiled_paths,
+        &command.hunspell_affix_paths,
+    )?;
     let source = fs::read_to_string(&command.path).map_err(|source| CliError::ReadInput {
         path: command.path.clone(),
         source,
@@ -747,6 +768,7 @@ fn parse_analyze_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
     let mut dictionary_paths = Vec::new();
+    let mut compiled_paths = Vec::new();
     let mut hunspell_affix_paths = Vec::new();
     let mut comment_prefix = None;
     let mut path = None;
@@ -761,6 +783,7 @@ fn parse_analyze_arguments(
             "--hunspell" => {
                 hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
+            "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
             "--comment-prefix" => {
                 let prefix = arguments.next().ok_or_else(|| {
                     CliError::Usage("`--comment-prefix` requires a prefix".to_owned())
@@ -789,7 +812,7 @@ fn parse_analyze_arguments(
         }
     }
 
-    if dictionary_paths.is_empty() && hunspell_affix_paths.is_empty() {
+    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
         return Err(CliError::Usage(
             "analyze requires at least one `--dictionary` or `--hunspell` path".to_owned(),
         ));
@@ -798,6 +821,7 @@ fn parse_analyze_arguments(
 
     Ok(Command::Analyze(AnalyzeCommand {
         dictionary_paths,
+        compiled_paths,
         hunspell_affix_paths,
         comment_prefix,
         path,
@@ -806,6 +830,7 @@ fn parse_analyze_arguments(
 
 fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Command, CliError> {
     let mut dictionary_paths = Vec::new();
+    let mut compiled_paths = Vec::new();
     let mut hunspell_affix_paths = Vec::new();
     let mut target = None;
     let mut arguments = arguments.into_iter();
@@ -818,6 +843,7 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
             "--hunspell" => {
                 hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
+            "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
             "--file" => {
                 set_target(
                     &mut target,
@@ -834,7 +860,7 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
 
     let target =
         target.ok_or_else(|| CliError::Usage("check requires a word or `--file`".to_owned()))?;
-    if dictionary_paths.is_empty() && hunspell_affix_paths.is_empty() {
+    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
         return Err(CliError::Usage(
             "check requires at least one `--dictionary` or `--hunspell` path".to_owned(),
         ));
@@ -842,6 +868,7 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
 
     Ok(Command::Check(CheckCommand {
         dictionary_paths,
+        compiled_paths,
         hunspell_affix_paths,
         target,
     }))
@@ -899,6 +926,7 @@ enum Command {
 #[derive(Debug, Eq, PartialEq)]
 struct CheckCommand {
     dictionary_paths: Vec<PathBuf>,
+    compiled_paths: Vec<PathBuf>,
     hunspell_affix_paths: Vec<PathBuf>,
     target: CheckTarget,
 }
@@ -918,6 +946,7 @@ enum CheckTarget {
 #[derive(Debug, Eq, PartialEq)]
 struct AnalyzeCommand {
     dictionary_paths: Vec<PathBuf>,
+    compiled_paths: Vec<PathBuf>,
     hunspell_affix_paths: Vec<PathBuf>,
     comment_prefix: Option<String>,
     path: PathBuf,
@@ -1128,6 +1157,7 @@ mod tests {
             command,
             Command::Check(CheckCommand {
                 dictionary_paths: vec![PathBuf::from("en.txt"), PathBuf::from("technical.txt")],
+                compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
                 target: CheckTarget::Word("OAuth".to_owned()),
             })
@@ -1170,6 +1200,7 @@ mod tests {
             command,
             Command::Analyze(AnalyzeCommand {
                 dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
                 comment_prefix: Some("//".to_owned()),
                 path: PathBuf::from("lib.rs"),
@@ -1201,6 +1232,7 @@ mod tests {
             check,
             Command::Check(CheckCommand {
                 dictionary_paths: Vec::new(),
+                compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff"), PathBuf::from("en.aff")],
                 target: CheckTarget::Word("Wort".to_owned()),
             })
@@ -1209,6 +1241,7 @@ mod tests {
             analyze,
             Command::Analyze(AnalyzeCommand {
                 dictionary_paths: Vec::new(),
+                compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
                 comment_prefix: None,
                 path: PathBuf::from("src/lib.rs"),
@@ -1276,6 +1309,24 @@ mod tests {
             Command::Suggest(SuggestCommand {
                 dictionary_path: PathBuf::from("words.txt"),
                 word: "recieve".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_compiled_dictionary_check_input() {
+        let command = parse_arguments(
+            ["ferrolex", "check", "--compiled", "words.flex", "Straße"].map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Check(CheckCommand {
+                dictionary_paths: Vec::new(),
+                compiled_paths: vec![PathBuf::from("words.flex")],
+                hunspell_affix_paths: Vec::new(),
+                target: CheckTarget::Word("Straße".to_owned()),
             })
         );
     }
@@ -1390,6 +1441,33 @@ mod tests {
         assert!(compiled.contains("Straße"));
         assert!(compiled.contains("東京"));
         compiled.validate().expect("the artifact is fully valid");
+    }
+
+    #[test]
+    fn checks_a_compiled_dictionary_artifact() {
+        let source = temporary_dictionary("Straße\n");
+        let artifact = temporary_file("");
+        run([
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            source.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            artifact.path.to_string_lossy().into_owned(),
+        ])
+        .expect("the artifact compiles");
+
+        assert_eq!(
+            run([
+                "ferrolex".to_owned(),
+                "check".to_owned(),
+                "--compiled".to_owned(),
+                artifact.path.to_string_lossy().into_owned(),
+                "Straße".to_owned(),
+            ])
+            .expect("the artifact is readable"),
+            RunOutcome::Success
+        );
     }
 
     #[test]

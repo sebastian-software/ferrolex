@@ -29,6 +29,7 @@ ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
 ferrolex validate --compiled words.flex
+ferrolex check --compiled words.flex Straße
 ferrolex dictionary list
 ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
@@ -76,10 +77,12 @@ acquisition from strict import and recognition evidence. Successful strict
 installs also create a [versioned Hunspell runtime cache](docs/hunspell-runtime-cache.md).
 
 `compile` turns the same plain-word-list syntax used by `check` into a
-deterministic native artifact. `validate --compiled` first performs the fast
-header/checksum load and then fully validates every offset, UTF-8 payload, and
-sort-order invariant. The [binary format](docs/binary-format.md) documents the
-artifact layout and compatibility policy.
+deterministic native artifact. `check --compiled` uses its allocation-free
+exact lookup directly and can be layered with plain or installed Hunspell
+dictionaries. `validate --compiled` first performs the fast header/checksum
+load and then fully validates every offset, UTF-8 payload, and sort-order
+invariant. The [binary format](docs/binary-format.md) documents the artifact
+layout and compatibility policy.
 
 ## Benchmarks
 
