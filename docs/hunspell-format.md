@@ -1,0 +1,54 @@
+# Hunspell import contract
+
+This document describes the ferrolex import boundary for UTF-8 Hunspell-style
+`.aff` and `.dic` inputs. It defines behavior, not the behavior of any other
+implementation.
+
+## Input and diagnostics
+
+The importer receives the two source texts independently and records a source
+name and one-based line number for every diagnostic. It never exposes legacy
+encoded bytes to the runtime dictionary: a declared legacy `SET` encoding is
+decoded during import or reported as unsupported.
+
+Parsing supports blank lines and lines beginning with `#`. A directive is a
+whitespace-separated keyword followed by its arguments. Unknown directives are
+reported with their source location and directive name.
+
+Strict mode rejects an input that produces an error diagnostic. Lenient mode
+returns the supported subset and all diagnostics. A construct whose omission
+could silently accept words is an error; a suggestion-only unsupported
+directive is a warning.
+
+## Dictionary entries
+
+The first non-comment `.dic` line may contain an entry count. The count is
+validated when present but does not change recognition semantics. Each remaining
+entry has this shape:
+
+```text
+stem[/flags][ <morphology fields>]
+```
+
+The importer retains the UTF-8 stem and the decoded flag set. Morphology fields
+are diagnostic metadata in the initial implementation. A malformed flag section
+is an error for that entry, not a panic.
+
+## Initial AFF subset
+
+The first compatibility milestone recognizes `SET`, `FLAG`, `PFX`, and `SFX`.
+`PFX`/`SFX` headers declare a flag, whether rules cross-product, and a rule
+count. Each following rule belongs to that header and has:
+
+```text
+PFX flag strip add condition
+SFX flag strip add condition
+```
+
+`0` represents an empty strip, add, or condition as appropriate. An add field
+can name continuation flags after `/`; those flags belong to the generated form
+for later morphology milestones. Conditions are anchored whole-stem tests.
+
+`AF`, aliases, complex prefix modes, capitalization controls, compounds,
+forbidden words, and suggestion directives have their own later feature gates.
+They must be diagnosed rather than silently interpreted as simple affixes.
