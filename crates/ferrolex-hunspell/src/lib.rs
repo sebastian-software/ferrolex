@@ -219,6 +219,11 @@ pub struct HunspellDictionary {
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
+    prefix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
+    suffix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
+    lexeme_indices_by_flag: BTreeMap<Flag, Vec<usize>>,
+    prefix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
+    suffix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
     special_flags: SpecialFlags,
     compound: CompoundConfig,
 }
@@ -229,14 +234,75 @@ impl Dictionary for HunspellDictionary {
             .get(word)
             .is_some_and(|flags| !self.is_forbidden(flags) && !self.requires_affix(flags))
             || self
-                .lexemes
-                .iter()
-                .any(|lexeme| self.matches_derived_word(lexeme, word))
+                .derived_candidate_indices(word)
+                .into_iter()
+                .any(|index| self.matches_derived_word(&self.lexemes[index], word))
             || self.matches_simple_compound(word)
     }
 }
 
 impl HunspellDictionary {
+    fn from_parts(
+        stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
+        lexemes: Vec<Lexeme>,
+        prefixes: Vec<AffixRule>,
+        suffixes: Vec<AffixRule>,
+        special_flags: SpecialFlags,
+        compound: CompoundConfig,
+    ) -> Self {
+        let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
+        let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
+        let lexeme_indices_by_flag = lexeme_indices_by_flag(&lexemes);
+        let prefix_parent_flags = parent_flags_by_continuation(&prefixes);
+        let suffix_parent_flags = parent_flags_by_continuation(&suffixes);
+        Self {
+            stems,
+            lexemes,
+            prefixes,
+            suffixes,
+            prefix_rules_by_flag,
+            suffix_rules_by_flag,
+            lexeme_indices_by_flag,
+            prefix_parent_flags,
+            suffix_parent_flags,
+            special_flags,
+            compound,
+        }
+    }
+
+    fn derived_candidate_indices(&self, word: &str) -> BTreeSet<usize> {
+        let mut candidates = BTreeSet::new();
+        self.extend_derived_candidates(
+            word,
+            &self.prefixes,
+            &self.prefix_parent_flags,
+            &mut candidates,
+        );
+        self.extend_derived_candidates(
+            word,
+            &self.suffixes,
+            &self.suffix_parent_flags,
+            &mut candidates,
+        );
+        candidates
+    }
+
+    fn extend_derived_candidates(
+        &self,
+        word: &str,
+        rules: &[AffixRule],
+        parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
+        candidates: &mut BTreeSet<usize>,
+    ) {
+        for rule in rules.iter().filter(|rule| rule.could_generate(word)) {
+            for flag in origin_flags_for(&rule.flag, parent_flags) {
+                if let Some(indices) = self.lexeme_indices_by_flag.get(&flag) {
+                    candidates.extend(indices);
+                }
+            }
+        }
+    }
+
     fn matches_derived_word(&self, lexeme: &Lexeme, word: &str) -> bool {
         if self.is_forbidden(&lexeme.flags) {
             return false;
@@ -251,20 +317,56 @@ impl HunspellDictionary {
             if state.depth == MAX_AFFIX_CHAIN {
                 continue;
             }
-            for rule in self.prefixes.iter().chain(&self.suffixes) {
+            if !self.expand_matching_rules(
+                &state,
+                AffixKind::Prefix,
+                &self.prefixes,
+                &self.prefix_rules_by_flag,
+                &mut states,
+                &mut derivations,
+            ) || !self.expand_matching_rules(
+                &state,
+                AffixKind::Suffix,
+                &self.suffixes,
+                &self.suffix_rules_by_flag,
+                &mut states,
+                &mut derivations,
+            ) {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn expand_matching_rules(
+        &self,
+        state: &FormState,
+        kind: AffixKind,
+        rules: &[AffixRule],
+        rule_indices_by_flag: &BTreeMap<Flag, Vec<usize>>,
+        states: &mut Vec<FormState>,
+        derivations: &mut usize,
+    ) -> bool {
+        let flags = state.flags_for(kind);
+        for flag in flags {
+            let Some(rule_indices) = rule_indices_by_flag.get(flag) else {
+                continue;
+            };
+            for index in rule_indices {
+                let rule = &rules[*index];
                 if !state.can_apply(rule) {
                     continue;
                 }
                 if let Some(form) = rule.apply(&state.form) {
-                    if derivations == MAX_DERIVATIONS_PER_LEXEME {
+                    if *derivations == MAX_DERIVATIONS_PER_LEXEME {
                         return false;
                     }
-                    derivations += 1;
+                    *derivations += 1;
                     states.push(state.apply(rule, form, &self.special_flags));
                 }
             }
         }
-        false
+        true
     }
 
     fn is_accepted_state(&self, state: &FormState) -> bool {
@@ -319,6 +421,55 @@ impl HunspellDictionary {
     }
 }
 
+fn rule_indices_by_flag(rules: &[AffixRule]) -> BTreeMap<Flag, Vec<usize>> {
+    let mut indices = BTreeMap::<Flag, Vec<usize>>::new();
+    for (index, rule) in rules.iter().enumerate() {
+        indices.entry(rule.flag.clone()).or_default().push(index);
+    }
+    indices
+}
+
+fn lexeme_indices_by_flag(lexemes: &[Lexeme]) -> BTreeMap<Flag, Vec<usize>> {
+    let mut indices = BTreeMap::<Flag, Vec<usize>>::new();
+    for (index, lexeme) in lexemes.iter().enumerate() {
+        for flag in &lexeme.flags {
+            indices.entry(flag.clone()).or_default().push(index);
+        }
+    }
+    indices
+}
+
+fn parent_flags_by_continuation(rules: &[AffixRule]) -> BTreeMap<Flag, BTreeSet<Flag>> {
+    let mut parents = BTreeMap::<Flag, BTreeSet<Flag>>::new();
+    for rule in rules {
+        for continuation in &rule.continuation_flags {
+            parents
+                .entry(continuation.clone())
+                .or_default()
+                .insert(rule.flag.clone());
+        }
+    }
+    parents
+}
+
+fn origin_flags_for(
+    terminal_flag: &Flag,
+    parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
+) -> BTreeSet<Flag> {
+    let mut origins = BTreeSet::from([terminal_flag.clone()]);
+    let mut pending = vec![terminal_flag.clone()];
+    while let Some(flag) = pending.pop() {
+        if let Some(parents) = parent_flags.get(&flag) {
+            for parent in parents {
+                if origins.insert(parent.clone()) {
+                    pending.push(parent.clone());
+                }
+            }
+        }
+    }
+    origins
+}
+
 #[derive(Clone, Debug)]
 struct Lexeme {
     stem: Box<str>,
@@ -347,6 +498,13 @@ struct AffixRule {
 }
 
 impl AffixRule {
+    fn could_generate(&self, word: &str) -> bool {
+        match self.kind {
+            AffixKind::Prefix => word.starts_with(self.add.as_ref()),
+            AffixKind::Suffix => word.ends_with(self.add.as_ref()),
+        }
+    }
+
     fn apply(&self, stem: &str) -> Option<String> {
         if !self.condition.matches(stem, self.kind) {
             return None;
@@ -408,6 +566,13 @@ impl FormState {
                         && self.origin_flags.contains(&rule.flag)
                 }
             }
+    }
+
+    fn flags_for(&self, kind: AffixKind) -> &BTreeSet<Flag> {
+        match self.last_kind {
+            Some(previous_kind) if previous_kind != kind => &self.origin_flags,
+            Some(_) | None => &self.flags,
+        }
     }
 
     fn apply(&self, rule: &AffixRule, form: String, special_flags: &SpecialFlags) -> Self {
@@ -689,14 +854,14 @@ fn import_decoded(
         .iter()
         .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
         .collect();
-    let dictionary = HunspellDictionary {
+    let dictionary = HunspellDictionary::from_parts(
         stems,
         lexemes,
-        prefixes: parsed_aff.prefixes,
-        suffixes: parsed_aff.suffixes,
-        special_flags: parsed_aff.special_flags,
-        compound: parsed_aff.compound,
-    };
+        parsed_aff.prefixes,
+        parsed_aff.suffixes,
+        parsed_aff.special_flags,
+        parsed_aff.compound,
+    );
 
     if mode == ImportMode::Strict
         && diagnostics

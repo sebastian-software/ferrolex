@@ -251,14 +251,8 @@ pub fn load_runtime_cache(
         .iter()
         .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
         .collect();
-    let dictionary = HunspellDictionary {
-        stems,
-        lexemes,
-        prefixes,
-        suffixes,
-        special_flags,
-        compound,
-    };
+    let dictionary =
+        HunspellDictionary::from_parts(stems, lexemes, prefixes, suffixes, special_flags, compound);
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)
 }
