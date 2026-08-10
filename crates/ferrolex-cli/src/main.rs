@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ferrolex_code::{Analyzer, CommentSyntax, Document};
 use ferrolex_compiler::{
     compile_words, CompileError, CompiledDictionary, LoadError, ValidationError,
+    MAX_COMPILED_ARTIFACT_BYTES,
 };
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
 use ferrolex_dictionaries::{
@@ -209,10 +210,7 @@ fn load_checker(
         builder = builder.dictionary(WordList::from_text(Normalization::Exact, &text));
     }
     for path in compiled_paths {
-        let bytes = fs::read(path).map_err(|source| CliError::ReadInput {
-            path: path.clone(),
-            source,
-        })?;
+        let bytes = read_compiled_artifact(path)?;
         let dictionary =
             CompiledDictionary::load(bytes).map_err(|source| CliError::LoadArtifact {
                 path: path.clone(),
@@ -487,10 +485,7 @@ fn atomic_write_runtime_cache(path: &Path, bytes: &[u8]) -> Result<(), CliError>
 }
 
 fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
-    let bytes = fs::read(path).map_err(|source| CliError::ReadInput {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let bytes = read_compiled_artifact(path)?;
     let dictionary = CompiledDictionary::load(bytes).map_err(|source| CliError::LoadArtifact {
         path: path.to_path_buf(),
         source,
@@ -503,6 +498,25 @@ fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
         })?;
     println!("valid: {}", path.display());
     Ok(RunOutcome::Success)
+}
+
+fn read_compiled_artifact(path: &Path) -> Result<Vec<u8>, CliError> {
+    let size = fs::metadata(path)
+        .map_err(|source| CliError::ReadInput {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .len();
+    if size > u64::try_from(MAX_COMPILED_ARTIFACT_BYTES).expect("usize fits u64") {
+        return Err(CliError::ArtifactTooLarge {
+            path: path.to_path_buf(),
+            actual: size,
+        });
+    }
+    fs::read(path).map_err(|source| CliError::ReadInput {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn print_import_diagnostic(diagnostic: &ImportDiagnostic) {
@@ -988,6 +1002,10 @@ enum CliError {
         path: PathBuf,
         source: io::Error,
     },
+    ArtifactTooLarge {
+        path: PathBuf,
+        actual: u64,
+    },
     ReadHunspellCache {
         path: PathBuf,
         source: io::Error,
@@ -1036,6 +1054,12 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::ArtifactTooLarge { path, actual } => write!(
+                formatter,
+                "compiled artifact `{}` is {actual} bytes and exceeds the {} MiB runtime limit",
+                path.display(),
+                MAX_COMPILED_ARTIFACT_BYTES / (1024 * 1024)
+            ),
             Self::ReadHunspellCache { path, source } => {
                 write!(
                     formatter,
@@ -1100,7 +1124,7 @@ impl fmt::Display for CliError {
 impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Usage(_) => None,
+            Self::Usage(_) | Self::ArtifactTooLarge { .. } => None,
             Self::ReadDictionary { source, .. }
             | Self::ReadInput { source, .. }
             | Self::ReadHunspellCache { source, .. }
@@ -1124,15 +1148,15 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ferrolex_compiler::{CompiledDictionary, ValidationError};
+    use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
     use ferrolex_core::Dictionary;
     use ferrolex_hunspell::{load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests};
 
     use super::{
         catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
-        run, runtime_cache_path, validate_hunspell, AnalyzeCommand, CheckCommand, CheckTarget,
-        CliError, Command, CompileCommand, DictionaryCommand, RunOutcome, SourceEncoding,
-        SuggestCommand, ValidateCommand,
+        read_compiled_artifact, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
+        CheckCommand, CheckTarget, CliError, Command, CompileCommand, DictionaryCommand,
+        RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -1468,6 +1492,22 @@ mod tests {
             .expect("the artifact is readable"),
             RunOutcome::Success
         );
+    }
+
+    #[test]
+    fn rejects_an_oversized_compiled_artifact_before_reading_it() {
+        let artifact = temporary_file("");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&artifact.path)
+            .expect("temporary artifact is writable")
+            .set_len(u64::try_from(MAX_COMPILED_ARTIFACT_BYTES + 1).expect("limit fits u64"))
+            .expect("sparse length is supported");
+
+        assert!(matches!(
+            read_compiled_artifact(&artifact.path),
+            Err(CliError::ArtifactTooLarge { .. })
+        ));
     }
 
     #[test]

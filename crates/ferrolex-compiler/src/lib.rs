@@ -29,6 +29,12 @@ const DATA_OFFSET: usize = 40;
 const DATA_LEN_OFFSET: usize = 48;
 const FILE_LEN_OFFSET: usize = 56;
 
+/// Largest compiled artifact accepted by the version-1 runtime.
+///
+/// Command-line callers should check a file's metadata before reading it; the
+/// in-memory loader repeats the limit for embedded callers.
+pub const MAX_COMPILED_ARTIFACT_BYTES: usize = 128 * 1024 * 1024;
+
 /// Reports a failure while compiling a textual word collection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -57,6 +63,11 @@ impl std::error::Error for CompileError {}
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum LoadError {
+    /// The supplied artifact exceeds the runtime's fixed allocation limit.
+    ArtifactTooLarge {
+        /// Actual backing byte length.
+        actual: usize,
+    },
     /// The input does not contain the fixed header.
     TruncatedHeader {
         /// Actual byte length of the input.
@@ -103,6 +114,11 @@ pub enum LoadError {
 impl fmt::Display for LoadError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ArtifactTooLarge { actual } => write!(
+                formatter,
+                "compiled dictionary is {actual} bytes and exceeds the {} MiB runtime limit",
+                MAX_COMPILED_ARTIFACT_BYTES / (1024 * 1024)
+            ),
             Self::TruncatedHeader { actual } => {
                 write!(
                     formatter,
@@ -354,6 +370,11 @@ impl CompiledDictionary {
     /// Returns a [`LoadError`] when the header, cheap layout checks, or checksum
     /// cannot be trusted.
     pub fn load(bytes: Vec<u8>) -> Result<Self, LoadError> {
+        if bytes.len() > MAX_COMPILED_ARTIFACT_BYTES {
+            return Err(LoadError::ArtifactTooLarge {
+                actual: bytes.len(),
+            });
+        }
         validate_header(&bytes)?;
 
         let word_count = read_u64(&bytes, WORD_COUNT_OFFSET).ok_or(LoadError::TruncatedHeader {

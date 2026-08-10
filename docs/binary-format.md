@@ -54,6 +54,11 @@ checksum checks. It intentionally does not decode every word, preserving the
 fast startup path required for a future mmap backing store. Lookup does a
 bounds-checked binary search directly over word bytes and allocates nothing.
 
+Version 1 accepts artifacts up to 128 MiB. The CLI checks a file's metadata
+before allocating its backing buffer, and the in-memory loader repeats the
+same limit. This is a resource boundary for untrusted artifacts, not a claim
+that the format has a permanently fixed maximum size.
+
 `CompiledDictionary::validate` is the opt-in paranoid check. It verifies every
 index entry, data bounds, UTF-8 payload, non-empty word, and strict sort order.
 Call it in CI, before distributing a file, or when accepting untrusted input.
