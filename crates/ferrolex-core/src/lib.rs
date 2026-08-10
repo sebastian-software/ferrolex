@@ -8,6 +8,8 @@
 
 mod composition;
 mod lexicon;
+mod overlay;
 
 pub use composition::{Checker, CheckerBuilder};
 pub use lexicon::{Dictionary, Normalization, WordList, WordListError};
+pub use overlay::UserDictionary;

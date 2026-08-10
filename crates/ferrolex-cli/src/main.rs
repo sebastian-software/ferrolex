@@ -7,13 +7,14 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use ferrolex_code::{Analyzer, CommentSyntax, Document};
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>";
+const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>";
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -33,6 +34,7 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
             Ok(RunOutcome::Success)
         }
         Command::Check(command) => check(&command),
+        Command::Analyze(command) => analyze(&command),
     }
 }
 
@@ -77,20 +79,15 @@ fn check_word(checker: &Checker, word: &str) -> RunOutcome {
     }
 }
 
-fn check_file(checker: &Checker, path: &PathBuf) -> Result<RunOutcome, CliError> {
+fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
     let text = fs::read_to_string(path).map_err(|source| CliError::ReadInput {
-        path: path.clone(),
+        path: path.to_path_buf(),
         source,
     })?;
     let mut misspelled = false;
 
     for issue in check_text(checker, &text) {
-        let (line, column) = line_and_column(&text, issue.range().start);
-        println!(
-            "{}:{line}:{column}: misspelled: {}",
-            path.display(),
-            issue.word()
-        );
+        print_finding(path, &text, issue.range().start, issue.word());
         misspelled = true;
     }
 
@@ -99,6 +96,50 @@ fn check_file(checker: &Checker, path: &PathBuf) -> Result<RunOutcome, CliError>
     } else {
         RunOutcome::Success
     })
+}
+
+fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
+    let checker = load_checker(&command.dictionary_paths)?;
+    let source = fs::read_to_string(&command.path).map_err(|source| CliError::ReadInput {
+        path: command.path.clone(),
+        source,
+    })?;
+    let document = match &command.comment_prefix {
+        Some(prefix) => Document::new(&source).with_comment_syntax(CommentSyntax::line(prefix)),
+        None => Document::new(&source),
+    };
+    let analysis = Analyzer::builder(&checker).build().check(&document);
+    let mut has_diagnostic = false;
+
+    for finding in analysis.findings() {
+        print_finding(
+            &command.path,
+            &source,
+            finding.range().start,
+            finding.word(),
+        );
+        has_diagnostic = true;
+    }
+    for diagnostic in analysis.directive_diagnostics() {
+        let (line, column) = line_and_column(&source, diagnostic.range().start);
+        println!(
+            "{}:{line}:{column}: malformed directive: {:?}",
+            command.path.display(),
+            diagnostic.problem()
+        );
+        has_diagnostic = true;
+    }
+
+    Ok(if has_diagnostic {
+        RunOutcome::Misspelled
+    } else {
+        RunOutcome::Success
+    })
+}
+
+fn print_finding(path: &Path, source: &str, byte_offset: usize, word: &str) {
+    let (line, column) = line_and_column(source, byte_offset);
+    println!("{}:{line}:{column}: misspelled: {word}", path.display());
 }
 
 fn line_and_column(text: &str, byte_offset: usize) -> (usize, usize) {
@@ -136,9 +177,66 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
     match arguments.next().as_deref() {
         Some("--help" | "-h") => Ok(Command::Help),
         Some("check") => parse_check_arguments(arguments),
+        Some("analyze") => parse_analyze_arguments(arguments),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
+}
+
+fn parse_analyze_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut dictionary_paths = Vec::new();
+    let mut comment_prefix = None;
+    let mut path = None;
+    let mut arguments = arguments.into_iter();
+
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--dictionary" => {
+                let dictionary_path = required_path(&mut arguments, "--dictionary")?;
+                dictionary_paths.push(dictionary_path);
+            }
+            "--comment-prefix" => {
+                let prefix = arguments.next().ok_or_else(|| {
+                    CliError::Usage("`--comment-prefix` requires a prefix".to_owned())
+                })?;
+                if prefix.is_empty() || prefix.starts_with('-') {
+                    return Err(CliError::Usage(
+                        "`--comment-prefix` requires a non-option prefix".to_owned(),
+                    ));
+                }
+                if comment_prefix.replace(prefix).is_some() {
+                    return Err(CliError::Usage(
+                        "`--comment-prefix` may only be supplied once".to_owned(),
+                    ));
+                }
+            }
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
+            }
+            _ if path.is_some() => {
+                return Err(CliError::Usage(
+                    "analyze accepts exactly one path".to_owned(),
+                ));
+            }
+            _ => path = Some(PathBuf::from(argument)),
+        }
+    }
+
+    if dictionary_paths.is_empty() {
+        return Err(CliError::Usage(
+            "analyze requires at least one `--dictionary` path".to_owned(),
+        ));
+    }
+    let path = path.ok_or_else(|| CliError::Usage("analyze requires a path".to_owned()))?;
+
+    Ok(Command::Analyze(AnalyzeCommand {
+        dictionary_paths,
+        comment_prefix,
+        path,
+    }))
 }
 
 fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Command, CliError> {
@@ -149,22 +247,13 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--dictionary" => {
-                let path = arguments
-                    .next()
-                    .ok_or_else(|| CliError::Usage("`--dictionary` requires a path".to_owned()))?;
-                if path.starts_with('-') {
-                    return Err(CliError::Usage("`--dictionary` requires a path".to_owned()));
-                }
-                dictionary_paths.push(PathBuf::from(path));
+                dictionary_paths.push(required_path(&mut arguments, "--dictionary")?);
             }
             "--file" => {
-                let path = arguments
-                    .next()
-                    .ok_or_else(|| CliError::Usage("`--file` requires a path".to_owned()))?;
-                if path.starts_with('-') {
-                    return Err(CliError::Usage("`--file` requires a path".to_owned()));
-                }
-                set_target(&mut target, CheckTarget::File(PathBuf::from(path)))?;
+                set_target(
+                    &mut target,
+                    CheckTarget::File(required_path(&mut arguments, "--file")?),
+                )?;
             }
             "--help" | "-h" => return Ok(Command::Help),
             option if option.starts_with('-') => {
@@ -188,6 +277,20 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
     }))
 }
 
+fn required_path(
+    arguments: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<PathBuf, CliError> {
+    let path = arguments
+        .next()
+        .ok_or_else(|| CliError::Usage(format!("`{option}` requires a path")))?;
+    if path.starts_with('-') {
+        return Err(CliError::Usage(format!("`{option}` requires a path")));
+    }
+
+    Ok(PathBuf::from(path))
+}
+
 fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<(), CliError> {
     if target.replace(value).is_some() {
         return Err(CliError::Usage(
@@ -201,6 +304,7 @@ fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<()
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
     Check(CheckCommand),
+    Analyze(AnalyzeCommand),
     Help,
 }
 
@@ -214,6 +318,13 @@ struct CheckCommand {
 enum CheckTarget {
     Word(String),
     File(PathBuf),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AnalyzeCommand {
+    dictionary_paths: Vec<PathBuf>,
+    comment_prefix: Option<String>,
+    path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -261,8 +372,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{
-        line_and_column, parse_arguments, run, CheckCommand, CheckTarget, CliError, Command,
-        RunOutcome,
+        line_and_column, parse_arguments, run, AnalyzeCommand, CheckCommand, CheckTarget, CliError,
+        Command, RunOutcome,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -306,6 +417,32 @@ mod tests {
             .expect("help is always valid");
 
         assert_eq!(command, Command::Help);
+    }
+
+    #[test]
+    fn parses_analyze_with_a_comment_prefix() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "analyze",
+                "--dictionary",
+                "words.txt",
+                "--comment-prefix",
+                "//",
+                "lib.rs",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Analyze(AnalyzeCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                comment_prefix: Some("//".to_owned()),
+                path: PathBuf::from("lib.rs"),
+            })
+        );
     }
 
     #[test]
