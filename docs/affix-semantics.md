@@ -6,10 +6,11 @@ lexeme only when its capability flag is present and its condition matches.
 
 ## Rule application
 
-For a prefix rule, ferrolex removes the declared prefix from the start of the
-stem, verifies the condition against the remaining stem, and prepends the add
-text. For a suffix rule it performs the analogous operation at the end. A
-failed strip or condition rejects that rule; it is not an exceptional state.
+For a prefix rule, ferrolex verifies the condition against the start of the
+original stem, removes the declared prefix, and prepends the add text. For a
+suffix rule it verifies the condition against the end of the original stem,
+removes the declared suffix, and appends the add text. A failed strip or
+condition rejects that rule; it is not an exceptional state.
 
 The original stem remains recognized unless a later rule explicitly changes
 that behavior. Generated forms are evaluated lazily during lookup rather than

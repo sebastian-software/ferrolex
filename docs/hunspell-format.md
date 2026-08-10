@@ -20,6 +20,12 @@ returns the supported subset and all diagnostics. A construct whose omission
 could silently accept words is an error; a suggestion-only unsupported
 directive is a warning.
 
+The public importer treats files as untrusted input. Its initial fixed limits
+are 32 MiB for `.aff`, 64 MiB for `.dic`, 16 KiB per line, 100,000 parsed
+affix rules, 1,000,000 parsed dictionary entries, 256 flags per entry, and 256
+condition atoms. Exceeding a limit reports an error and discards the affected
+input or entry; later configuration can make these limits explicit per caller.
+
 ## Dictionary entries
 
 The first non-comment `.dic` line may contain an entry count. The count is
@@ -47,7 +53,9 @@ SFX flag strip add condition
 
 `0` represents an empty strip, add, or condition as appropriate. An add field
 can name continuation flags after `/`; those flags belong to the generated form
-for later morphology milestones. Conditions are anchored whole-stem tests.
+for later morphology milestones and are reported while being ignored. Extra
+affix morphology fields are likewise reported and ignored. Conditions are
+anchored prefix or suffix tests, according to the rule kind.
 
 `AF`, aliases, complex prefix modes, capitalization controls, compounds,
 forbidden words, and suggestion directives have their own later feature gates.
