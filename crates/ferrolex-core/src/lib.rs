@@ -6,8 +6,8 @@
 
 #![forbid(unsafe_code)]
 
-mod checker;
-mod word_list;
+mod composition;
+mod lexicon;
 
-pub use checker::{Checker, CheckerBuilder};
-pub use word_list::{Dictionary, Normalization, WordList, WordListError};
+pub use composition::{Checker, CheckerBuilder};
+pub use lexicon::{Dictionary, Normalization, WordList, WordListError};
