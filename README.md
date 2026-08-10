@@ -3,10 +3,10 @@
 Modern spell-checking infrastructure for text and code.
 
 ferrolex is an independent, native Rust implementation with planned support
-for the Hunspell dictionary ecosystem. It is not a Hunspell port. The first
-implementation slice provides immutable, UTF-8 plain-word-list dictionaries
-and exact lookup; Hunspell import, morphology, suggestions, and source-code
-analysis follow in later phases.
+for the Hunspell dictionary ecosystem. It is not a Hunspell port. It currently
+provides immutable UTF-8 plain-word-list dictionaries, generic source-code
+analysis, and a documented basic Hunspell `.aff`/`.dic` import subset;
+advanced morphology and suggestions follow in later phases.
 
 ## Status
 
@@ -22,6 +22,7 @@ one word or a plain-text file:
 ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
 ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
+ferrolex validate --strict dictionary.aff dictionary.dic
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -34,6 +35,11 @@ snake_case, kebab-case, and Unicode identifiers; ignores URLs, email addresses,
 numbers, and hashes by default; and recognizes `ferrolex:ignore`,
 `ferrolex:disable`, and `ferrolex:enable` only inside the declared comment
 syntax. See [source-code analysis](docs/source-code-analysis.md).
+
+`validate` imports a UTF-8 Hunspell-style pair under ferrolex's documented
+compatibility subset and reports structured diagnostics. It never invokes an
+external spell-checking engine; see the [import contract](docs/hunspell-format.md)
+and [affix semantics](docs/affix-semantics.md).
 
 ## Benchmarks
 

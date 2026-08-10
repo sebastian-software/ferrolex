@@ -12,9 +12,12 @@ use std::process::ExitCode;
 
 use ferrolex_code::{Analyzer, CommentSyntax, Document};
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
+use ferrolex_hunspell::{
+    import as import_hunspell, Diagnostic as ImportDiagnostic, ImportMode, Severity,
+};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>";
+const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>";
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -35,6 +38,7 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
         }
         Command::Check(command) => check(&command),
         Command::Analyze(command) => analyze(&command),
+        Command::Validate(command) => validate(&command),
     }
 }
 
@@ -137,6 +141,62 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     })
 }
 
+fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
+    let aff_text = fs::read_to_string(&command.aff_path).map_err(|source| CliError::ReadInput {
+        path: command.aff_path.clone(),
+        source,
+    })?;
+    let dic_text = fs::read_to_string(&command.dic_path).map_err(|source| CliError::ReadInput {
+        path: command.dic_path.clone(),
+        source,
+    })?;
+    let mode = if command.strict {
+        ImportMode::Strict
+    } else {
+        ImportMode::Lenient
+    };
+    let aff_source = command.aff_path.display().to_string();
+    let dic_source = command.dic_path.display().to_string();
+
+    match import_hunspell(&aff_source, &aff_text, &dic_source, &dic_text, mode) {
+        Ok(result) => {
+            let has_errors = result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.severity() == Severity::Error);
+            for diagnostic in result.diagnostics() {
+                print_import_diagnostic(diagnostic);
+            }
+            if has_errors {
+                Ok(RunOutcome::Misspelled)
+            } else {
+                println!("valid: {}", command.dic_path.display());
+                Ok(RunOutcome::Success)
+            }
+        }
+        Err(error) => {
+            for diagnostic in error.diagnostics() {
+                print_import_diagnostic(diagnostic);
+            }
+            Ok(RunOutcome::Misspelled)
+        }
+    }
+}
+
+fn print_import_diagnostic(diagnostic: &ImportDiagnostic) {
+    let severity = match diagnostic.severity() {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+    };
+    println!(
+        "{}:{}: {severity}[{}]: {}",
+        diagnostic.source(),
+        diagnostic.line(),
+        diagnostic.directive(),
+        diagnostic.message()
+    );
+}
+
 fn print_finding(path: &Path, source: &str, byte_offset: usize, word: &str) {
     let (line, column) = line_and_column(source, byte_offset);
     println!("{}:{line}:{column}: misspelled: {word}", path.display());
@@ -178,9 +238,39 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some("--help" | "-h") => Ok(Command::Help),
         Some("check") => parse_check_arguments(arguments),
         Some("analyze") => parse_analyze_arguments(arguments),
+        Some("validate") => parse_validate_arguments(arguments),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
+}
+
+fn parse_validate_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut strict = false;
+    let mut paths = Vec::new();
+
+    for argument in arguments {
+        match argument.as_str() {
+            "--strict" => strict = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
+            }
+            _ => paths.push(PathBuf::from(argument)),
+        }
+    }
+    if paths.len() != 2 {
+        return Err(CliError::Usage(
+            "validate requires exactly an AFF path and a DIC path".to_owned(),
+        ));
+    }
+
+    Ok(Command::Validate(ValidateCommand {
+        strict,
+        aff_path: paths.remove(0),
+        dic_path: paths.remove(0),
+    }))
 }
 
 fn parse_analyze_arguments(
@@ -305,6 +395,7 @@ fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<()
 enum Command {
     Check(CheckCommand),
     Analyze(AnalyzeCommand),
+    Validate(ValidateCommand),
     Help,
 }
 
@@ -325,6 +416,13 @@ struct AnalyzeCommand {
     dictionary_paths: Vec<PathBuf>,
     comment_prefix: Option<String>,
     path: PathBuf,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ValidateCommand {
+    strict: bool,
+    aff_path: PathBuf,
+    dic_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -373,7 +471,7 @@ mod tests {
 
     use super::{
         line_and_column, parse_arguments, run, AnalyzeCommand, CheckCommand, CheckTarget, CliError,
-        Command, RunOutcome,
+        Command, RunOutcome, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -442,6 +540,49 @@ mod tests {
                 comment_prefix: Some("//".to_owned()),
                 path: PathBuf::from("lib.rs"),
             })
+        );
+    }
+
+    #[test]
+    fn parses_strict_hunspell_validation() {
+        let command = parse_arguments(
+            ["ferrolex", "validate", "--strict", "de.aff", "de.dic"].map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Validate(ValidateCommand {
+                strict: true,
+                aff_path: PathBuf::from("de.aff"),
+                dic_path: PathBuf::from("de.dic"),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_hunspell_validation_paths() {
+        let error = parse_arguments(["ferrolex", "validate", "de.aff"].map(str::to_owned))
+            .expect_err("both dictionary files are required");
+
+        assert!(matches!(error, CliError::Usage(message) if message.contains("AFF path")));
+    }
+
+    #[test]
+    fn strict_hunspell_validation_reports_import_errors_with_a_failure_exit_code() {
+        let affix = temporary_file("SET ISO-8859-1\n");
+        let dictionary = temporary_file("1\nStraße\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "validate".to_owned(),
+            "--strict".to_owned(),
+            affix.path.to_string_lossy().into_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("validation files are readable"),
+            RunOutcome::Misspelled
         );
     }
 
