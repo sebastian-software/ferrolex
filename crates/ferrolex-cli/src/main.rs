@@ -16,7 +16,7 @@ const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PA
 
 fn main() -> ExitCode {
     match run(env::args()) {
-        Ok(exit_code) => exit_code,
+        Ok(outcome) => outcome.exit_code(),
         Err(error) => {
             eprintln!("error: {error}");
             eprintln!("{USAGE}");
@@ -25,17 +25,17 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(arguments: impl IntoIterator<Item = String>) -> Result<ExitCode, CliError> {
+fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliError> {
     match parse_arguments(arguments)? {
         Command::Help => {
             println!("{USAGE}");
-            Ok(ExitCode::SUCCESS)
+            Ok(RunOutcome::Success)
         }
         Command::Check(command) => check(&command),
     }
 }
 
-fn check(command: &CheckCommand) -> Result<ExitCode, CliError> {
+fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
     let dictionaries = command
         .dictionary_paths
         .iter()
@@ -57,10 +57,25 @@ fn check(command: &CheckCommand) -> Result<ExitCode, CliError> {
 
     if checker.contains(&command.word) {
         println!("accepted: {}", command.word);
-        Ok(ExitCode::SUCCESS)
+        Ok(RunOutcome::Success)
     } else {
         println!("misspelled: {}", command.word);
-        Ok(ExitCode::from(1))
+        Ok(RunOutcome::Misspelled)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RunOutcome {
+    Success,
+    Misspelled,
+}
+
+impl RunOutcome {
+    fn exit_code(self) -> ExitCode {
+        match self {
+            Self::Success => ExitCode::SUCCESS,
+            Self::Misspelled => ExitCode::from(1),
+        }
     }
 }
 
@@ -162,10 +177,9 @@ impl Error for CliError {
 mod tests {
     use std::fs;
     use std::path::PathBuf;
-    use std::process::ExitCode;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{parse_arguments, run, CheckCommand, CliError, Command};
+    use super::{parse_arguments, run, CheckCommand, CliError, Command, RunOutcome};
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
 
@@ -235,11 +249,11 @@ mod tests {
 
         assert_eq!(
             run(arguments("Straße")).expect("dictionary is readable"),
-            ExitCode::SUCCESS
+            RunOutcome::Success
         );
         assert_eq!(
             run(arguments("Strasse")).expect("dictionary is readable"),
-            ExitCode::from(1)
+            RunOutcome::Misspelled
         );
     }
 
