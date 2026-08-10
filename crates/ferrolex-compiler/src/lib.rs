@@ -11,6 +11,7 @@
 use std::fmt;
 
 use ferrolex_core::Dictionary;
+use ferrolex_suggest::CandidateSource;
 
 const MAGIC: [u8; 8] = *b"FLEXDIC\0";
 const FORMAT_VERSION: u16 = 1;
@@ -533,6 +534,19 @@ impl CompiledDictionary {
         &self.bytes
     }
 
+    /// Visits valid UTF-8 words in serialized byte-lexical order.
+    ///
+    /// This does not allocate or force paranoid validation. A malformed entry
+    /// accepted by fast loading is simply not exposed as a candidate; callers
+    /// that require a structural guarantee should call [`Self::validate`]
+    /// before using the artifact.
+    pub fn words(&self) -> impl Iterator<Item = &str> + '_ {
+        (0..self.word_count).filter_map(|entry| {
+            self.word_bytes(entry)
+                .and_then(|word| std::str::from_utf8(word).ok())
+        })
+    }
+
     fn word_bytes(&self, entry: usize) -> Option<&[u8]> {
         let (start, end) = self.word_offsets(entry)?;
         if start > end || end > self.data_len {
@@ -570,6 +584,16 @@ impl CompiledDictionary {
         let start = usize::try_from(read_u64(&self.bytes, index_entry)?).ok()?;
         let end = usize::try_from(read_u64(&self.bytes, index_entry.checked_add(8)?)?).ok()?;
         Some((start, end))
+    }
+}
+
+impl CandidateSource for CompiledDictionary {
+    fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        for word in self.words() {
+            if !visitor(word) {
+                break;
+            }
+        }
     }
 }
 
@@ -722,6 +746,7 @@ mod tests {
         ExactDictionaryIr, LoadError, ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
+    use ferrolex_suggest::CandidateSource;
 
     #[test]
     fn compilation_is_byte_identical_across_input_order_and_duplicates() {
@@ -758,6 +783,21 @@ mod tests {
         dictionary
             .validate()
             .expect("compiler output is structurally valid");
+    }
+
+    #[test]
+    fn exposes_serialized_words_as_suggestion_candidates() {
+        let dictionary = CompiledDictionary::load(
+            compile_words(["zebra", "東京", "apple"]).expect("valid words compile"),
+        )
+        .expect("artifact loads");
+        let mut candidates = Vec::new();
+        dictionary.visit_candidates(&mut |word| {
+            candidates.push(word.to_owned());
+            true
+        });
+
+        assert_eq!(candidates, ["apple", "zebra", "東京"]);
     }
 
     #[test]
