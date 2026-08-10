@@ -34,7 +34,10 @@ complete raw token, not merely a substring.
 
 Project and user vocabulary belongs in a layered `Dictionary`. `UserDictionary`
 is the mutable overlay: adding a word is immediately visible to concurrent
-lookups without mutating base dictionaries.
+lookups without mutating base dictionaries. Its `from_text` and `to_text`
+methods use the same deterministic UTF-8 word-list syntax as base lists, so a
+caller can atomically persist an overlay without imposing filesystem policy on
+the core crate.
 
 ## Inline directives
 

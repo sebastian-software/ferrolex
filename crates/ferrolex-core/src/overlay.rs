@@ -24,6 +24,47 @@ impl UserDictionary {
         }
     }
 
+    /// Loads an overlay from the project's UTF-8 plain-word-list syntax.
+    ///
+    /// Blank lines and lines beginning with `#` are ignored, matching
+    /// [`crate::WordList::from_text`]. The returned overlay is immediately
+    /// available for concurrent updates and lookups.
+    #[must_use]
+    pub fn from_text(normalization: Normalization, text: &str) -> Self {
+        let words = crate::WordList::from_text(normalization, text)
+            .words()
+            .map(Box::<str>::from)
+            .collect();
+        Self {
+            normalization,
+            words: RwLock::new(words),
+        }
+    }
+
+    /// Returns a deterministic snapshot of the current overlay entries.
+    #[must_use]
+    pub fn snapshot(&self) -> Vec<String> {
+        recover_lock(self.words.read())
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// Serializes the current overlay as a deterministic UTF-8 word list.
+    ///
+    /// The output ends with a newline when non-empty, which makes it suitable
+    /// for atomic replacement by a caller-owned persistence layer.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let words = recover_lock(self.words.read());
+        let mut text = String::new();
+        for word in words.iter() {
+            text.push_str(word);
+            text.push('\n');
+        }
+        text
+    }
+
     /// Adds `word` to this overlay.
     ///
     /// Returns whether the word was newly added.
@@ -125,5 +166,17 @@ mod tests {
         });
 
         assert!(dictionary.contains("shared"));
+    }
+
+    #[test]
+    fn round_trips_a_deterministic_persistent_word_list() {
+        let dictionary = UserDictionary::from_text(
+            Normalization::Nfc,
+            "\u{feff}# project vocabulary\n cafe\u{301}\n\nAlpha\n",
+        );
+
+        assert_eq!(dictionary.snapshot(), ["Alpha", "café"]);
+        assert_eq!(dictionary.to_text(), "Alpha\ncafé\n");
+        assert!(dictionary.contains("cafe\u{301}"));
     }
 }
