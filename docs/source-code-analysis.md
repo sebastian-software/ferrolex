@@ -24,10 +24,13 @@ whole-token range and segment index to reconstruct identifiers case-preservingly
 ## Classification and ignores
 
 The generic classifier identifies natural words, identifiers, acronyms, URLs,
-email addresses, numbers, and hexadecimal hashes. URLs, email addresses,
-numbers, and hashes are ignored by default but remain configurable categories.
-Exact ignored words and regular expressions are supported; an ignore expression
-must match the complete raw token, not merely a substring.
+email addresses, numbers, hexadecimal hashes, local paths, and long
+Base64-shaped ASCII data. URLs, email addresses, numbers, hashes, paths, and
+Base64-shaped data are ignored by default but remain configurable categories.
+The path and Base64 heuristics are deliberately conservative: neither is a
+claim to parse every platform path or binary encoding. Exact ignored words and
+regular expressions are supported; an ignore expression must match the
+complete raw token, not merely a substring.
 
 Project and user vocabulary belongs in a layered `Dictionary`. `UserDictionary`
 is the mutable overlay: adding a word is immediately visible to concurrent

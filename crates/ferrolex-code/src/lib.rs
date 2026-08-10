@@ -32,6 +32,10 @@ pub enum TokenClass {
     Number,
     /// A hexadecimal hash or hexadecimal literal.
     Hash,
+    /// A local or relative file-system path.
+    Path,
+    /// A long ASCII token shaped like padded or unpadded Base64 data.
+    Base64,
     /// A token without a more specific classification.
     Unknown,
 }
@@ -190,6 +194,8 @@ impl Default for AnalyzerConfig {
                 TokenClass::Email,
                 TokenClass::Number,
                 TokenClass::Hash,
+                TokenClass::Path,
+                TokenClass::Base64,
             ]
             .into_iter()
             .collect(),
@@ -679,6 +685,10 @@ fn classify(token: &str) -> TokenClass {
         TokenClass::Email
     } else if is_hex_token(token) {
         TokenClass::Hash
+    } else if is_path_token(token) {
+        TokenClass::Path
+    } else if is_base64_token(token) {
+        TokenClass::Base64
     } else if token.chars().all(char::is_numeric) {
         TokenClass::Number
     } else if split_identifier(token, IdentifierSplitConfig::default()).len() > 1 {
@@ -690,6 +700,25 @@ fn classify(token: &str) -> TokenClass {
     } else {
         TokenClass::Unknown
     }
+}
+
+fn is_path_token(token: &str) -> bool {
+    let normalized = token.replace('\\', "/");
+    let mut parts = normalized.split('/');
+    let first = parts.next().unwrap_or_default();
+    let has_separator = normalized.contains('/');
+    has_separator
+        && !first.is_empty()
+        && parts.any(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+fn is_base64_token(token: &str) -> bool {
+    token.len() >= 24
+        && token.is_ascii()
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+        && (token.contains(['+', '/', '=']) || token.bytes().any(|byte| byte.is_ascii_digit()))
 }
 
 fn is_hex_token(token: &str) -> bool {
@@ -812,6 +841,14 @@ mod tests {
         assert_eq!(classify("maintainer@example.com"), TokenClass::Email);
         assert_eq!(classify("0xdeadbeef"), TokenClass::Hash);
         assert_eq!(classify("2026"), TokenClass::Number);
+        assert_eq!(
+            classify("crates/ferrolex-code/src/lib.rs"),
+            TokenClass::Path
+        );
+        assert_eq!(
+            classify("QXV0aGVudGljYXRpb25Qcm92aWRlcg=="),
+            TokenClass::Base64
+        );
         assert_eq!(classify("HTTP"), TokenClass::Acronym);
     }
 
@@ -839,7 +876,7 @@ mod tests {
             .ignore_pattern("generated_[A-Za-z]+")
             .expect("pattern is valid")
             .build();
-        let source = "https://example.com maintainer@example.com 0xdeadbeef generated_value";
+        let source = "https://example.com maintainer@example.com 0xdeadbeef crates/ferrolex-code/src/lib.rs QXV0aGVudGljYXRpb25Qcm92aWRlcg== generated_value";
 
         assert!(analyzer.check(&Document::new(source)).findings().is_empty());
     }
