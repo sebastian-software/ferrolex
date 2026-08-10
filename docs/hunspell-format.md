@@ -42,7 +42,9 @@ is an error for that entry, not a panic.
 
 ## Initial AFF subset
 
-The first compatibility milestone recognizes `SET`, `FLAG`, `PFX`, and `SFX`.
+The current compatibility level recognizes `SET`, `FLAG`, `PFX`, `SFX`,
+`CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
+`COMPOUNDMIN`.
 `PFX`/`SFX` headers declare a flag, whether rules cross-product, and a rule
 count. Each following rule belongs to that header and has:
 
@@ -52,10 +54,11 @@ SFX flag strip add condition
 ```
 
 `0` represents an empty strip, add, or condition as appropriate. An add field
-can name continuation flags after `/`; those flags belong to the generated form
-for later morphology milestones and are reported while being ignored. Extra
-affix morphology fields are likewise reported and ignored. Conditions are
-anchored prefix or suffix tests, according to the rule kind.
+can name continuation flags after `/`; those flags remain active on the
+generated form under the [affix semantics](affix-semantics.md). Extra affix
+morphology fields are reported and ignored. Conditions are anchored prefix or
+suffix tests, according to the rule kind. See [compound semantics](compound-semantics.md)
+for the deliberately bounded `COMPOUNDFLAG`/`COMPOUNDMIN` subset.
 
 `AF`, aliases, complex prefix modes, capitalization controls, compounds,
 forbidden words, and suggestion directives have their own later feature gates.

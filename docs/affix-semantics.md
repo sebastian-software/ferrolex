@@ -36,7 +36,20 @@ and one suffix when the lexeme carries both flags. The prefix operates on the
 stem first, then the suffix operates on the prefixed form. Rules without that
 opt-in are never combined merely because both independently match.
 
-The initial milestone does not recursively apply continuation classes, and it
-does not promise circumfix, need-affix, forbidden-word, or compound semantics.
-Those features are additive gates rather than implicit side effects of the
-basic rule evaluator.
+## Advanced flags
+
+Continuation flags following an add field (`add/flags`) remain active for the
+derived form and can unlock another rule. A derivation may apply a particular
+rule only once and is limited to eight transformations; this makes recognition
+deterministic and bounded. Dictionaries requiring a deeper chain are outside
+the current compatibility level and must not be treated as equivalent.
+
+`CIRCUMFIX` is represented by a flag in continuation fields. A form created
+through a circumfix-marked prefix is accepted only after a circumfix-marked
+suffix is also applied, and conversely. `NEEDAFFIX` rejects its bare stem but
+allows a valid derived form. `FORBIDDENWORD` rejects the complete lexeme and
+all forms derived from it, taking precedence over every positive rule.
+
+Recognition is exact UTF-8 matching. `KEEPCASE` is imported as an explicit
+marker, but has no additional transformation in this level: neither marked nor
+unmarked words receive implicit lower-, upper-, or title-case fallbacks.

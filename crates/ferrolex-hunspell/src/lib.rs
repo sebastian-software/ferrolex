@@ -18,6 +18,8 @@ const MAX_AFFIX_RULES: usize = 100_000;
 const MAX_DICTIONARY_ENTRIES: usize = 1_000_000;
 const MAX_FLAGS_PER_ENTRY: usize = 256;
 const MAX_CONDITION_ATOMS: usize = 256;
+const MAX_AFFIX_CHAIN: usize = 8;
+const MAX_COMPOUND_SCALARS: usize = 256;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -133,41 +135,91 @@ impl ImportResult {
 /// lookup, so importing does not pre-expand a potentially unbounded word set.
 #[derive(Clone, Debug, Default)]
 pub struct HunspellDictionary {
-    stems: BTreeSet<Box<str>>,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
+    special_flags: SpecialFlags,
+    compound: CompoundConfig,
 }
 
 impl Dictionary for HunspellDictionary {
     fn contains(&self, word: &str) -> bool {
-        self.stems.contains(word)
-            || self
-                .lexemes
-                .iter()
-                .any(|lexeme| self.matches_derived_word(lexeme, word))
+        self.lexemes
+            .iter()
+            .any(|lexeme| self.matches_word_from_lexeme(lexeme, word))
+            || self.matches_simple_compound(word)
     }
 }
 
 impl HunspellDictionary {
-    fn matches_derived_word(&self, lexeme: &Lexeme, word: &str) -> bool {
-        if self.prefixes.iter().any(|rule| {
-            rule.applies_to(lexeme) && rule.apply(&lexeme.stem).is_some_and(|form| form == word)
-        }) || self.suffixes.iter().any(|rule| {
-            rule.applies_to(lexeme) && rule.apply(&lexeme.stem).is_some_and(|form| form == word)
-        }) {
-            return true;
+    fn matches_word_from_lexeme(&self, lexeme: &Lexeme, word: &str) -> bool {
+        if self.is_forbidden(&lexeme.flags) {
+            return false;
         }
+        let mut states = vec![FormState::new(lexeme)];
 
-        self.prefixes.iter().any(|prefix| {
-            prefix.applies_to(lexeme)
-                && prefix.cross_product
-                && prefix.apply(&lexeme.stem).is_some_and(|prefixed| {
-                    self.suffixes.iter().any(|suffix| {
-                        suffix.applies_to(lexeme)
-                            && suffix.cross_product
-                            && suffix.apply(&prefixed).is_some_and(|form| form == word)
-                    })
+        while let Some(state) = states.pop() {
+            if state.form == word && self.is_accepted_state(&state) {
+                return true;
+            }
+            if state.depth == MAX_AFFIX_CHAIN {
+                continue;
+            }
+            for rule in self.prefixes.iter().chain(&self.suffixes) {
+                if !state.flags.contains(&rule.flag) || !state.can_apply(rule) {
+                    continue;
+                }
+                if let Some(form) = rule.apply(&state.form) {
+                    states.push(state.apply(rule, form, &self.special_flags));
+                }
+            }
+        }
+        false
+    }
+
+    fn is_accepted_state(&self, state: &FormState) -> bool {
+        !self.is_forbidden(&state.flags)
+            && (!self.requires_affix(&state.origin_flags) || state.depth > 0)
+            && state.has_complete_circumfix()
+    }
+
+    fn is_forbidden(&self, flags: &BTreeSet<Flag>) -> bool {
+        self.special_flags
+            .forbidden_word
+            .as_ref()
+            .is_some_and(|flag| flags.contains(flag))
+    }
+
+    fn requires_affix(&self, flags: &BTreeSet<Flag>) -> bool {
+        self.special_flags
+            .need_affix
+            .as_ref()
+            .is_some_and(|flag| flags.contains(flag))
+    }
+
+    fn matches_simple_compound(&self, word: &str) -> bool {
+        let Some(compound_flag) = &self.compound.flag else {
+            return false;
+        };
+        let characters = word.char_indices().collect::<Vec<_>>();
+        if characters.len() > MAX_COMPOUND_SCALARS {
+            return false;
+        }
+        let minimum = self.compound.minimum_length;
+        (1..characters.len()).any(|split| {
+            let byte_index = characters[split].0;
+            let (left, right) = word.split_at(byte_index);
+            left.chars().count() >= minimum
+                && right.chars().count() >= minimum
+                && self.lexemes.iter().any(|lexeme| {
+                    lexeme.stem.as_ref() == left
+                        && lexeme.flags.contains(compound_flag)
+                        && !self.is_forbidden(&lexeme.flags)
+                })
+                && self.lexemes.iter().any(|lexeme| {
+                    lexeme.stem.as_ref() == right
+                        && lexeme.flags.contains(compound_flag)
+                        && !self.is_forbidden(&lexeme.flags)
                 })
         })
     }
@@ -190,19 +242,17 @@ enum AffixKind {
 
 #[derive(Clone, Debug)]
 struct AffixRule {
+    id: usize,
     kind: AffixKind,
     flag: Flag,
     strip: Box<str>,
     add: Box<str>,
     condition: Condition,
     cross_product: bool,
+    continuation_flags: BTreeSet<Flag>,
 }
 
 impl AffixRule {
-    fn applies_to(&self, lexeme: &Lexeme) -> bool {
-        lexeme.flags.contains(&self.flag)
-    }
-
     fn apply(&self, stem: &str) -> Option<String> {
         if !self.condition.matches(stem, self.kind) {
             return None;
@@ -221,6 +271,93 @@ impl AffixRule {
                 form.push_str(&self.add);
                 form
             }),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FormState {
+    form: String,
+    flags: BTreeSet<Flag>,
+    origin_flags: BTreeSet<Flag>,
+    depth: usize,
+    last_kind: Option<AffixKind>,
+    last_cross_product: bool,
+    used_rules: BTreeSet<usize>,
+    circumfix_prefix: bool,
+    circumfix_suffix: bool,
+}
+
+impl FormState {
+    fn new(lexeme: &Lexeme) -> Self {
+        Self {
+            form: lexeme.stem.to_string(),
+            flags: lexeme.flags.clone(),
+            origin_flags: lexeme.flags.clone(),
+            depth: 0,
+            last_kind: None,
+            last_cross_product: true,
+            used_rules: BTreeSet::new(),
+            circumfix_prefix: false,
+            circumfix_suffix: false,
+        }
+    }
+
+    fn can_apply(&self, rule: &AffixRule) -> bool {
+        !self.used_rules.contains(&rule.id)
+            && (self.last_kind.is_none()
+                || self.last_kind == Some(rule.kind)
+                || (self.last_cross_product && rule.cross_product))
+    }
+
+    fn apply(&self, rule: &AffixRule, form: String, special_flags: &SpecialFlags) -> Self {
+        let circumfix = special_flags
+            .circumfix
+            .as_ref()
+            .is_some_and(|flag| rule.continuation_flags.contains(flag));
+        let mut flags = self.flags.clone();
+        flags.extend(rule.continuation_flags.iter().cloned());
+        let mut used_rules = self.used_rules.clone();
+        used_rules.insert(rule.id);
+        Self {
+            form,
+            flags,
+            origin_flags: self.origin_flags.clone(),
+            depth: self.depth + 1,
+            last_kind: Some(rule.kind),
+            last_cross_product: rule.cross_product,
+            used_rules,
+            circumfix_prefix: self.circumfix_prefix
+                || (circumfix && rule.kind == AffixKind::Prefix),
+            circumfix_suffix: self.circumfix_suffix
+                || (circumfix && rule.kind == AffixKind::Suffix),
+        }
+    }
+
+    fn has_complete_circumfix(&self) -> bool {
+        self.circumfix_prefix == self.circumfix_suffix
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SpecialFlags {
+    circumfix: Option<Flag>,
+    forbidden_word: Option<Flag>,
+    keep_case: Option<Flag>,
+    need_affix: Option<Flag>,
+}
+
+#[derive(Clone, Debug)]
+struct CompoundConfig {
+    flag: Option<Flag>,
+    minimum_length: usize,
+}
+
+impl Default for CompoundConfig {
+    fn default() -> Self {
+        Self {
+            flag: None,
+            minimum_length: 3,
         }
     }
 }
@@ -305,12 +442,12 @@ pub fn import(
     } else {
         Vec::new()
     };
-    let stems = lexemes.iter().map(|lexeme| lexeme.stem.clone()).collect();
     let dictionary = HunspellDictionary {
-        stems,
         lexemes,
         prefixes: parsed_aff.prefixes,
         suffixes: parsed_aff.suffixes,
+        special_flags: parsed_aff.special_flags,
+        compound: parsed_aff.compound,
     };
 
     if mode == ImportMode::Strict
@@ -333,6 +470,8 @@ struct ParsedAff {
     suffixes: Vec<AffixRule>,
     diagnostics: Vec<Diagnostic>,
     rule_count: usize,
+    special_flags: SpecialFlags,
+    compound: CompoundConfig,
 }
 
 fn parse_aff(source: &str, text: &str) -> ParsedAff {
@@ -363,6 +502,53 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
         match directive {
             "SET" => parse_set(source, line_number, &fields, &mut parsed.diagnostics),
             "FLAG" => parse_flag_mode(source, line_number, &fields, &mut parsed.diagnostics),
+            "CIRCUMFIX" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.special_flags.circumfix,
+                &mut parsed.diagnostics,
+            ),
+            "FORBIDDENWORD" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.special_flags.forbidden_word,
+                &mut parsed.diagnostics,
+            ),
+            "KEEPCASE" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.special_flags.keep_case,
+                &mut parsed.diagnostics,
+            ),
+            "NEEDAFFIX" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.special_flags.need_affix,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDFLAG" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.flag,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDMIN" => parse_compound_minimum(
+                source,
+                line_number,
+                &fields,
+                &mut parsed.compound,
+                &mut parsed.diagnostics,
+            ),
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
@@ -429,6 +615,81 @@ fn parse_flag_mode(source: &str, line: usize, fields: &[&str], diagnostics: &mut
             "FLAG",
             Severity::Error,
             "only single-Unicode-scalar flags are supported in the current compatibility level",
+        ));
+    }
+}
+
+fn parse_special_flag(
+    source: &str,
+    line: usize,
+    directive: &str,
+    fields: &[&str],
+    target: &mut Option<Flag>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if fields.len() != 2 {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            directive,
+            Severity::Error,
+            "directive requires exactly one single-Unicode-scalar flag",
+        ));
+    } else if target.is_some() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            directive,
+            Severity::Error,
+            "directive may only be declared once",
+        ));
+    } else if let Some(flag) = decode_flag(fields[1]) {
+        *target = Some(flag);
+    } else {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            directive,
+            Severity::Error,
+            "directive flag must contain exactly one Unicode scalar",
+        ));
+    }
+}
+
+fn parse_compound_minimum(
+    source: &str,
+    line: usize,
+    fields: &[&str],
+    compound: &mut CompoundConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if fields.len() != 2 {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDMIN",
+            Severity::Error,
+            "COMPOUNDMIN requires exactly one positive scalar length",
+        ));
+    } else if let Ok(minimum_length) = fields[1].parse::<usize>() {
+        if minimum_length == 0 {
+            diagnostics.push(diagnostic(
+                source,
+                line,
+                "COMPOUNDMIN",
+                Severity::Error,
+                "COMPOUNDMIN must be greater than zero",
+            ));
+        } else {
+            compound.minimum_length = minimum_length;
+        }
+    } else {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDMIN",
+            Severity::Error,
+            "COMPOUNDMIN requires a positive integer",
         ));
     }
 }
@@ -523,18 +784,15 @@ fn parse_affix_group(
             ));
             continue;
         }
-        match parse_affix_rule(directive, &flag, cross_product, rule_line) {
+        match parse_affix_rule(
+            parsed.rule_count,
+            directive,
+            &flag,
+            cross_product,
+            rule_line,
+        ) {
             Ok(rule) => {
                 let rule_fields = rule_line.split_whitespace().collect::<Vec<_>>();
-                if rule_fields[3].contains('/') {
-                    parsed.diagnostics.push(diagnostic(
-                        source,
-                        rule_line_number,
-                        directive,
-                        Severity::Warning,
-                        "continuation flags are not implemented and are ignored",
-                    ));
-                }
                 if rule_fields.len() > 5 {
                     parsed.diagnostics.push(diagnostic(
                         source,
@@ -571,6 +829,7 @@ fn parse_affix_group(
 }
 
 fn parse_affix_rule(
+    id: usize,
     expected_directive: &str,
     header_flag: &Flag,
     cross_product: bool,
@@ -589,11 +848,19 @@ fn parse_affix_rule(
     if &rule_flag != header_flag {
         return Err("affix rule flag does not match its header".to_owned());
     }
-    let (add, _) = fields[3]
-        .split_once('/')
-        .map_or((fields[3], None), |(add, flags)| (add, Some(flags)));
+    let (add, continuation_flags) = match fields[3].split_once('/') {
+        None => (fields[3], BTreeSet::new()),
+        Some((_, "")) => return Err("affix continuation flags must not be empty".to_owned()),
+        Some((_, flags)) if flags.chars().count() > MAX_FLAGS_PER_ENTRY => {
+            return Err("affix continuation flags exceed the 256-flag importer limit".to_owned())
+        }
+        Some((add, flags)) => decode_flags(flags)
+            .map(|flags| (add, flags))
+            .ok_or_else(|| "affix continuation flags are invalid".to_owned())?,
+    };
     let condition = parse_condition(fields[4])?;
     Ok(AffixRule {
+        id,
         kind: if expected_directive == "PFX" {
             AffixKind::Prefix
         } else {
@@ -604,6 +871,7 @@ fn parse_affix_rule(
         add: empty_marker(add),
         condition,
         cross_product,
+        continuation_flags,
     })
 }
 
@@ -945,7 +1213,7 @@ mod tests {
 
     #[test]
     fn recognition_affecting_unknown_directives_are_errors_in_strict_mode() {
-        let affixes = "FORBIDDENWORD X\n";
+        let affixes = "COMPLEXPREFIXES\n";
         let lenient = import(
             "test.aff",
             affixes,
@@ -1002,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_continuation_flags_and_morphology_fields_without_guessing_them() {
+    fn applies_continuation_flags_and_reports_only_morphology_fields() {
         let result = import(
             "test.aff",
             "SFX A N 1\nSFX A 0 s/B . DS:plural\n",
@@ -1016,11 +1284,48 @@ mod tests {
         assert!(result
             .diagnostics()
             .iter()
-            .any(|item| item.message().contains("continuation flags")));
-        assert!(result
-            .diagnostics()
-            .iter()
             .any(|item| item.message().contains("morphology fields")));
+    }
+
+    #[test]
+    fn continuation_classes_enable_an_additional_affix_transformation() {
+        let result = import(
+            "test.aff",
+            "SFX A N 1\nSFX A 0 x/B .\nSFX B N 1\nSFX B 0 y .\n",
+            "test.dic",
+            "1\nroot/A\n",
+            ImportMode::Strict,
+        )
+        .expect("continuation classes are supported");
+
+        assert!(result.dictionary().contains("rootx"));
+        assert!(result.dictionary().contains("rootxy"));
+    }
+
+    #[test]
+    fn advanced_flags_and_simple_compounds_follow_the_documented_contract() {
+        let result = import(
+            "test.aff",
+            "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nKEEPCASE K\nCOMPOUNDFLAG M\nCOMPOUNDMIN 3\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nPFX D N 1\nPFX D 0 re .\n",
+            "test.dic",
+            "6\nword/AB\nfix/DN\nbad/AF\nHaus/M\ntür/M\nOAuth/K\n",
+            ImportMode::Strict,
+        )
+        .expect("advanced flags are supported");
+        let dictionary = result.dictionary();
+
+        assert!(dictionary.contains("word"));
+        assert!(!dictionary.contains("unword"));
+        assert!(!dictionary.contains("words"));
+        assert!(dictionary.contains("unwords"));
+        assert!(!dictionary.contains("fix"));
+        assert!(dictionary.contains("refix"));
+        assert!(!dictionary.contains("bad"));
+        assert!(!dictionary.contains("unbad"));
+        assert!(dictionary.contains("Haustür"));
+        assert!(!dictionary.contains("HausHa"));
+        assert!(dictionary.contains("OAuth"));
+        assert!(!dictionary.contains("oauth"));
     }
 
     #[test]
