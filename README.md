@@ -25,6 +25,8 @@ ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
 ferrolex validate --compiled words.flex
+ferrolex dictionary list
+ferrolex dictionary fetch pt_BR --cache .ferrolex-dictionaries
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -49,6 +51,13 @@ ranking contract is documented in [Suggestions](docs/suggestions.md).
 
 The current native integration boundary and explicit LSP/FFI deferral are
 recorded in [Native integrations](docs/integrations.md).
+
+The optional, digest-pinned LibreOffice installer is documented in
+[Dictionary fetching](docs/dictionary-fetching.md). It provides reviewed
+LibreOffice sources for English, German, Spanish, French, Italian, Portuguese,
+Dutch, Polish, Russian, Turkish, Arabic, Ukrainian, and Swedish; it never
+downloads or updates dictionaries implicitly. CJK is intentionally deferred
+until text segmentation has its own contract.
 
 `compile` turns the same plain-word-list syntax used by `check` into a
 deterministic native artifact. `validate --compiled` first performs the fast

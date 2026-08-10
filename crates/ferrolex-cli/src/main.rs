@@ -15,12 +15,16 @@ use ferrolex_compiler::{
     compile_words, CompileError, CompiledDictionary, LoadError, ValidationError,
 };
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
+use ferrolex_dictionaries::{
+    find_locale, DictionaryInstaller, FetchError as DictionaryFetchError,
+    ManifestError as DictionaryManifestError, UreqFetcher, LIBREOFFICE_CATALOG,
+};
 use ferrolex_hunspell::{
     import as import_hunspell, Diagnostic as ImportDiagnostic, ImportMode, Severity,
 };
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>";
+const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>\n       ferrolex analyze --dictionary <PATH> [--dictionary <PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>";
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -43,6 +47,41 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
         Command::Analyze(command) => analyze(&command),
         Command::Compile(command) => compile(&command),
         Command::Validate(command) => validate(&command),
+        Command::Dictionary(command) => dictionary(&command),
+    }
+}
+
+fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
+    match command {
+        DictionaryCommand::List => {
+            for source in LIBREOFFICE_CATALOG {
+                println!(
+                    "{}\trevision={}\tencoding={}\tlicense={}\tnotice={}",
+                    source.locale(),
+                    source.revision(),
+                    source.encoding().label(),
+                    source.license_label(),
+                    source.license_notice_url()
+                );
+            }
+            Ok(RunOutcome::Success)
+        }
+        DictionaryCommand::Fetch { locale, cache_path } => {
+            let source = find_locale(locale).ok_or_else(|| {
+                CliError::Usage(format!(
+                    "unsupported LibreOffice locale `{locale}`; run `ferrolex dictionary list`"
+                ))
+            })?;
+            let manifest = source.manifest().map_err(CliError::DictionaryManifest)?;
+            let installed = DictionaryInstaller::new(UreqFetcher)
+                .install(&manifest, cache_path)
+                .map_err(CliError::FetchDictionary)?;
+            println!("installed: {}", installed.aff_path().display());
+            println!("installed: {}", installed.dic_path().display());
+            println!("license: {}", manifest.license_label());
+            println!("notice: {}", manifest.license_notice_url());
+            Ok(RunOutcome::Success)
+        }
     }
 }
 
@@ -300,9 +339,69 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some("analyze") => parse_analyze_arguments(arguments),
         Some("compile") => parse_compile_arguments(arguments),
         Some("validate") => parse_validate_arguments(arguments),
+        Some("dictionary") => parse_dictionary_arguments(arguments),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
+}
+
+fn parse_dictionary_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut arguments = arguments.into_iter();
+    match arguments.next().as_deref() {
+        Some("list") => {
+            if arguments.next().is_some() {
+                return Err(CliError::Usage(
+                    "dictionary list does not accept arguments".to_owned(),
+                ));
+            }
+            Ok(Command::Dictionary(DictionaryCommand::List))
+        }
+        Some("fetch") => parse_dictionary_fetch_arguments(arguments),
+        Some("--help" | "-h") => Ok(Command::Help),
+        Some(subcommand) => Err(CliError::Usage(format!(
+            "unknown dictionary subcommand `{subcommand}`"
+        ))),
+        None => Err(CliError::Usage(
+            "dictionary requires `list` or `fetch`".to_owned(),
+        )),
+    }
+}
+
+fn parse_dictionary_fetch_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut locale = None;
+    let mut cache_path = None;
+    let mut arguments = arguments.into_iter();
+
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--cache" => set_once_path(&mut cache_path, &mut arguments, "--cache")?,
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
+            }
+            _ => {
+                if locale.replace(argument).is_some() {
+                    return Err(CliError::Usage(
+                        "dictionary fetch accepts exactly one locale".to_owned(),
+                    ));
+                }
+            }
+        }
+    }
+
+    let locale = locale.ok_or_else(|| {
+        CliError::Usage("dictionary fetch requires exactly one locale".to_owned())
+    })?;
+    let cache_path = cache_path
+        .ok_or_else(|| CliError::Usage("dictionary fetch requires `--cache`".to_owned()))?;
+    Ok(Command::Dictionary(DictionaryCommand::Fetch {
+        locale,
+        cache_path,
+    }))
 }
 
 fn parse_validate_arguments(
@@ -508,6 +607,20 @@ fn required_path(
     Ok(PathBuf::from(path))
 }
 
+fn set_once_path(
+    destination: &mut Option<PathBuf>,
+    arguments: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<(), CliError> {
+    let value = required_path(arguments, option)?;
+    if destination.replace(value).is_some() {
+        return Err(CliError::Usage(format!(
+            "`{option}` may only be supplied once"
+        )));
+    }
+    Ok(())
+}
+
 fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<(), CliError> {
     if target.replace(value).is_some() {
         return Err(CliError::Usage(
@@ -524,6 +637,7 @@ enum Command {
     Analyze(AnalyzeCommand),
     Compile(CompileCommand),
     Validate(ValidateCommand),
+    Dictionary(DictionaryCommand),
     Help,
 }
 
@@ -564,6 +678,12 @@ enum ValidateCommand {
     },
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum DictionaryCommand {
+    List,
+    Fetch { locale: String, cache_path: PathBuf },
+}
+
 #[derive(Debug)]
 enum CliError {
     Usage(String),
@@ -588,6 +708,8 @@ enum CliError {
         path: PathBuf,
         source: ValidationError,
     },
+    DictionaryManifest(DictionaryManifestError),
+    FetchDictionary(DictionaryFetchError),
 }
 
 impl fmt::Display for CliError {
@@ -632,6 +754,12 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::DictionaryManifest(source) => {
+                write!(formatter, "invalid dictionary review manifest: {source}")
+            }
+            Self::FetchDictionary(source) => {
+                write!(formatter, "could not fetch dictionary: {source}")
+            }
         }
     }
 }
@@ -646,6 +774,8 @@ impl Error for CliError {
             Self::CompileDictionary(source) => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),
+            Self::DictionaryManifest(source) => Some(source),
+            Self::FetchDictionary(source) => Some(source),
         }
     }
 }
@@ -661,7 +791,7 @@ mod tests {
 
     use super::{
         line_and_column, parse_arguments, run, AnalyzeCommand, CheckCommand, CheckTarget, CliError,
-        Command, CompileCommand, RunOutcome, ValidateCommand,
+        Command, CompileCommand, DictionaryCommand, RunOutcome, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -772,6 +902,44 @@ mod tests {
                 output_path: PathBuf::from("words.flex"),
             })
         );
+    }
+
+    #[test]
+    fn parses_a_catalog_pinned_dictionary_fetch() {
+        let command = parse_arguments([
+            "ferrolex".to_owned(),
+            "dictionary".to_owned(),
+            "fetch".to_owned(),
+            "de_DE".to_owned(),
+            "--cache".to_owned(),
+            ".dictionary-cache".to_owned(),
+        ])
+        .expect("the reviewed fetch command is valid");
+
+        assert_eq!(
+            command,
+            Command::Dictionary(DictionaryCommand::Fetch {
+                locale: "de_DE".to_owned(),
+                cache_path: PathBuf::from(".dictionary-cache"),
+            })
+        );
+    }
+
+    #[test]
+    fn dictionary_fetch_requires_a_caller_selected_cache() {
+        let error =
+            parse_arguments(["ferrolex", "dictionary", "fetch", "de_DE"].map(str::to_owned))
+                .expect_err("the installer must not infer a cache location");
+
+        assert!(matches!(error, CliError::Usage(message) if message.contains("--cache")));
+    }
+
+    #[test]
+    fn parses_a_catalog_listing_without_network_parameters() {
+        let command = parse_arguments(["ferrolex", "dictionary", "list"].map(str::to_owned))
+            .expect("list needs no download configuration");
+
+        assert_eq!(command, Command::Dictionary(DictionaryCommand::List));
     }
 
     #[test]

@@ -18,6 +18,7 @@ path = "src/main.rs"
 ferrolex-code = { path = "../ferrolex-code", version = "0.1.0" }
 ferrolex-compiler = { path = "../ferrolex-compiler", version = "0.1.0" }
 ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
+ferrolex-dictionaries = { path = "../ferrolex-dictionaries", version = "0.1.0" }
 ferrolex-hunspell = { path = "../ferrolex-hunspell", version = "0.1.0" }
 ferrolex-text = { path = "../ferrolex-text", version = "0.1.0" }
 
