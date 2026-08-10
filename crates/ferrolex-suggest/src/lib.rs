@@ -113,13 +113,12 @@ impl<'source, S: CandidateSource> Suggester<'source, S> {
     /// Generates ranked suggestions for `query`.
     #[must_use]
     pub fn suggest(&self, query: &str) -> SuggestionResult {
-        let query_chars = lowercase_chars(query);
-        if query_chars.len() > self.config.max_word_scalars {
+        let Some(query_chars) = lowercase_chars_bounded(query, self.config.max_word_scalars) else {
             return SuggestionResult {
                 suggestions: Vec::new(),
                 completeness: Completeness::QueryTooLong,
             };
-        }
+        };
         let mut suggestions = Vec::new();
         let mut examined = 0;
         let mut cells = 0_usize;
@@ -130,10 +129,11 @@ impl<'source, S: CandidateSource> Suggester<'source, S> {
                 return false;
             }
             examined += 1;
-            let candidate_chars = lowercase_chars(candidate);
-            if candidate_chars.len() > self.config.max_word_scalars {
+            let Some(candidate_chars) =
+                lowercase_chars_bounded(candidate, self.config.max_word_scalars)
+            else {
                 return true;
-            }
+            };
             let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
             if cells.saturating_add(required) > self.config.max_edit_cells {
                 completeness = Completeness::EditBudgetReached;
@@ -186,8 +186,17 @@ fn present(candidate: &str, query: &str) -> String {
     }
 }
 
-fn lowercase_chars(word: &str) -> Vec<char> {
-    word.chars().flat_map(char::to_lowercase).collect()
+fn lowercase_chars_bounded(word: &str, maximum: usize) -> Option<Vec<char>> {
+    let mut lowercase = Vec::new();
+    for character in word.chars() {
+        for lowercase_character in character.to_lowercase() {
+            if lowercase.len() == maximum {
+                return None;
+            }
+            lowercase.push(lowercase_character);
+        }
+    }
+    Some(lowercase)
 }
 
 fn osa_distance(left: &[char], right: &[char], maximum: usize) -> Option<usize> {
@@ -220,8 +229,25 @@ fn osa_distance(left: &[char], right: &[char], maximum: usize) -> Option<usize> 
 
 #[cfg(test)]
 mod tests {
-    use super::{Completeness, SuggestConfig, Suggester};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use super::{CandidateSource, Completeness, SuggestConfig, Suggester};
     use ferrolex_core::WordList;
+
+    struct TestSource<'candidate> {
+        candidates: &'candidate [&'candidate str],
+    }
+
+    impl CandidateSource for TestSource<'_> {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            for candidate in self.candidates {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+    }
+
     #[test]
     fn suggests_missing_letters_and_transpositions_deterministically() {
         let words = WordList::new(["authentication", "receive", "recipe"]).expect("valid words");
@@ -248,6 +274,78 @@ mod tests {
                 .suggest("words")
                 .completeness(),
             Completeness::QueryTooLong
+        );
+    }
+
+    #[test]
+    fn deterministic_adversarial_suggestion_corpus_never_panics() {
+        let long_unicode = "İ".repeat(10_000);
+        let candidates = ["", "word", "東京", "🦀", long_unicode.as_str()];
+        let source = TestSource {
+            candidates: &candidates,
+        };
+        let configurations = [
+            SuggestConfig::default(),
+            SuggestConfig {
+                max_results: 0,
+                ..SuggestConfig::default()
+            },
+            SuggestConfig {
+                max_candidates: 0,
+                ..SuggestConfig::default()
+            },
+            SuggestConfig {
+                max_edit_cells: 0,
+                ..SuggestConfig::default()
+            },
+            SuggestConfig {
+                max_word_scalars: 0,
+                ..SuggestConfig::default()
+            },
+        ];
+        let queries = ["", "wrod", "東京", "🦀", long_unicode.as_str()];
+
+        for (configuration_index, configuration) in configurations.iter().enumerate() {
+            for (query_index, query) in queries.iter().enumerate() {
+                let outcome = catch_unwind(AssertUnwindSafe(|| {
+                    let result = Suggester::new(&source, *configuration).suggest(query);
+                    assert!(result.suggestions().len() <= configuration.max_results);
+                    assert!(result.suggestions().iter().all(|suggestion| suggestion
+                        .word()
+                        .is_char_boundary(suggestion.word().len())));
+                }));
+                assert!(
+                    outcome.is_ok(),
+                    "suggestion case configuration={configuration_index}, query={query_index} panicked"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_unicode_inputs_short_circuit_before_case_expansion() {
+        let long_unicode = "İ".repeat(10_000);
+        let candidates = [long_unicode.as_str(), "word"];
+        let source = TestSource {
+            candidates: &candidates,
+        };
+        let config = SuggestConfig {
+            max_word_scalars: 4,
+            ..SuggestConfig::default()
+        };
+
+        assert_eq!(
+            Suggester::new(&source, config)
+                .suggest(&long_unicode)
+                .completeness(),
+            Completeness::QueryTooLong
+        );
+        assert_eq!(
+            Suggester::new(&source, config)
+                .suggest("wrod")
+                .suggestions()[0]
+                .word(),
+            "word"
         );
     }
 }

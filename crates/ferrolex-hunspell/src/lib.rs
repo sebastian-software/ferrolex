@@ -212,7 +212,13 @@ impl HunspellDictionary {
         let Some(compound_flag) = &self.compound.flag else {
             return false;
         };
-        let characters = word.char_indices().collect::<Vec<_>>();
+        // Retain at most the bounded number of split positions.  Building an
+        // index for an arbitrarily long untrusted query would defeat the
+        // compound-evaluation limit before it can reject the query.
+        let characters = word
+            .char_indices()
+            .take(MAX_COMPOUND_SCALARS.saturating_add(1))
+            .collect::<Vec<_>>();
         if characters.len() > MAX_COMPOUND_SCALARS {
             return false;
         }
@@ -493,14 +499,12 @@ struct ParsedAff {
 }
 
 fn parse_aff(source: &str, text: &str) -> ParsedAff {
-    let lines = text.lines().collect::<Vec<_>>();
     let mut parsed = ParsedAff::default();
-    let mut index = 0;
+    let mut lines = text.lines().enumerate();
 
-    while index < lines.len() {
-        let line = lines[index].trim();
+    while let Some((index, original_line)) = lines.next() {
+        let line = original_line.trim();
         let line_number = index + 1;
-        index += 1;
         if is_ignored_line(line) {
             continue;
         }
@@ -570,8 +574,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
-                &lines,
-                &mut index,
+                &mut lines,
                 line_number,
                 &fields,
                 &mut parsed,
@@ -716,8 +719,7 @@ fn parse_compound_minimum(
 fn parse_affix_group(
     source: &str,
     directive: &str,
-    lines: &[&str],
-    index: &mut usize,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
     line_number: usize,
     fields: &[&str],
     parsed: &mut ParsedAff,
@@ -773,10 +775,12 @@ fn parse_affix_group(
         AffixKind::Suffix
     };
     let mut consumed_rules = 0;
-    while *index < lines.len() && consumed_rules < rule_count {
-        let rule_line = lines[*index].trim();
-        let rule_line_number = *index + 1;
-        *index += 1;
+    while consumed_rules < rule_count {
+        let Some((index, original_line)) = lines.next() else {
+            break;
+        };
+        let rule_line = original_line.trim();
+        let rule_line_number = index + 1;
         if is_ignored_line(rule_line) {
             continue;
         }
@@ -1147,12 +1151,13 @@ fn diagnostic(
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::Arc;
     use std::thread;
 
     use ferrolex_core::Dictionary;
 
-    use super::{import, ImportMode, Severity};
+    use super::{import, ImportMode, Severity, MAX_COMPOUND_SCALARS};
 
     const AFFIXES: &str =
         "SET UTF-8\nFLAG UTF-8\nPFX A Y 1\nPFX A 0 un .\nSFX B Y 1\nSFX B y ies [^aeiou]y\n";
@@ -1286,6 +1291,67 @@ mod tests {
             .diagnostics()
             .iter()
             .any(|item| item.directive() == "count"));
+    }
+
+    #[test]
+    fn deterministic_adversarial_import_corpus_never_panics() {
+        let excessive_flags = "A".repeat(257);
+        let excessive_condition = ".".repeat(257);
+        let affixes = [
+            String::new(),
+            "\0\n\u{feff}\n".to_owned(),
+            "PFX A Y 18446744073709551616\n".to_owned(),
+            "PFX A Y 2\nPFX A 0 re [\n".to_owned(),
+            format!("SFX A N 1\nSFX A 0 s {excessive_condition}\n"),
+            "SFX A Y 1\nPFX A 0 re .\n".to_owned(),
+            "COMPOUNDMIN 0\nFORBIDDENWORD AB\n".to_owned(),
+        ];
+        let dictionaries = [
+            String::new(),
+            "\0\n".to_owned(),
+            "18446744073709551616\nword\n".to_owned(),
+            "2\nword/\n\n".to_owned(),
+            format!("1\nword/{excessive_flags}\n"),
+            "1\n/ABC\n".to_owned(),
+            "1\n東京/A\n".to_owned(),
+        ];
+
+        for (aff_index, aff) in affixes.iter().enumerate() {
+            for (dictionary_index, dictionary) in dictionaries.iter().enumerate() {
+                let outcome = catch_unwind(AssertUnwindSafe(|| {
+                    let imported = import(
+                        "adversarial.aff",
+                        aff,
+                        "adversarial.dic",
+                        dictionary,
+                        ImportMode::Lenient,
+                    )
+                    .expect("lenient mode always returns a safe subset");
+                    for query in ["", "word", "東京", "wordword", "\0"] {
+                        let _ = imported.dictionary().contains(query);
+                    }
+                }));
+                assert!(
+                    outcome.is_ok(),
+                    "adversarial import case aff={aff_index}, dictionary={dictionary_index} panicked"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compound_evaluation_rejects_overlong_queries_before_indexing_them() {
+        let imported = import(
+            "test.aff",
+            "COMPOUNDFLAG M\nCOMPOUNDMIN 1\n",
+            "test.dic",
+            "2\na/M\nb/M\n",
+            ImportMode::Strict,
+        )
+        .expect("compound dictionary imports");
+        let query = "ab".repeat(MAX_COMPOUND_SCALARS);
+
+        assert!(!imported.dictionary().contains(&query));
     }
 
     #[test]

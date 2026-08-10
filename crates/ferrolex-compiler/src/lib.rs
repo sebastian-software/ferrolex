@@ -650,6 +650,8 @@ fn checksum(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
     use super::{
         checksum, compile_words, put_u64, CompileError, CompiledDictionary, LoadError,
         ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
@@ -757,6 +759,52 @@ mod tests {
         assert_eq!(index_offset % 8, 0);
         assert_eq!(data_offset % 8, 0);
         assert_eq!(&bytes[8..10], &[1, 0]);
+    }
+
+    #[test]
+    fn deterministic_adversarial_loader_corpus_never_panics() {
+        let template = compile_words(["alpha", "東京", "🦀"])
+            .expect("valid words compile into a test template");
+
+        for length in 0..=template.len() {
+            assert_loader_handles(&template[..length], format_args!("truncation at {length}"));
+        }
+        for offset in 0..template.len() {
+            let mut mutated = template.clone();
+            mutated[offset] ^= 0xa5;
+            refresh_checksum(&mut mutated);
+            assert_loader_handles(&mutated, format_args!("single-byte mutation at {offset}"));
+        }
+
+        let mut state = 0x6d0f_27bd_4c51_aa93_u64;
+        for case in 0..512 {
+            let length = usize::try_from(next_random(&mut state) % 513)
+                .expect("small deterministic corpus length fits usize");
+            let mut bytes = vec![0_u8; length];
+            for byte in &mut bytes {
+                *byte = next_random(&mut state).to_le_bytes()[0];
+            }
+            assert_loader_handles(&bytes, format_args!("seeded byte case {case}"));
+        }
+    }
+
+    fn assert_loader_handles(bytes: &[u8], label: std::fmt::Arguments<'_>) {
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            if let Ok(dictionary) = CompiledDictionary::load(bytes.to_vec()) {
+                let _ = dictionary.validate();
+                for query in ["", "alpha", "東京", "🦀", "not-present"] {
+                    let _ = dictionary.contains(query);
+                }
+            }
+        }));
+        assert!(outcome.is_ok(), "compiled loader panicked for {label}");
+    }
+
+    fn next_random(state: &mut u64) -> u64 {
+        *state ^= *state << 7;
+        *state ^= *state >> 9;
+        *state ^= *state << 8;
+        *state
     }
 
     fn read_header_u64(bytes: &[u8], offset: usize) -> u64 {
