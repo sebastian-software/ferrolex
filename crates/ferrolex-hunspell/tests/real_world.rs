@@ -10,8 +10,11 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
-use ferrolex_hunspell::{import, ImportMode};
+use ferrolex_hunspell::{
+    compile_runtime_cache, import_bytes, load_runtime_cache, ImportMode, SourceDigests,
+};
 
 const MANIFEST: &str = include_str!("real_world/manifest.tsv");
 
@@ -27,6 +30,7 @@ struct Fixture {
     dic_sha256: String,
     aff_decode: Decode,
     dic_decode: Decode,
+    import_expectation: ImportExpectation,
     accepted: Vec<String>,
     rejected: Vec<String>,
     source: String,
@@ -38,6 +42,7 @@ struct Fixture {
 enum Decode {
     Utf8,
     Latin1,
+    Latin2,
     NotUtf8,
 }
 
@@ -46,6 +51,7 @@ impl Decode {
         match value {
             "utf-8" => Ok(Self::Utf8),
             "iso-8859-1" => Ok(Self::Latin1),
+            "iso-8859-2" => Ok(Self::Latin2),
             "not-utf-8" => Ok(Self::NotUtf8),
             _ => Err(format!("unknown decoding mode `{value}`")),
         }
@@ -60,9 +66,41 @@ impl Decode {
                 )
             }),
             // ISO-8859-1 has a direct one-code-point-per-byte mapping, so this
-            // conversion is lossless and needs no runtime encoding dependency.
+            // reporting conversion is lossless.
             Self::Latin1 => Ok(bytes.iter().map(|byte| char::from(*byte)).collect()),
+            Self::Latin2 => {
+                let (text, _, had_replacements) = ISO_8859_2.decode(bytes);
+                (!had_replacements)
+                    .then(|| text.into_owned())
+                    .ok_or_else(|| "ISO-8859-2 decoding replaced invalid input".to_owned())
+            }
             Self::NotUtf8 => Err("fixture is intentionally recorded as non-UTF-8".to_owned()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImportExpectation {
+    Lenient,
+    Strict,
+    Blocked,
+}
+
+impl ImportExpectation {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "lenient" => Ok(Self::Lenient),
+            "strict" => Ok(Self::Strict),
+            "blocked" => Ok(Self::Blocked),
+            _ => Err(format!("unknown import expectation `{value}`")),
+        }
+    }
+
+    const fn mode(self) -> Option<ImportMode> {
+        match self {
+            Self::Lenient => Some(ImportMode::Lenient),
+            Self::Strict => Some(ImportMode::Strict),
+            Self::Blocked => None,
         }
     }
 }
@@ -94,6 +132,9 @@ fn real_world_manifest_is_complete_and_source_pinned() {
         assert!(!fixture.license.is_empty());
         assert!(!fixture.accepted.is_empty());
         assert!(!fixture.rejected.is_empty());
+        if fixture.import_expectation == ImportExpectation::Blocked {
+            assert_eq!(fixture.aff_decode, Decode::NotUtf8);
+        }
     }
 }
 
@@ -117,6 +158,93 @@ fn local_real_world_fixtures_report_format_and_recognition() {
 }
 
 fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
+    let (aff_path, dic_path, aff_bytes, dic_bytes) = read_verified_fixture(root, fixture);
+    writeln!(report, "fixture={} locale={}", fixture.id, fixture.locale)
+        .expect("writing to String does not fail");
+    writeln!(report, "  source={}", fixture.source).expect("writing to String does not fail");
+    writeln!(report, "  license={}", fixture.license).expect("writing to String does not fail");
+    writeln!(
+        report,
+        "  sha256.aff={} sha256.dic={} (verified)",
+        fixture.aff_sha256, fixture.dic_sha256
+    )
+    .expect("writing to String does not fail");
+
+    let aff_text = match fixture.aff_decode.decode(&aff_bytes) {
+        Ok(text) => text,
+        Err(reason) => {
+            writeln!(report, "  format=blocked ({reason})")
+                .expect("writing to String does not fail");
+            return;
+        }
+    };
+    let _dic_text = match fixture.dic_decode.decode(&dic_bytes) {
+        Ok(text) => text,
+        Err(reason) => {
+            writeln!(report, "  format=blocked ({reason})")
+                .expect("writing to String does not fail");
+            return;
+        }
+    };
+    let Some(mode) = fixture.import_expectation.mode() else {
+        writeln!(report, "  format=blocked (manifested format boundary)")
+            .expect("writing to String does not fail");
+        return;
+    };
+    let directives = directives_in(&aff_text);
+    let imported = import_bytes(
+        &aff_path.display().to_string(),
+        &aff_bytes,
+        &dic_path.display().to_string(),
+        &dic_bytes,
+        mode,
+    )
+    .unwrap_or_else(|error| panic!("{} import unexpectedly failed: {error}", fixture.id));
+    let diagnostics = imported
+        .diagnostics()
+        .iter()
+        .map(ferrolex_hunspell::Diagnostic::directive)
+        .collect::<BTreeSet<_>>();
+    writeln!(
+        report,
+        "  format=imported directives={} recognition_diagnostics={}",
+        join(&directives),
+        join(&diagnostics)
+    )
+    .expect("writing to String does not fail");
+
+    let sources = SourceDigests::from_source_bytes(&aff_bytes, &dic_bytes);
+    let cache = compile_runtime_cache(imported.dictionary(), sources)
+        .unwrap_or_else(|error| panic!("{} cache compilation failed: {error}", fixture.id));
+    let dictionary = load_runtime_cache(&cache, sources)
+        .unwrap_or_else(|error| panic!("{} cache loading failed: {error}", fixture.id));
+    writeln!(report, "  runtime_cache=compiled-and-validated")
+        .expect("writing to String does not fail");
+
+    for word in &fixture.accepted {
+        assert!(
+            dictionary.contains(word),
+            "{} must recognize recorded positive probe `{word}`",
+            fixture.id
+        );
+    }
+    for word in &fixture.rejected {
+        assert!(
+            !dictionary.contains(word),
+            "{} must reject recorded negative probe `{word}`",
+            fixture.id
+        );
+    }
+    writeln!(
+        report,
+        "  recognition=accepted:{} rejected:{}",
+        join(&fixture.accepted),
+        join(&fixture.rejected)
+    )
+    .expect("writing to String does not fail");
+}
+
+fn read_verified_fixture(root: &Path, fixture: &Fixture) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {
     let aff_path = root.join(&fixture.id).join(&fixture.aff_path);
     let dic_path = root.join(&fixture.id).join(&fixture.dic_path);
     let aff_bytes = fs::read(&aff_path)
@@ -148,76 +276,7 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
         "{} .dic SHA-256",
         fixture.id
     );
-    writeln!(report, "fixture={} locale={}", fixture.id, fixture.locale)
-        .expect("writing to String does not fail");
-    writeln!(report, "  source={}", fixture.source).expect("writing to String does not fail");
-    writeln!(report, "  license={}", fixture.license).expect("writing to String does not fail");
-    writeln!(
-        report,
-        "  sha256.aff={} sha256.dic={} (verified)",
-        fixture.aff_sha256, fixture.dic_sha256
-    )
-    .expect("writing to String does not fail");
-
-    let aff_text = match fixture.aff_decode.decode(&aff_bytes) {
-        Ok(text) => text,
-        Err(reason) => {
-            writeln!(report, "  format=blocked ({reason})")
-                .expect("writing to String does not fail");
-            return;
-        }
-    };
-    let dic_text = match fixture.dic_decode.decode(&dic_bytes) {
-        Ok(text) => text,
-        Err(reason) => {
-            writeln!(report, "  format=blocked ({reason})")
-                .expect("writing to String does not fail");
-            return;
-        }
-    };
-    let directives = directives_in(&aff_text);
-    let imported = import(
-        &aff_path.display().to_string(),
-        &aff_text,
-        &dic_path.display().to_string(),
-        &dic_text,
-        ImportMode::Lenient,
-    )
-    .expect("lenient imports return diagnostics instead of failing");
-    let diagnostics = imported
-        .diagnostics()
-        .iter()
-        .map(ferrolex_hunspell::Diagnostic::directive)
-        .collect::<BTreeSet<_>>();
-    writeln!(
-        report,
-        "  format=imported directives={} recognition_diagnostics={}",
-        join(&directives),
-        join(&diagnostics)
-    )
-    .expect("writing to String does not fail");
-
-    for word in &fixture.accepted {
-        assert!(
-            imported.dictionary().contains(word),
-            "{} must recognize recorded positive probe `{word}`",
-            fixture.id
-        );
-    }
-    for word in &fixture.rejected {
-        assert!(
-            !imported.dictionary().contains(word),
-            "{} must reject recorded negative probe `{word}`",
-            fixture.id
-        );
-    }
-    writeln!(
-        report,
-        "  recognition=accepted:{} rejected:{}",
-        join(&fixture.accepted),
-        join(&fixture.rejected)
-    )
-    .expect("writing to String does not fail");
+    (aff_path, dic_path, aff_bytes, dic_bytes)
 }
 
 fn directives_in(aff_text: &str) -> BTreeSet<&str> {
@@ -251,9 +310,9 @@ fn parse_manifest(text: &str) -> Result<Vec<Fixture>, String> {
 
 fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
     let fields = line.split('\t').collect::<Vec<_>>();
-    if fields.len() != 15 {
+    if fields.len() != 16 {
         return Err(format!(
-            "manifest line {line_number} has {} fields; expected 15",
+            "manifest line {line_number} has {} fields; expected 16",
             fields.len()
         ));
     }
@@ -279,11 +338,12 @@ fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
         dic_sha256: fields[7].to_owned(),
         aff_decode: Decode::parse(fields[8])?,
         dic_decode: Decode::parse(fields[9])?,
-        accepted: parse_words(fields[10]),
-        rejected: parse_words(fields[11]),
-        source: fields[12].to_owned(),
-        license: fields[13].to_owned(),
-        license_evidence: fields[14].to_owned(),
+        import_expectation: ImportExpectation::parse(fields[10])?,
+        accepted: parse_words(fields[11]),
+        rejected: parse_words(fields[12]),
+        source: fields[13].to_owned(),
+        license: fields[14].to_owned(),
+        license_evidence: fields[15].to_owned(),
     })
 }
 

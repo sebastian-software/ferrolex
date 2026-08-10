@@ -29,10 +29,11 @@ The columns deliberately use different kinds of evidence:
   directives alone produce warnings and do not fail strict mode; every other
   unimplemented directive can affect recognition and is an error.
 
-The matrix intentionally has no `supported` checkmark yet. A locale earns that
-label only after a byte-verified local fixture imports in strict mode and has
-recorded accepted and rejected word probes. This keeps a source catalog from
-turning into an accidental quality promise.
+The matrix intentionally has no general `supported` checkmark yet. A strict
+fixture is evidence only for the documented ferrolex subset and its recorded
+probes; broader support also needs a completed source-license review and
+language-relevant behavior coverage. This keeps a source catalog from turning
+into an accidental quality promise.
 
 ## Pinned source matrix
 
@@ -46,7 +47,7 @@ turning into an accidental quality promise.
 | `pt_BR` | Latin | UTF-8 with leading BOM in `.aff` | Blocked | The byte importer normalizes the leading BOM; `BREAK`, `ONLYMAXDIFF`, and `WARN` remain outside the subset. |
 | `pt_PT` | Latin | UTF-8 | Blocked | `LANG` and `WORDCHARS` are outside the recognition subset; `KEY`, `MAP`, `REP`, and `TRY` are only suggestion warnings. |
 | `nl_NL` | Latin | UTF-8 | Blocked | Compound-position and compound-check directives, `COMPOUNDRULE`, `FORCEUCASE`, `OCONV`, and `WORDCHARS` exceed the subset. |
-| `pl_PL` | Latin | ISO-8859-2 | No known AFF error | The byte importer decodes ISO-8859-2 from `SET`; a local exact-pair strict run succeeds with only suggestion/count warnings. Recognition probes are still pending. |
+| `pl_PL` | Latin | ISO-8859-2 | Strict fixture | The exact-byte fixture imports through the public ISO-8859-2 byte path, compiles and reloads the runtime cache, accepts `słowo` and `słowami`, and rejects its synthetic negative probe. This validates the documented subset, not full Hunspell compatibility or redistribution terms. |
 | `ru_RU` | Cyrillic | UTF-8 | No known AFF error | The observed AFF uses `SET`, `SFX`, and suggestion-only `TRY`; a local exact-pair strict run succeeds with one warning. Recognition probes are still pending. |
 | `tr_TR` | Latin, agglutinative | UTF-8 | Blocked | `LANG` is not implemented. Turkish should also receive generated-form probes before any support claim. |
 | `ar` | Arabic | UTF-8 | Blocked | `AF`/`AM` aliases, `ICONV`, and `IGNORE` are not implemented. Fetching is useful for compatibility work, not yet a strict-import endorsement. |

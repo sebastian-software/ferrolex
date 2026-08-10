@@ -10,17 +10,18 @@ source review visible.
 
 [`crates/ferrolex-hunspell/tests/real_world/manifest.tsv`](../crates/ferrolex-hunspell/tests/real_world/manifest.tsv)
 is the authoritative registry. It pins a source revision, file sizes,
-SHA-256 values, decoding status, positive recognition probes, and a negative
-probe for every fixture. It deliberately contains metadata only, never
-dictionary words or affix rules.
+SHA-256 values, decoding status, import expectation, positive recognition
+probes, and a negative probe for every fixture. It deliberately contains
+metadata only, never dictionary words or affix rules.
 
 The first two cases were selected for complementary evidence rather than their
 licenses alone:
 
 | ID | Source and license evidence | Purpose | Current expected result |
 | --- | --- | --- | --- |
-| `en_CA` | Chromium's pinned Hunspell dictionary repository includes [`README_en_CA.txt`](https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/50fb79b30a2e3e512c88884152f26b255d0e4074/README_en_CA.txt), which states the permissive redistribution conditions inherited from Geoff Kuenning's word list. | A compact, real ISO-8859-1 dictionary with ordinary English affixes and compound directives. | The harness losslessly converts ISO-8859-1 to UTF-8 before calling the importer. It records recognition-affecting diagnostics such as `COMPOUNDRULE` instead of hiding them. |
+| `en_CA` | Chromium's pinned Hunspell dictionary repository includes [`README_en_CA.txt`](https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/50fb79b30a2e3e512c88884152f26b255d0e4074/README_en_CA.txt), which states the permissive redistribution conditions inherited from Geoff Kuenning's word list. | A compact, real ISO-8859-1 dictionary with ordinary English affixes and compound directives. | The harness uses the public byte importer, which losslessly decodes the declared ISO-8859-1 input. It records recognition-affecting diagnostics such as `COMPOUNDRULE` instead of hiding them. |
 | `hu_HU` | The [`Magyar Ispell COPYING`](https://github.com/laszlonemeth/magyarispell/blob/455229e26eaf5c9ed5bb7a4456c131fc0985e399/COPYING) file explicitly grants GPL-2.0-or-later, LGPL-2.1-or-later, or MPL-1.1-or-later; its project identifies LibreOffice's `hu_HU` files as the release dictionary. | A large morphology stress case required by the RFC. | The pinned `.aff` bytes are not valid UTF-8 despite their `SET` line, so the suite reports a format boundary rather than silently lossy-decoding the input. |
+| `pl_PL` | LibreOffice's pinned locale directory carries a [locale-specific upstream notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/pl_PL/README_pl_PL.txt). Its exact data license remains an explicit review item before any redistribution decision. | First strict byte-import reference case: ISO-8859-2 decoding, runtime-cache compilation, and cache loading are all exercised against exact upstream bytes. | Strict import accepts the documented subset; cached recognition accepts `słowo` and `słowami` and rejects the synthetic negative probe. This is bounded ferrolex-subset evidence, not general Hunspell parity. |
 
 These terms govern the dictionary data, not ferrolex. They are acceptable for
 an opt-in test because no third-party content is distributed by this repository.
@@ -41,6 +42,9 @@ the manifest; the suite intentionally has no downloader.
 └── hu_HU/
     ├── hu_HU.aff
     └── hu_HU.dic
+└── pl_PL/
+    ├── pl_PL.aff
+    └── pl_PL.dic
 ```
 
 Before enabling the suite, compare both byte size and SHA-256 with the
@@ -50,6 +54,7 @@ Linux installations, the optional manual check is:
 ```sh
 shasum -a 256 .compat-fixtures/en_CA/en_CA.aff .compat-fixtures/en_CA/en_CA.dic
 shasum -a 256 .compat-fixtures/hu_HU/hu_HU.aff .compat-fixtures/hu_HU/hu_HU.dic
+shasum -a 256 .compat-fixtures/pl_PL/pl_PL.aff .compat-fixtures/pl_PL/pl_PL.dic
 ```
 
 Then run the opt-in integration test:
@@ -71,7 +76,8 @@ With fixtures enabled, the test prints one report block per source containing:
 - the recorded SHA-256 values and local byte-length check;
 - all directives observed in the `.aff` file;
 - the recognition-affecting directives emitted by the ferrolex importer;
-- positive and negative probe outcomes; or an explicit encoding boundary.
+- positive and negative probe outcomes after a runtime-cache roundtrip; or an
+  explicit encoding boundary.
 
 This is a compatibility scorecard, not a claim of bug-for-bug Hunspell parity.
 When a recognition directive becomes supported, update the project-owned
