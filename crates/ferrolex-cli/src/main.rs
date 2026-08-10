@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
+use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>";
+const USAGE: &str = "Usage: ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] <WORD>\n       ferrolex check --dictionary <PATH> [--dictionary <PATH> ...] --file <PATH>";
 
 fn main() -> ExitCode {
     match run(env::args()) {
@@ -36,8 +37,16 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
 }
 
 fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
-    let dictionaries = command
-        .dictionary_paths
+    let checker = load_checker(&command.dictionary_paths)?;
+
+    match &command.target {
+        CheckTarget::Word(word) => Ok(check_word(&checker, word)),
+        CheckTarget::File(path) => check_file(&checker, path),
+    }
+}
+
+fn load_checker(dictionary_paths: &[PathBuf]) -> Result<Checker, CliError> {
+    let dictionaries = dictionary_paths
         .iter()
         .map(|path| {
             fs::read_to_string(path)
@@ -55,13 +64,54 @@ fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
         })
         .build();
 
-    if checker.contains(&command.word) {
-        println!("accepted: {}", command.word);
-        Ok(RunOutcome::Success)
+    Ok(checker)
+}
+
+fn check_word(checker: &Checker, word: &str) -> RunOutcome {
+    if checker.contains(word) {
+        println!("accepted: {word}");
+        RunOutcome::Success
     } else {
-        println!("misspelled: {}", command.word);
-        Ok(RunOutcome::Misspelled)
+        println!("misspelled: {word}");
+        RunOutcome::Misspelled
     }
+}
+
+fn check_file(checker: &Checker, path: &PathBuf) -> Result<RunOutcome, CliError> {
+    let text = fs::read_to_string(path).map_err(|source| CliError::ReadInput {
+        path: path.clone(),
+        source,
+    })?;
+    let mut misspelled = false;
+
+    for issue in check_text(checker, &text) {
+        let (line, column) = line_and_column(&text, issue.range().start);
+        println!(
+            "{}:{line}:{column}: misspelled: {}",
+            path.display(),
+            issue.word()
+        );
+        misspelled = true;
+    }
+
+    Ok(if misspelled {
+        RunOutcome::Misspelled
+    } else {
+        RunOutcome::Success
+    })
+}
+
+fn line_and_column(text: &str, byte_offset: usize) -> (usize, usize) {
+    let prefix = &text[..byte_offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rsplit_once('\n')
+        .map_or(prefix, |(_, current_line)| current_line)
+        .chars()
+        .count()
+        + 1;
+
+    (line, column)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,7 +143,7 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
 
 fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Command, CliError> {
     let mut dictionary_paths = Vec::new();
-    let mut word = None;
+    let mut target = None;
     let mut arguments = arguments.into_iter();
 
     while let Some(argument) = arguments.next() {
@@ -107,18 +157,25 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
                 }
                 dictionary_paths.push(PathBuf::from(path));
             }
+            "--file" => {
+                let path = arguments
+                    .next()
+                    .ok_or_else(|| CliError::Usage("`--file` requires a path".to_owned()))?;
+                if path.starts_with('-') {
+                    return Err(CliError::Usage("`--file` requires a path".to_owned()));
+                }
+                set_target(&mut target, CheckTarget::File(PathBuf::from(path)))?;
+            }
             "--help" | "-h" => return Ok(Command::Help),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
-            _ if word.is_some() => {
-                return Err(CliError::Usage("check accepts exactly one word".to_owned()));
-            }
-            _ => word = Some(argument),
+            _ => set_target(&mut target, CheckTarget::Word(argument))?,
         }
     }
 
-    let word = word.ok_or_else(|| CliError::Usage("check requires a word".to_owned()))?;
+    let target =
+        target.ok_or_else(|| CliError::Usage("check requires a word or `--file`".to_owned()))?;
     if dictionary_paths.is_empty() {
         return Err(CliError::Usage(
             "check requires at least one `--dictionary` path".to_owned(),
@@ -127,8 +184,18 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
 
     Ok(Command::Check(CheckCommand {
         dictionary_paths,
-        word,
+        target,
     }))
+}
+
+fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<(), CliError> {
+    if target.replace(value).is_some() {
+        return Err(CliError::Usage(
+            "check accepts exactly one word or `--file` target".to_owned(),
+        ));
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -140,13 +207,20 @@ enum Command {
 #[derive(Debug, Eq, PartialEq)]
 struct CheckCommand {
     dictionary_paths: Vec<PathBuf>,
-    word: String,
+    target: CheckTarget,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum CheckTarget {
+    Word(String),
+    File(PathBuf),
 }
 
 #[derive(Debug)]
 enum CliError {
     Usage(String),
     ReadDictionary { path: PathBuf, source: io::Error },
+    ReadInput { path: PathBuf, source: io::Error },
 }
 
 impl fmt::Display for CliError {
@@ -160,6 +234,13 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::ReadInput { path, source } => {
+                write!(
+                    formatter,
+                    "could not read input `{}`: {source}",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -168,7 +249,7 @@ impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Usage(_) => None,
-            Self::ReadDictionary { source, .. } => Some(source),
+            Self::ReadDictionary { source, .. } | Self::ReadInput { source, .. } => Some(source),
         }
     }
 }
@@ -179,7 +260,10 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{parse_arguments, run, CheckCommand, CliError, Command, RunOutcome};
+    use super::{
+        line_and_column, parse_arguments, run, CheckCommand, CheckTarget, CliError, Command,
+        RunOutcome,
+    };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
 
@@ -203,7 +287,7 @@ mod tests {
             command,
             Command::Check(CheckCommand {
                 dictionary_paths: vec![PathBuf::from("en.txt"), PathBuf::from("technical.txt")],
-                word: "OAuth".to_owned(),
+                target: CheckTarget::Word("OAuth".to_owned()),
             })
         );
     }
@@ -257,6 +341,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn checks_every_natural_language_word_in_a_file() {
+        let dictionary = temporary_dictionary("Café\nStraße\n");
+        let input = temporary_file("Café, Strasse!\nStraße\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "check".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "--file".to_owned(),
+            input.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("inputs are readable"),
+            RunOutcome::Misspelled
+        );
+    }
+
+    #[test]
+    fn counts_columns_as_unicode_scalar_values() {
+        assert_eq!(line_and_column("Café\nStrasse", 6), (2, 1));
+    }
+
     struct TemporaryDictionary {
         path: PathBuf,
     }
@@ -268,6 +376,10 @@ mod tests {
     }
 
     fn temporary_dictionary(contents: &str) -> TemporaryDictionary {
+        temporary_file(contents)
+    }
+
+    fn temporary_file(contents: &str) -> TemporaryDictionary {
         let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "ferrolex-cli-test-{}-{sequence}.txt",

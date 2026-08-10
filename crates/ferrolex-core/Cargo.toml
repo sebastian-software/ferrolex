@@ -12,3 +12,13 @@ categories.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "lookup"
+harness = false
+
+[dependencies]
+unicode-normalization = "0.1.25"

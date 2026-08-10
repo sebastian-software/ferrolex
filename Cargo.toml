@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ferrolex-core", "crates/ferrolex-cli"]
+members = ["crates/ferrolex-core", "crates/ferrolex-text", "crates/ferrolex-cli"]
 resolver = "2"
 
 [workspace.package]

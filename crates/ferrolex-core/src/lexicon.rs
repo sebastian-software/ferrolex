@@ -1,4 +1,7 @@
+use std::borrow::Cow;
 use std::fmt;
+
+use unicode_normalization::{is_nfc, is_nfkc, UnicodeNormalization};
 
 /// An immutable collection that can recognize words.
 ///
@@ -11,15 +14,35 @@ pub trait Dictionary: Send + Sync {
 
 /// The lookup transformation applied to both dictionary entries and queries.
 ///
-/// Only exact matching is implemented initially. The enum makes the
-/// normalization contract explicit and leaves room for separately specified
-/// behavior such as Unicode normalization or case folding.
+/// Normalization never performs case folding. That behavior must remain a
+/// separate policy because language-specific casing can carry meaning.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Normalization {
     /// Compare each UTF-8 string exactly as supplied.
     #[default]
     Exact,
+    /// Canonically normalize Unicode text according to NFC.
+    Nfc,
+    /// Compatibility-normalize Unicode text according to NFKC.
+    Nfkc,
+}
+
+impl Normalization {
+    /// Returns the normalized lookup representation of `word`.
+    ///
+    /// Exact input and already-normalized NFC/NFKC input are borrowed. Other
+    /// normalization requests allocate the transformed UTF-8 representation.
+    #[must_use]
+    pub fn normalize(self, word: &str) -> Cow<'_, str> {
+        match self {
+            Self::Exact => Cow::Borrowed(word),
+            Self::Nfc if is_nfc(word) => Cow::Borrowed(word),
+            Self::Nfc => Cow::Owned(word.nfc().collect()),
+            Self::Nfkc if is_nfkc(word) => Cow::Borrowed(word),
+            Self::Nfkc => Cow::Owned(word.nfkc().collect()),
+        }
+    }
 }
 
 /// A structured error encountered while building a [`WordList`].
@@ -84,13 +107,13 @@ impl WordList {
         let mut entries = Vec::new();
 
         for (index, word) in words.into_iter().enumerate() {
-            let word = word.as_ref();
+            let word = normalization.normalize(word.as_ref());
             if word.is_empty() {
                 return Err(WordListError::EmptyEntry {
                     position: index + 1,
                 });
             }
-            entries.push(Box::<str>::from(word));
+            entries.push(Box::<str>::from(word.as_ref()));
         }
 
         Ok(Self::from_entries(normalization, entries))
@@ -117,7 +140,7 @@ impl WordList {
 
                 (!word.is_empty() && !word.starts_with('#')).then_some(word)
             })
-            .map(Box::<str>::from)
+            .map(|word| Box::<str>::from(normalization.normalize(word).as_ref()))
             .collect();
 
         Self::from_entries(normalization, entries)
@@ -159,12 +182,10 @@ impl WordList {
 
 impl Dictionary for WordList {
     fn contains(&self, word: &str) -> bool {
-        match self.normalization {
-            Normalization::Exact => self
-                .words
-                .binary_search_by(|candidate| candidate.as_ref().cmp(word))
-                .is_ok(),
-        }
+        let word = self.normalization.normalize(word);
+        self.words
+            .binary_search_by(|candidate| candidate.as_ref().cmp(word.as_ref()))
+            .is_ok()
     }
 }
 
@@ -207,6 +228,24 @@ mod tests {
             .expect("all test entries are non-empty");
 
         assert_eq!(dictionary.normalization(), Normalization::Exact);
+    }
+
+    #[test]
+    fn nfc_recognizes_canonically_equivalent_unicode() {
+        let dictionary = WordList::with_normalization(Normalization::Nfc, ["café"])
+            .expect("all test entries are non-empty");
+
+        assert!(dictionary.contains("cafe\u{301}"));
+        assert_eq!(dictionary.words().collect::<Vec<_>>(), ["café"]);
+    }
+
+    #[test]
+    fn nfkc_recognizes_compatibility_equivalent_unicode() {
+        let dictionary = WordList::with_normalization(Normalization::Nfkc, ["H"])
+            .expect("all test entries are non-empty");
+
+        assert!(dictionary.contains("ℌ"));
+        assert!(!dictionary.contains("h"));
     }
 
     #[test]
