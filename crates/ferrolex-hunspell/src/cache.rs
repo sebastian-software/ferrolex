@@ -33,7 +33,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 3;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 4;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -173,6 +173,9 @@ pub fn compile_runtime_cache(
     write_rules(&mut output, &dictionary.suffixes)?;
     write_special_flags(&mut output, &dictionary.special_flags)?;
     write_optional_flag(&mut output, dictionary.compound.flag.as_ref())?;
+    write_optional_flag(&mut output, dictionary.compound.begin.as_ref())?;
+    write_optional_flag(&mut output, dictionary.compound.middle.as_ref())?;
+    write_optional_flag(&mut output, dictionary.compound.end.as_ref())?;
     write_u64(
         &mut output,
         u64::try_from(dictionary.compound.minimum_length)
@@ -253,6 +256,9 @@ pub fn load_runtime_cache(
     let suffixes = read_rules(&mut reader, AffixKind::Suffix)?;
     let special_flags = read_special_flags(&mut reader)?;
     let flag = read_optional_flag(&mut reader)?;
+    let begin = read_optional_flag(&mut reader)?;
+    let middle = read_optional_flag(&mut reader)?;
+    let end = read_optional_flag(&mut reader)?;
     let minimum_length = usize::try_from(reader.u64()?)
         .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
@@ -276,6 +282,9 @@ pub fn load_runtime_cache(
     }
     let compound = CompoundConfig {
         flag,
+        begin,
+        middle,
+        end,
         minimum_length,
         rules,
     };
@@ -362,7 +371,11 @@ fn validate_dictionary(
     validate_optional_flag(dictionary.special_flags.forbidden_word.as_ref(), error)?;
     validate_optional_flag(dictionary.special_flags.keep_case.as_ref(), error)?;
     validate_optional_flag(dictionary.special_flags.need_affix.as_ref(), error)?;
+    validate_optional_flag(dictionary.special_flags.only_in_compound.as_ref(), error)?;
     validate_optional_flag(dictionary.compound.flag.as_ref(), error)?;
+    validate_optional_flag(dictionary.compound.begin.as_ref(), error)?;
+    validate_optional_flag(dictionary.compound.middle.as_ref(), error)?;
+    validate_optional_flag(dictionary.compound.end.as_ref(), error)?;
     if dictionary.compound.minimum_length == 0 {
         return Err(error.error("compound minimum must be greater than zero"));
     }
@@ -464,7 +477,8 @@ fn write_special_flags(
     write_optional_flag(output, special_flags.circumfix.as_ref())?;
     write_optional_flag(output, special_flags.forbidden_word.as_ref())?;
     write_optional_flag(output, special_flags.keep_case.as_ref())?;
-    write_optional_flag(output, special_flags.need_affix.as_ref())
+    write_optional_flag(output, special_flags.need_affix.as_ref())?;
+    write_optional_flag(output, special_flags.only_in_compound.as_ref())
 }
 
 fn write_optional_flag(output: &mut Vec<u8>, flag: Option<&Flag>) -> Result<(), RuntimeCacheError> {
@@ -635,6 +649,7 @@ fn read_special_flags(reader: &mut Reader<'_>) -> Result<SpecialFlags, RuntimeCa
         forbidden_word: read_optional_flag(reader)?,
         keep_case: read_optional_flag(reader)?,
         need_affix: read_optional_flag(reader)?,
+        only_in_compound: read_optional_flag(reader)?,
     })
 }
 
@@ -832,8 +847,8 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nCOMPOUNDFLAG M\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
-    const DIC: &str = "7\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/Z\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const DIC: &str = "8\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/Z\nTeil/XO\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())
@@ -865,6 +880,7 @@ mod tests {
             "rooted",
             "rootedly",
             "BahnHofStraße",
+            "Teil",
             "unknown",
         ] {
             assert_eq!(
@@ -877,6 +893,7 @@ mod tests {
         assert!(!loaded.contains("unword"));
         assert!(loaded.contains("fixedly"));
         assert!(loaded.contains("BahnHofStraße"));
+        assert!(!loaded.contains("Teil"));
     }
 
     #[test]

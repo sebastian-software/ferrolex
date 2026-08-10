@@ -11,7 +11,12 @@ and sorted stem-index lookups. It considers at most 256 Unicode scalar values;
 this is a bounded recognition rule, not a general asymptotic performance
 claim. Longer inputs are not treated as compounds in this compatibility level.
 Compound components are exact stems: their affix-derived forms, positional
-restrictions, and linking elements remain later feature gates. A
+linking elements, and permit-affixes remain later feature gates.
+`COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, and `COMPOUNDEND` can instead mark exact
+stems for their respective positions. A two-component compound needs a begin
+and an end stem; longer compounds use zero or more middle stems. A stem with
+`ONLYINCOMPOUND` is rejected alone but may participate in an otherwise valid
+compound. A
 `COMPOUNDRULE` header may additionally declare up to 1,024 literal patterns
 with two through sixteen single-scalar flags, such as `AB` or `XYZ`; components
 must carry the corresponding flags in order. Quantifiers and patterns outside

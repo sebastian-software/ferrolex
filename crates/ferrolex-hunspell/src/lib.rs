@@ -232,13 +232,14 @@ pub struct HunspellDictionary {
 
 impl Dictionary for HunspellDictionary {
     fn contains(&self, word: &str) -> bool {
-        self.stems
-            .get(word)
-            .is_some_and(|flags| !self.is_forbidden(flags) && !self.requires_affix(flags))
-            || self
-                .derived_candidate_indices(word)
-                .into_iter()
-                .any(|index| self.matches_derived_word(&self.lexemes[index], word))
+        self.stems.get(word).is_some_and(|flags| {
+            !self.is_forbidden(flags)
+                && !self.requires_affix(flags)
+                && !self.is_only_in_compound(flags)
+        }) || self
+            .derived_candidate_indices(word)
+            .into_iter()
+            .any(|index| self.matches_derived_word(&self.lexemes[index], word))
             || self.matches_simple_compound(word)
     }
 }
@@ -374,6 +375,7 @@ impl HunspellDictionary {
     fn is_accepted_state(&self, state: &FormState) -> bool {
         !self.is_forbidden(&state.flags)
             && (!self.requires_affix(&state.origin_flags) || state.depth > 0)
+            && !self.is_only_in_compound(&state.origin_flags)
             && state.has_complete_circumfix()
     }
 
@@ -391,8 +393,18 @@ impl HunspellDictionary {
             .is_some_and(|flag| flags.contains(flag))
     }
 
+    fn is_only_in_compound(&self, flags: &BTreeSet<Flag>) -> bool {
+        self.special_flags
+            .only_in_compound
+            .as_ref()
+            .is_some_and(|flag| flags.contains(flag))
+    }
+
     fn matches_simple_compound(&self, word: &str) -> bool {
-        if self.compound.flag.is_none() && self.compound.rules.is_empty() {
+        if self.compound.flag.is_none()
+            && self.compound.rules.is_empty()
+            && (self.compound.begin.is_none() || self.compound.end.is_none())
+        {
             return false;
         };
         // Retain at most the bounded number of split positions. Building an
@@ -415,6 +427,7 @@ impl HunspellDictionary {
             || self.compound.rules.iter().any(|rule| {
                 self.matches_compound_pattern(word, &boundaries, Some(&rule.flags), None)
             })
+            || self.matches_positioned_compound(word, &boundaries)
     }
 
     fn matches_compound_pattern(
@@ -491,6 +504,61 @@ impl HunspellDictionary {
         self.stems
             .get(word)
             .is_some_and(|flags| !self.is_forbidden(flags) && flags.contains(required_flag))
+    }
+
+    fn matches_positioned_compound(&self, word: &str, boundaries: &[usize]) -> bool {
+        let (Some(begin), Some(end)) = (&self.compound.begin, &self.compound.end) else {
+            return false;
+        };
+        let mut reachable = vec![false; boundaries.len()];
+        reachable[0] = true;
+        reachable = self.extend_positioned_components(word, boundaries, &reachable, begin);
+        for _ in 2..boundaries.len() {
+            let terminal = self.extend_positioned_components(word, boundaries, &reachable, end);
+            if terminal.last() == Some(&true) {
+                return true;
+            }
+            let Some(middle) = self.compound.middle.as_ref() else {
+                return false;
+            };
+            reachable = self.extend_positioned_components(word, boundaries, &reachable, middle);
+        }
+        false
+    }
+
+    fn extend_positioned_components(
+        &self,
+        word: &str,
+        boundaries: &[usize],
+        reachable: &[bool],
+        position_flag: &Flag,
+    ) -> Vec<bool> {
+        let mut next = vec![false; boundaries.len()];
+        for start in 0..boundaries.len().saturating_sub(1) {
+            if !reachable[start] {
+                continue;
+            }
+            let first_end = start.saturating_add(self.compound.minimum_length);
+            for end in first_end..boundaries.len() {
+                let candidate = &word[boundaries[start]..boundaries[end]];
+                if self.matches_positioned_component(candidate, position_flag) {
+                    next[end] = true;
+                }
+            }
+        }
+        next
+    }
+
+    fn matches_positioned_component(&self, word: &str, position_flag: &Flag) -> bool {
+        self.stems.get(word).is_some_and(|flags| {
+            !self.is_forbidden(flags)
+                && (flags.contains(position_flag)
+                    || self
+                        .compound
+                        .flag
+                        .as_ref()
+                        .is_some_and(|flag| flags.contains(flag)))
+        })
     }
 }
 
@@ -681,11 +749,15 @@ struct SpecialFlags {
     forbidden_word: Option<Flag>,
     keep_case: Option<Flag>,
     need_affix: Option<Flag>,
+    only_in_compound: Option<Flag>,
 }
 
 #[derive(Clone, Debug)]
 struct CompoundConfig {
     flag: Option<Flag>,
+    begin: Option<Flag>,
+    middle: Option<Flag>,
+    end: Option<Flag>,
     minimum_length: usize,
     rules: Vec<CompoundRule>,
 }
@@ -694,6 +766,9 @@ impl Default for CompoundConfig {
     fn default() -> Self {
         Self {
             flag: None,
+            begin: None,
+            middle: None,
+            end: None,
             minimum_length: 3,
             rules: Vec::new(),
         }
@@ -1094,6 +1169,10 @@ struct ParsedAff {
     compound: CompoundConfig,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the directive dispatch stays together to preserve the line-oriented parser contract"
+)]
 fn parse_aff(source: &str, text: &str) -> ParsedAff {
     let mut parsed = ParsedAff::default();
     let mut lines = text.lines().enumerate();
@@ -1152,12 +1231,44 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.special_flags.need_affix,
                 &mut parsed.diagnostics,
             ),
+            "ONLYINCOMPOUND" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.special_flags.only_in_compound,
+                &mut parsed.diagnostics,
+            ),
             "COMPOUNDFLAG" => parse_special_flag(
                 source,
                 line_number,
                 directive,
                 &fields,
                 &mut parsed.compound.flag,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDBEGIN" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.begin,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDMIDDLE" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.middle,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDEND" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.end,
                 &mut parsed.diagnostics,
             ),
             "COMPOUNDMIN" => parse_compound_minimum(
@@ -2239,6 +2350,26 @@ mod tests {
         assert!(imported.dictionary().contains("BahnHofStraße"));
         assert!(!imported.dictionary().contains("BahnStraßeHof"));
         assert!(!imported.dictionary().contains("BahnHof"));
+    }
+
+    #[test]
+    fn compound_positions_and_compound_only_stems_are_enforced() {
+        let imported = import(
+            "test.aff",
+            "COMPOUNDBEGIN B\nCOMPOUNDMIDDLE M\nCOMPOUNDEND E\nONLYINCOMPOUND O\nCOMPOUNDMIN 1\n",
+            "test.dic",
+            "4\nBahn/B\nHof/M\nStraße/E\nTeil/BO\n",
+            ImportMode::Strict,
+        )
+        .expect("positioned compound directives import");
+
+        let dictionary = imported.dictionary();
+        assert!(!dictionary.contains("Teil"));
+        assert!(dictionary.contains("BahnStraße"));
+        assert!(dictionary.contains("BahnHofStraße"));
+        assert!(dictionary.contains("TeilStraße"));
+        assert!(!dictionary.contains("HofStraße"));
+        assert!(!dictionary.contains("BahnHof"));
     }
 
     #[test]
