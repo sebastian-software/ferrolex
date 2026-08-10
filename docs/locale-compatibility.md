@@ -40,7 +40,7 @@ into an accidental quality promise.
 | Locale | Script / practical group | Source encoding | AFF strict gate | Known boundary |
 | --- | --- | --- | --- | --- |
 | `en_US` | Latin | UTF-8 | Blocked | `COMPOUNDRULE`, `ONLYINCOMPOUND`, and `WORDCHARS` are outside the recognition subset. |
-| `de_DE` | Latin | ISO-8859-1 | Blocked | The byte importer decodes ISO-8859-1, recognizes bounded positioned compound affixes, handles its literal `-`/`.` breaks, and supports its `CHECKSHARPS`/`KEEPCASE` uppercase-`SS` behavior; `WORDCHARS` still blocks strict installation. |
+| `de_DE` | Latin | ISO-8859-1 | Strict candidate | The byte importer decodes ISO-8859-1, recognizes bounded positioned compound affixes, handles its literal `-`/`.` breaks, supports its `CHECKSHARPS`/`KEEPCASE` uppercase-`SS` behavior, and retains `WORDCHARS` metadata. Recognition probes for this full dictionary are still pending. |
 | `es_ES` | Latin | UTF-8 | Blocked | Its multi-scalar `PFX` flag declarations are outside the current flag model. `MAP`, `REP`, and `TRY` are suggestion-only warnings, but do not remove that recognition gate. |
 | `fr_FR` | Latin | UTF-8 | Blocked | `BREAK`, `FULLSTRIP`, `ICONV`, `OCONV`, and `WORDCHARS` are recognition-affecting omissions. |
 | `it_IT` | Latin | UTF-8 | Blocked | `HOME`, `LANG`, `NAME`, and `VERSION` are not part of the importer subset. |

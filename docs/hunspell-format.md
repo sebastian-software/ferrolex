@@ -85,3 +85,8 @@ multi-scalar break patterns are strict errors rather than approximated.
 With `CHECKSHARPS`, a `KEEPCASE` stem containing `ß` additionally recognizes
 its all-uppercase spelling with `SS`. No other case fallback is implied, and
 an uppercase-sharp-S spelling is not accepted as that variant.
+
+`WORDCHARS` is retained as immutable tokenization metadata and is available
+from `HunspellDictionary::word_characters`. It does not alter
+`Dictionary::contains`, whose argument is already one caller-segmented word;
+the generic source analyzer keeps its own explicit tokenizer policy.

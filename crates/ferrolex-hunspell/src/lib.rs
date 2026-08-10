@@ -231,6 +231,7 @@ pub struct HunspellDictionary {
     compound: CompoundConfig,
     break_characters: BTreeSet<char>,
     sharp_uppercase_forms: BTreeSet<Box<str>>,
+    word_characters: BTreeSet<char>,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -250,6 +251,10 @@ impl Dictionary for HunspellDictionary {
 }
 
 impl HunspellDictionary {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the importer and cache hand over every owned runtime section explicitly"
+    )]
     fn from_parts(
         stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
         lexemes: Vec<Lexeme>,
@@ -258,6 +263,7 @@ impl HunspellDictionary {
         special_flags: SpecialFlags,
         compound: CompoundConfig,
         break_characters: BTreeSet<char>,
+        word_characters: BTreeSet<char>,
     ) -> Self {
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
@@ -279,7 +285,16 @@ impl HunspellDictionary {
             compound,
             break_characters,
             sharp_uppercase_forms,
+            word_characters,
         }
+    }
+
+    /// Returns extra Unicode scalar values declared as Hunspell word characters.
+    ///
+    /// This is a tokenization hint. [`Dictionary::contains`] deliberately
+    /// receives an already segmented string and therefore does not apply it.
+    pub fn word_characters(&self) -> impl Iterator<Item = char> + '_ {
+        self.word_characters.iter().copied()
     }
 
     fn derived_candidate_indices(&self, word: &str) -> BTreeSet<usize> {
@@ -1212,6 +1227,7 @@ fn import_decoded(
         parsed_aff.special_flags,
         parsed_aff.compound,
         parsed_aff.break_characters,
+        parsed_aff.word_characters,
     );
 
     if mode == ImportMode::Strict
@@ -1364,6 +1380,7 @@ struct ParsedAff {
     special_flags: SpecialFlags,
     compound: CompoundConfig,
     break_characters: BTreeSet<char>,
+    word_characters: BTreeSet<char>,
 }
 
 #[allow(
@@ -1495,6 +1512,13 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 parse_compound_rules(source, &mut lines, line_number, &fields, &mut parsed);
             }
             "BREAK" => parse_break_patterns(source, &mut lines, line_number, &fields, &mut parsed),
+            "WORDCHARS" => parse_word_characters(
+                source,
+                line_number,
+                &fields,
+                &mut parsed.word_characters,
+                &mut parsed.diagnostics,
+            ),
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
@@ -1799,6 +1823,36 @@ fn parse_break_patterns(
             .break_characters
             .insert(character.expect("checked above"));
     }
+}
+
+fn parse_word_characters(
+    source: &str,
+    line: usize,
+    fields: &[&str],
+    word_characters: &mut BTreeSet<char>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if fields.len() != 2 || fields[1].is_empty() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "WORDCHARS",
+            Severity::Error,
+            "WORDCHARS requires exactly one non-empty Unicode character set",
+        ));
+        return;
+    }
+    if !word_characters.is_empty() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "WORDCHARS",
+            Severity::Error,
+            "WORDCHARS may only be declared once",
+        ));
+        return;
+    }
+    word_characters.extend(fields[1].chars());
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -2726,6 +2780,23 @@ mod tests {
         assert!(dictionary.contains("STRASSE"));
         assert!(!dictionary.contains("STRAẞE"));
         assert!(!dictionary.contains("MASSE"));
+    }
+
+    #[test]
+    fn wordchars_are_preserved_as_tokenization_metadata() {
+        let imported = import(
+            "test.aff",
+            "WORDCHARS ß-.\n",
+            "test.dic",
+            "1\nWort\n",
+            ImportMode::Strict,
+        )
+        .expect("WORDCHARS imports");
+
+        assert_eq!(
+            imported.dictionary().word_characters().collect::<Vec<_>>(),
+            ['-', '.', 'ß']
+        );
     }
 
     #[test]

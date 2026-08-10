@@ -33,7 +33,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 7;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 8;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -209,6 +209,14 @@ pub fn compile_runtime_cache(
     for character in &dictionary.break_characters {
         write_u32(&mut output, u32::from(*character));
     }
+    write_count(
+        &mut output,
+        dictionary.word_characters.len(),
+        "word character count",
+    )?;
+    for character in &dictionary.word_characters {
+        write_u32(&mut output, u32::from(*character));
+    }
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -307,6 +315,19 @@ pub fn load_runtime_cache(
             ));
         }
     }
+    let word_character_count = reader.count(MAX_LINE_BYTES, "word character count")?;
+    reader.require_minimum_items(word_character_count, 4, "word characters")?;
+    let mut word_characters = BTreeSet::new();
+    for _ in 0..word_character_count {
+        let character = char::from_u32(reader.u32()?).ok_or(RuntimeCacheError::InvalidArtifact(
+            "word character is invalid",
+        ))?;
+        if !word_characters.insert(character) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "duplicate word character",
+            ));
+        }
+    }
     let compound = CompoundConfig {
         flag,
         begin,
@@ -334,6 +355,7 @@ pub fn load_runtime_cache(
         special_flags,
         compound,
         break_characters,
+        word_characters,
     );
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)
@@ -428,6 +450,9 @@ fn validate_dictionary(
     }
     if dictionary.break_characters.len() > MAX_BREAK_PATTERNS {
         return Err(error.error("break character count exceeds importer limit"));
+    }
+    if dictionary.word_characters.len() > MAX_LINE_BYTES {
+        return Err(error.error("word character count exceeds importer line limit"));
     }
     Ok(())
 }
@@ -897,7 +922,7 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
     const DIC: &str =
         "9\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\n";
 
@@ -948,6 +973,10 @@ mod tests {
         assert!(loaded.contains("BahnHofStraße"));
         assert!(loaded.contains("Bahn-Mail"));
         assert!(loaded.contains("STRASSE"));
+        assert_eq!(
+            loaded.word_characters().collect::<Vec<_>>(),
+            ['-', '.', 'ß']
+        );
         assert!(!loaded.contains("Teil"));
     }
 
