@@ -13,6 +13,8 @@ The optional `ferrolex dictionary` command is an installer, not an updater:
 - the bytes are verified before an atomic write to
   `<cache>/<locale>/<file-name>`;
 - a cache file with different bytes is preserved and causes an error;
+- a cache file whose bytes match the pinned digest is reused without a network
+  request;
 - redirects are refused; the command has no implicit retries, telemetry, or
   background updates.
 
@@ -100,7 +102,8 @@ consuming product responsible for the exact upstream terms it accepts.
 
 ## Checked install workflow
 
-For the normal workflow, `install` fetches the same checked source bytes and
+For the normal workflow, `install` obtains the same checked source bytes (or
+reuses an already verified cache entry) and
 then runs the strict byte-oriented importer in one operation:
 
 ```sh

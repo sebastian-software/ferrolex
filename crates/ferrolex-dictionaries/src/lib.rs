@@ -576,6 +576,18 @@ impl<F: Fetcher> DictionaryInstaller<F> {
     }
 
     fn install_file(&self, file: &VerifiedFile, directory: &Path) -> Result<PathBuf, FetchError> {
+        let destination = directory.join(file.name());
+        if destination.exists() {
+            let existing = fs::read(&destination).map_err(|source| FetchError::ReadCache {
+                path: destination.clone(),
+                source,
+            })?;
+            if sha256(&existing) == file.sha256 {
+                return Ok(destination);
+            }
+            return Err(FetchError::CacheConflict(destination));
+        }
+
         let bytes = self.fetcher.fetch(file.url())?;
         if bytes.len() > self.maximum_file_bytes {
             return Err(FetchError::FileTooLarge {
@@ -591,18 +603,6 @@ impl<F: Fetcher> DictionaryInstaller<F> {
                 expected: file.sha256_hex(),
                 actual: hex_digest(&actual),
             });
-        }
-
-        let destination = directory.join(file.name());
-        if destination.exists() {
-            let existing = fs::read(&destination).map_err(|source| FetchError::ReadCache {
-                path: destination.clone(),
-                source,
-            })?;
-            if sha256(&existing) == file.sha256 {
-                return Ok(destination);
-            }
-            return Err(FetchError::CacheConflict(destination));
         }
 
         atomic_write(&destination, &bytes)?;
@@ -949,6 +949,23 @@ mod tests {
             fs::read(directory.join("sample.aff")).expect("conflict remains"),
             b"different"
         );
+    }
+
+    #[test]
+    fn verified_cache_entries_are_reused_without_a_fetch() {
+        let manifest = manifest();
+        let cache = Cache::new();
+        let directory = cache.path().join("en_US");
+        fs::create_dir_all(&directory).expect("cache directory is writable");
+        fs::write(directory.join("sample.aff"), b"abc").expect("aff cache can be prepared");
+        fs::write(directory.join("sample.dic"), b"abc").expect("dic cache can be prepared");
+
+        let installed = DictionaryInstaller::new(FixtureFetcher::from([]))
+            .install(&manifest, cache.path())
+            .expect("verified cache needs no network response");
+
+        assert_eq!(installed.aff_path(), directory.join("sample.aff"));
+        assert_eq!(installed.dic_path(), directory.join("sample.dic"));
     }
 
     #[test]
