@@ -6,9 +6,11 @@ minimum Unicode-scalar length of each component. A word is accepted as a
 compound only when it can be split into exactly two eligible, non-forbidden
 stems that both meet this minimum.
 
-The check tries every UTF-8 character boundary once and performs two sorted
-stem-index lookups at each boundary. It considers at most 256 Unicode scalar
-values. Longer inputs are not treated as compounds in this compatibility level.
+The check examines every UTF-8 character boundary once and performs two sorted
+stem-index lookups at each candidate boundary. It considers at most 256 Unicode
+scalar values; this is a bounded recognition rule, not a general asymptotic
+performance claim. Longer inputs are not treated as compounds in this
+compatibility level.
 Compound components are exact stems: their affix-derived forms, positional
 restrictions, linking elements, and `COMPOUNDRULE` patterns remain later
 feature gates.

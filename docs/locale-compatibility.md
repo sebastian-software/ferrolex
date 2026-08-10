@@ -64,12 +64,15 @@ must never be presented as equivalent dictionary recognition.
 
 ## Reproducing and advancing a row
 
-Use an explicit cache, then validate the installed exact bytes. For the normal
-fetch-and-validate workflow, prefer `install`:
+Use an explicit cache, then validate the installed exact bytes. For a current
+strict-import candidate, prefer `install` with `pl_PL`:
 
 ```sh
-ferrolex dictionary install es_ES --cache .ferrolex-dictionaries
+ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ```
+
+Rows marked **Blocked** intentionally return exit status `1` from `install`.
+That result is diagnostic evidence, not a failed download.
 
 For shared legacy encodings, `validate` and `install` select the lossless
 decoder from the AFF `SET` declaration. Never relabel or rewrite the fetched

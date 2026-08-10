@@ -55,10 +55,11 @@ review and accept the linked terms for every locale they distribute.
 `list` also prints the source encoding. Installation preserves upstream bytes:
 `de_DE` is ISO-8859-1, `pl_PL` is ISO-8859-2, and `id_ID` has an
 ISO-8859-1-compatible affix file with a UTF-8 word list; the other initial
-entries are UTF-8. The current `validate` command accepts UTF-8 Hunspell input,
-so legacy pairs need an explicit, lossless transcode before import. Arabic and
-Turkish are deliberately available for compatibility evaluation; recognition
-support remains dependent on the diagnostics from `validate --strict`.
+entries are UTF-8. `validate` and `install` decode shared UTF-8, ISO-8859-1,
+and ISO-8859-2 pairs losslessly from their AFF `SET` declaration. `install`
+also supplies the reviewed per-file override needed by mixed-encoding `id_ID`.
+Arabic and Turkish are deliberately available for compatibility evaluation;
+recognition support remains dependent on the diagnostics from `validate --strict`.
 The [locale compatibility matrix](locale-compatibility.md) records this
 evidence separately for every catalog entry.
 
@@ -79,7 +80,7 @@ ferrolex dictionary list
 Install a reviewed locale into an explicit cache directory:
 
 ```sh
-ferrolex dictionary fetch de_DE \
+ferrolex dictionary fetch pl_PL \
   --cache "$HOME/.cache/ferrolex/dictionaries"
 ```
 
@@ -88,8 +89,8 @@ notice URL. Validate the resulting files before using them:
 
 ```sh
 ferrolex validate --strict \
-  "$HOME/.cache/ferrolex/dictionaries/de_DE/de_DE_frami.aff" \
-  "$HOME/.cache/ferrolex/dictionaries/de_DE/de_DE_frami.dic"
+  "$HOME/.cache/ferrolex/dictionaries/pl_PL/pl_PL.aff" \
+  "$HOME/.cache/ferrolex/dictionaries/pl_PL/pl_PL.dic"
 ```
 
 No dictionary data or network fixtures are committed in this repository. Only
@@ -103,7 +104,7 @@ For the normal workflow, `install` fetches the same checked source bytes and
 then runs the strict byte-oriented importer in one operation:
 
 ```sh
-ferrolex dictionary install de_DE \
+ferrolex dictionary install pl_PL \
   --cache "$HOME/.cache/ferrolex/dictionaries"
 ```
 
@@ -123,8 +124,8 @@ Use the installed dictionary offline with the affix path:
 
 ```sh
 ferrolex check \
-  --hunspell "$HOME/.cache/ferrolex/dictionaries/de_DE/de_DE_frami.aff" \
-  Wörter
+  --hunspell "$HOME/.cache/ferrolex/dictionaries/pl_PL/pl_PL.aff" \
+  słowami
 ```
 
 This loads the adjacent runtime cache only after verifying it against both

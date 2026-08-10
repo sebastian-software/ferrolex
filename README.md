@@ -5,8 +5,11 @@ Modern spell-checking infrastructure for text and code.
 ferrolex is an independent, native Rust implementation with planned support
 for the Hunspell dictionary ecosystem. It is not a Hunspell port. It currently
 provides immutable UTF-8 plain-word-list dictionaries, generic source-code
-analysis, and a documented basic Hunspell `.aff`/`.dic` import subset;
-advanced morphology and suggestions follow in later phases.
+analysis, bounded deterministic suggestions, and a documented Hunspell
+`.aff`/`.dic` recognition subset. That subset includes lazy affixes,
+continuations, circumfixes, special-word flags, and simple two-part compounds;
+unsupported directives remain explicit diagnostics rather than compatibility
+claims.
 
 ## Status
 
@@ -26,9 +29,9 @@ ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
 ferrolex validate --compiled words.flex
 ferrolex dictionary list
-ferrolex dictionary install pt_BR --cache .ferrolex-dictionaries
-ferrolex check --hunspell .ferrolex-dictionaries/pt_BR/pt_BR.aff palavras
-ferrolex analyze --hunspell .ferrolex-dictionaries/pt_BR/pt_BR.aff src/lib.rs
+ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
+ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
+ferrolex analyze --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff src/lib.rs
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -42,10 +45,13 @@ numbers, and hashes by default; and recognizes `ferrolex:ignore`,
 `ferrolex:disable`, and `ferrolex:enable` only inside the declared comment
 syntax. See [source-code analysis](docs/source-code-analysis.md).
 
-`validate` imports a UTF-8 Hunspell-style pair under ferrolex's documented
-compatibility subset and reports structured diagnostics. It never invokes an
-external spell-checking engine; see the [import contract](docs/hunspell-format.md)
-and [affix semantics](docs/affix-semantics.md).
+`validate` imports a Hunspell-style pair under ferrolex's documented
+compatibility subset and reports structured diagnostics. It decodes UTF-8,
+ISO-8859-1, and ISO-8859-2 source pairs from their `SET` declaration; reviewed
+mixed-encoding catalog pairs are handled by `dictionary install`. It never
+invokes an external spell-checking engine; see the
+[import contract](docs/hunspell-format.md) and
+[affix semantics](docs/affix-semantics.md).
 
 The `ferrolex-suggest` library crate provides bounded, deterministic
 edit-distance suggestions for enumerable word sources. Its comparison and

@@ -11,6 +11,10 @@ The corpus tests cover these boundaries:
   affix groups, invalid conditions, empty or excessive flag sections, Unicode,
   and dictionary entries without stems. Both parsing and representative lookup
   run inside the no-panic assertion.
+- Hunspell runtime caches: format and semantics versions, source-provenance
+  mismatches, checksums, counts, truncations, trailing payload bytes, and a
+  deterministic mutation corpus. A cache is constructed only after its full
+  structure is validated and never yields a partial dictionary.
 - Compiled dictionaries: every truncation and single-byte mutation of a valid
   artifact, followed by a fixed seeded byte corpus. Each accepted artifact is
   then fully validated and queried.
