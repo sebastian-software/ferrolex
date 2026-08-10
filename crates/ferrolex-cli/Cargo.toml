@@ -1,0 +1,21 @@
+[package]
+name = "ferrolex-cli"
+version = "0.1.0"
+description = "Command-line interface for ferrolex"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "ferrolex"
+path = "src/main.rs"
+
+[dependencies]
+ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
+
+[lints]
+workspace = true

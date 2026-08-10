@@ -3,5 +3,12 @@
 version = 3
 
 [[package]]
+name = "ferrolex-cli"
+version = "0.1.0"
+dependencies = [
+ "ferrolex-core",
+]
+
+[[package]]
 name = "ferrolex-core"
 version = "0.1.0"
