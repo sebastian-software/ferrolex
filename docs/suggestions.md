@@ -6,6 +6,10 @@ not assumed to be enumerable. The first implementation uses Unicode-scalar
 optimal-string-alignment distance, including adjacent transpositions, and
 ranks by `(distance, byte-lexical spelling)`.
 
+`WordList` and `UserDictionary` are candidate sources. A mutable
+`UserDictionary` is snapshotted before suggestion work begins, so project-word
+updates never hold its lock across edit-distance comparisons.
+
 Callers may supply explicit `ReplacementRule` values for known misspellings or
 organization-specific conventions. A rule that transforms the query directly
 into an enumerated candidate gives that candidate ranking distance zero; it

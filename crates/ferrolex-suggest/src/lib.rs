@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 
-use ferrolex_core::WordList;
+use ferrolex_core::{UserDictionary, WordList};
 
 /// A stable source of suggestion candidates.
 pub trait CandidateSource: Send + Sync {
@@ -16,6 +16,19 @@ impl CandidateSource for WordList {
     fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
         for word in self.words() {
             if !visitor(word) {
+                break;
+            }
+        }
+    }
+}
+
+impl CandidateSource for UserDictionary {
+    fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        // Snapshotting releases the overlay lock before a caller performs
+        // bounded edit-distance work. It also gives this mutable source a
+        // deterministic candidate order for one suggestion request.
+        for word in self.snapshot() {
+            if !visitor(&word) {
                 break;
             }
         }
@@ -292,7 +305,7 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use super::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
-    use ferrolex_core::WordList;
+    use ferrolex_core::{Normalization, UserDictionary, WordList};
 
     struct TestSource<'candidate> {
         candidates: &'candidate [&'candidate str],
@@ -348,6 +361,19 @@ mod tests {
         assert_eq!(result.suggestions()[0].word(), "the");
         assert_eq!(result.suggestions()[0].distance(), 0);
         assert!(ReplacementRule::new("", "the").is_none());
+    }
+
+    #[test]
+    fn snapshots_project_overlay_candidates_without_holding_its_lock() {
+        let dictionary = UserDictionary::new(Normalization::Exact);
+        dictionary
+            .insert("ferrolex")
+            .expect("non-empty overlay word");
+
+        let result = Suggester::new(&dictionary, SuggestConfig::default()).suggest("ferolex");
+
+        assert_eq!(result.suggestions()[0].word(), "ferrolex");
+        assert_eq!(result.completeness(), Completeness::Complete);
     }
 
     #[test]

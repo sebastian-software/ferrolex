@@ -58,8 +58,9 @@ invokes an external spell-checking engine; see the
 `suggest` exposes bounded, deterministic edit-distance suggestions for one
 plain-word-list dictionary. It reports when its configured work limits prevent
 a complete search, but still returns any stable partial results. Hunspell and
-project sources are deliberately not candidate sources yet. The comparison and
-ranking contract is documented in [Suggestions](docs/suggestions.md).
+other non-enumerable sources are deliberately not candidate sources yet;
+`UserDictionary` project overlays can be used through the library API. The
+comparison and ranking contract is documented in [Suggestions](docs/suggestions.md).
 
 The current native integration boundary and explicit LSP/FFI deferral are
 recorded in [Native integrations](docs/integrations.md).
