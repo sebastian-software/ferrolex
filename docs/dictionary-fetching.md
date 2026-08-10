@@ -118,3 +118,14 @@ After a successful strict import, `install` also writes a versioned,
 provenance-bound runtime cache beside the affix source. See
 [Hunspell runtime cache](hunspell-runtime-cache.md) for its validity and
 rebuild contract.
+
+Use the installed dictionary offline with the affix path:
+
+```sh
+ferrolex check \
+  --hunspell "$HOME/.cache/ferrolex/dictionaries/de_DE/de_DE_frami.aff" \
+  Wörter
+```
+
+This loads the adjacent runtime cache only after verifying it against both
+source files; checking does not download, reimport, or rebuild a cache.

@@ -27,6 +27,8 @@ ferrolex compile --dictionary words.txt -o words.flex
 ferrolex validate --compiled words.flex
 ferrolex dictionary list
 ferrolex dictionary install pt_BR --cache .ferrolex-dictionaries
+ferrolex check --hunspell .ferrolex-dictionaries/pt_BR/pt_BR.aff palavras
+ferrolex analyze --hunspell .ferrolex-dictionaries/pt_BR/pt_BR.aff src/lib.rs
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and

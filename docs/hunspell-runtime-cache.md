@@ -31,5 +31,26 @@ import leaves the verified source cache available for diagnostics but does not
 create a runtime artifact. A stale or malformed runtime cache is disposable and
 must be rebuilt from its source pair; it is never silently repaired in place.
 
-The cache is currently prepared during installation. Loading it directly from
-`check` and `analyze` is the next CLI integration step.
+## Offline runtime use
+
+After a successful install, pass the installed affix path to `check` or
+`analyze` with `--hunspell`:
+
+```sh
+ferrolex check \
+  --hunspell "$HOME/.cache/ferrolex/dictionaries/pl_PL/pl_PL.aff" \
+  słowami
+
+ferrolex analyze \
+  --hunspell "$HOME/.cache/ferrolex/dictionaries/pl_PL/pl_PL.aff" \
+  src/lib.rs
+```
+
+The option derives the adjacent `.dic` source and versioned runtime cache from
+the affix stem. It reads all three local files and verifies the cache against
+the exact `.aff` and `.dic` bytes before any lookup. This is deliberately not a
+standalone cache-file option: the source pair is required to enforce
+provenance. `--dictionary` and `--hunspell` may be repeated and composed in the
+same invocation. No network access, reimport, or cache rebuild occurs while
+checking; a missing, malformed, or stale cache is an error that instructs the
+caller to rerun `ferrolex dictionary install`.
