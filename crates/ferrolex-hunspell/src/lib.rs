@@ -365,97 +365,6 @@ impl HunspellDictionary {
         false
     }
 
-    fn matches_derived_compound_component(
-        &self,
-        lexeme: &Lexeme,
-        word: &str,
-        position_flag: &Flag,
-        position: CompoundPosition,
-    ) -> bool {
-        if self.is_forbidden(&lexeme.flags) {
-            return false;
-        }
-        let mut states = vec![FormState::new(lexeme)];
-        let mut derivations = 0;
-
-        while let Some(state) = states.pop() {
-            if state.depth > 0
-                && state.form == word
-                && !self.is_forbidden(&state.flags)
-                && state.has_complete_circumfix()
-                && self.state_has_compound_flag(&state, position_flag)
-            {
-                return true;
-            }
-            if state.depth == MAX_AFFIX_CHAIN {
-                continue;
-            }
-            if !self.expand_compound_rules(
-                &state,
-                AffixKind::Prefix,
-                position,
-                &mut states,
-                &mut derivations,
-            ) || !self.expand_compound_rules(
-                &state,
-                AffixKind::Suffix,
-                position,
-                &mut states,
-                &mut derivations,
-            ) {
-                return false;
-            }
-        }
-        false
-    }
-
-    fn state_has_compound_flag(&self, state: &FormState, position_flag: &Flag) -> bool {
-        (state.flags.contains(position_flag) || state.origin_flags.contains(position_flag))
-            || self
-                .compound
-                .flag
-                .as_ref()
-                .is_some_and(|flag| state.flags.contains(flag) || state.origin_flags.contains(flag))
-    }
-
-    fn expand_compound_rules(
-        &self,
-        state: &FormState,
-        kind: AffixKind,
-        position: CompoundPosition,
-        states: &mut Vec<FormState>,
-        derivations: &mut usize,
-    ) -> bool {
-        let flags = state.flags_for(kind);
-        let rule_indices_by_flag = match kind {
-            AffixKind::Prefix => &self.prefix_rules_by_flag,
-            AffixKind::Suffix => &self.suffix_rules_by_flag,
-        };
-        let rules = match kind {
-            AffixKind::Prefix => &self.prefixes,
-            AffixKind::Suffix => &self.suffixes,
-        };
-        for flag in flags {
-            let Some(rule_indices) = rule_indices_by_flag.get(flag) else {
-                continue;
-            };
-            for index in rule_indices {
-                let rule = &rules[*index];
-                if !state.can_apply(rule) || !self.compound_rule_is_allowed(rule, position) {
-                    continue;
-                }
-                if let Some(form) = rule.apply(&state.form) {
-                    if *derivations == MAX_DERIVATIONS_PER_LEXEME {
-                        return false;
-                    }
-                    *derivations += 1;
-                    states.push(state.apply(rule, form, &self.special_flags));
-                }
-            }
-        }
-        true
-    }
-
     fn compound_rule_is_allowed(&self, rule: &AffixRule, position: CompoundPosition) -> bool {
         let permit = self
             .compound
@@ -710,16 +619,32 @@ impl HunspellDictionary {
                         .flag
                         .as_ref()
                         .is_some_and(|flag| flags.contains(flag)))
-        }) || self
-            .derived_candidate_indices(word)
-            .into_iter()
-            .any(|index| {
-                self.matches_derived_compound_component(
-                    &self.lexemes[index],
-                    word,
-                    position_flag,
-                    position,
-                )
+        }) || self.matches_one_affix_compound_component(word, position_flag, position)
+    }
+
+    fn matches_one_affix_compound_component(
+        &self,
+        word: &str,
+        position_flag: &Flag,
+        position: CompoundPosition,
+    ) -> bool {
+        self.prefixes
+            .iter()
+            .chain(&self.suffixes)
+            .filter(|rule| self.compound_rule_is_allowed(rule, position))
+            .any(|rule| {
+                rule.reverse_apply(word).is_some_and(|stem| {
+                    self.stems.get(stem.as_str()).is_some_and(|flags| {
+                        !self.is_forbidden(flags)
+                            && flags.contains(&rule.flag)
+                            && (flags.contains(position_flag)
+                                || self
+                                    .compound
+                                    .flag
+                                    .as_ref()
+                                    .is_some_and(|flag| flags.contains(flag)))
+                    })
+                })
             })
     }
 
@@ -872,6 +797,26 @@ impl AffixRule {
                 form
             }),
         }
+    }
+
+    fn reverse_apply(&self, form: &str) -> Option<String> {
+        let stem = match self.kind {
+            AffixKind::Prefix => {
+                let remaining = form.strip_prefix(self.add.as_ref())?;
+                let mut stem = String::with_capacity(self.strip.len() + remaining.len());
+                stem.push_str(&self.strip);
+                stem.push_str(remaining);
+                stem
+            }
+            AffixKind::Suffix => {
+                let remaining = form.strip_suffix(self.add.as_ref())?;
+                let mut stem = String::with_capacity(remaining.len() + self.strip.len());
+                stem.push_str(remaining);
+                stem.push_str(&self.strip);
+                stem
+            }
+        };
+        (self.apply(&stem).as_deref() == Some(form)).then_some(stem)
     }
 }
 

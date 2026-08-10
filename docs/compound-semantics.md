@@ -21,6 +21,8 @@ compound. A
 `COMPOUNDPERMITFLAG` on an affix rule's continuation flags also permits that
 affix inside a compound: prefixes are otherwise limited to initial components,
 suffixes to final components, and neither is allowed in a middle component.
+A single permit-affix transformation is matched by inverse rule application
+against the stem index; multi-step permit chains remain a later feature gate.
 A permit-affix remains valid as an ordinary affix outside a compound. A
 `COMPOUNDRULE` header may additionally declare up to 1,024 literal patterns
 with two through sixteen single-scalar flags, such as `AB` or `XYZ`; components
