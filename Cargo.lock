@@ -250,6 +250,7 @@ dependencies = [
  "ferrolex-core",
  "ferrolex-dictionaries",
  "ferrolex-hunspell",
+ "ferrolex-suggest",
  "ferrolex-text",
 ]
 

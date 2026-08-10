@@ -27,9 +27,10 @@ use ferrolex_hunspell::{
     ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic, HunspellDictionary,
     ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity, SourceDigests,
 };
+use ferrolex_suggest::{Completeness, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest --dictionary <PLAIN_WORD_LIST> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--hunspell <AFF_PATH> ...] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -52,10 +53,45 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
             Ok(RunOutcome::Success)
         }
         Command::Check(command) => check(&command),
+        Command::Suggest(command) => suggest(&command),
         Command::Analyze(command) => analyze(&command),
         Command::Compile(command) => compile(&command),
         Command::Validate(command) => validate(&command),
         Command::Dictionary(command) => dictionary(&command),
+    }
+}
+
+fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
+    let text = fs::read_to_string(&command.dictionary_path).map_err(|source| {
+        CliError::ReadDictionary {
+            path: command.dictionary_path.clone(),
+            source,
+        }
+    })?;
+    let dictionary = WordList::from_text(Normalization::Exact, &text);
+    let result = Suggester::new(&dictionary, SuggestConfig::default()).suggest(&command.word);
+    for suggestion in result.suggestions() {
+        println!(
+            "suggestion: {} (distance {})",
+            suggestion.word(),
+            suggestion.distance()
+        );
+    }
+    if result.completeness() != Completeness::Complete {
+        eprintln!(
+            "suggestion search incomplete: {}",
+            completeness_label(result.completeness())
+        );
+    }
+    Ok(RunOutcome::Success)
+}
+
+const fn completeness_label(completeness: Completeness) -> &'static str {
+    match completeness {
+        Completeness::Complete => "complete",
+        Completeness::CandidateLimitReached => "candidate limit reached",
+        Completeness::EditBudgetReached => "edit-distance budget reached",
+        Completeness::QueryTooLong => "query exceeds the scalar limit",
     }
 }
 
@@ -502,6 +538,7 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
     match arguments.next().as_deref() {
         Some("--help" | "-h") => Ok(Command::Help),
         Some("check") => parse_check_arguments(arguments),
+        Some("suggest") => parse_suggest_arguments(arguments),
         Some("analyze") => parse_analyze_arguments(arguments),
         Some("compile") => parse_compile_arguments(arguments),
         Some("validate") => parse_validate_arguments(arguments),
@@ -509,6 +546,37 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
+}
+
+fn parse_suggest_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut dictionary_path = None;
+    let mut word = None;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--dictionary" => set_once_path(&mut dictionary_path, &mut arguments, "--dictionary")?,
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
+            }
+            _ if word.is_some() => {
+                return Err(CliError::Usage(
+                    "suggest accepts exactly one word".to_owned(),
+                ));
+            }
+            _ => word = Some(argument),
+        }
+    }
+    let dictionary_path = dictionary_path
+        .ok_or_else(|| CliError::Usage("suggest requires a `--dictionary` path".to_owned()))?;
+    let word =
+        word.ok_or_else(|| CliError::Usage("suggest requires exactly one word".to_owned()))?;
+    Ok(Command::Suggest(SuggestCommand {
+        dictionary_path,
+        word,
+    }))
 }
 
 fn parse_dictionary_arguments(
@@ -820,6 +888,7 @@ fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<()
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
     Check(CheckCommand),
+    Suggest(SuggestCommand),
     Analyze(AnalyzeCommand),
     Compile(CompileCommand),
     Validate(ValidateCommand),
@@ -832,6 +901,12 @@ struct CheckCommand {
     dictionary_paths: Vec<PathBuf>,
     hunspell_affix_paths: Vec<PathBuf>,
     target: CheckTarget,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct SuggestCommand {
+    dictionary_path: PathBuf,
+    word: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1028,7 +1103,7 @@ mod tests {
         catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
         run, runtime_cache_path, validate_hunspell, AnalyzeCommand, CheckCommand, CheckTarget,
         CliError, Command, CompileCommand, DictionaryCommand, RunOutcome, SourceEncoding,
-        ValidateCommand,
+        SuggestCommand, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -1179,6 +1254,46 @@ mod tests {
                 dictionary_path: PathBuf::from("words.txt"),
                 output_path: PathBuf::from("words.flex"),
             })
+        );
+    }
+
+    #[test]
+    fn parses_bounded_plain_word_list_suggestions() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "words.txt",
+                "recieve",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Suggest(SuggestCommand {
+                dictionary_path: PathBuf::from("words.txt"),
+                word: "recieve".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn suggests_from_a_plain_word_list() {
+        let dictionary = temporary_dictionary("receive\nrecipe\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "suggest".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "recieve".to_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("dictionary is readable"),
+            RunOutcome::Success
         );
     }
 

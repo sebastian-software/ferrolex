@@ -24,6 +24,7 @@ one word or a plain-text file:
 ```sh
 ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
+ferrolex suggest --dictionary words.txt Strase
 ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
@@ -53,8 +54,10 @@ invokes an external spell-checking engine; see the
 [import contract](docs/hunspell-format.md) and
 [affix semantics](docs/affix-semantics.md).
 
-The `ferrolex-suggest` library crate provides bounded, deterministic
-edit-distance suggestions for enumerable word sources. Its comparison and
+`suggest` exposes bounded, deterministic edit-distance suggestions for one
+plain-word-list dictionary. It reports when its configured work limits prevent
+a complete search, but still returns any stable partial results. Hunspell and
+project sources are deliberately not candidate sources yet. The comparison and
 ranking contract is documented in [Suggestions](docs/suggestions.md).
 
 The current native integration boundary and explicit LSP/FFI deferral are
