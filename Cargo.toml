@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/ferrolex-core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.70"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sebastian-software/ferrolex"
+homepage = "https://github.com/sebastian-software/ferrolex"
+keywords = ["spell-checking", "dictionary", "unicode"]
+categories = ["text-processing"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
