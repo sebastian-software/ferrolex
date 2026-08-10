@@ -77,26 +77,31 @@ The project shall aim to provide the following characteristics.
 
 All production code shall be independently written.
 
-No source code shall be copied, translated, adapted, mechanically converted, or structurally reproduced from:
+No source code shall be copied, translated file-by-file, mechanically converted, or reproduced through side-by-side porting from:
 
 - Hunspell
 - Nuspell
+- Spellbook
 - CSpell
 - Aspell
 - MySpell
-- or other implementations whose licenses are incompatible with MIT OR Apache-2.0
+- or other implementations whose provenance is incompatible with MIT OR Apache-2.0
 
-Existing projects may be studied for:
+Studying existing implementations — including reading their source code — is permitted and encouraged for:
 
 - publicly documented behavior
 - publicly documented formats
 - observable runtime behavior
-- conceptual understanding
+- conceptual and algorithmic understanding
 - interoperability expectations
 - feature discovery
 - performance comparison
 
-Their implementation code must not serve as source material for the new implementation.
+The boundary is expression, not knowledge: ideas, algorithms, file formats, and observed behavior are free to reimplement. The concrete code of incompatible implementations must not serve as a template for new code.
+
+Spellbook deserves an explicit rule: it is MPL-2.0 licensed and a self-described Rust rewrite of Nuspell, which makes code proximity to it both the most tempting and the most easily detected. Spellbook must not be used as porting material under any circumstances.
+
+AI-assisted contributions shall be treated as contributions of unknown provenance: generated code must be reviewed for obvious structural closeness to known implementations before merging, and prompts should be phrased against project-owned behavior documentation (§5.3) rather than requesting reproductions of specific implementations.
 
 ---
 
@@ -119,7 +124,6 @@ Users must be able to:
 - use it in SaaS systems
 - use it in desktop applications
 - use it in developer tools
-- use it through WebAssembly
 
 without copyleft obligations originating from the engine itself.
 
@@ -166,7 +170,7 @@ It shall support concepts such as:
 - file paths
 - package names
 - domain names
-- programming-language keywords
+- programming-language keywords (as configurable vocabulary or ignore layers)
 - generated identifiers
 - mixed identifiers and natural-language text
 
@@ -175,6 +179,8 @@ Tokenization and identifier segmentation shall be independent of the dictionary 
 ---
 
 ## 3.5 High performance
+
+Performance is a defining requirement, not an optimization pass: the engine shall be consistently CPU-optimized for native execution, with memory-saving operations wherever feasible (see §31).
 
 The engine shall be optimized for:
 
@@ -247,9 +253,19 @@ The initial project shall focus on:
 
 ---
 
+## 4.5 Browser and WebAssembly targets
+
+Browser deployment and WebAssembly are not goals of this project, initial or otherwise.
+
+The engine targets native execution. Architecture, dependency, and data-structure decisions shall be made in favor of native CPU performance; wasm32 compatibility shall not act as a constraint (see §31).
+
+---
+
 # 5. Licensing and Code Provenance Requirements
 
 Code provenance is a fundamental project requirement.
+
+Clean provenance is a product feature, not merely a legal safeguard. The credibility of the MIT OR Apache-2.0 claim is one of this project's core differentiators; its audience is commercial adopters performing license due diligence and an open-source community judging the project's independence. Provenance documentation shall therefore be maintained with the same care as user-facing features.
 
 ## 5.1 Original implementation
 
@@ -258,7 +274,7 @@ Every contribution must be either:
 1. original work created for this project, or
 2. derived from code whose license is explicitly compatible with the project's MIT OR Apache-2.0 licensing model.
 
-Contributors must not submit translated or adapted code from incompatible implementations.
+Contributors must not submit code translated or ported from incompatible implementations. Knowledge gained by studying such implementations may inform independently written code (§3.1).
 
 ---
 
@@ -269,13 +285,22 @@ The repository shall include a documented policy similar to:
 ```text
 This project is an independent implementation.
 
-Do not copy, translate, mechanically convert, or adapt source code from
-Hunspell, Nuspell, or other implementations whose licenses are incompatible
-with MIT OR Apache-2.0.
+Studying existing spell checkers — including their source code — is
+welcome. Copying, file-by-file translation, mechanical conversion, or
+side-by-side porting of code from Hunspell, Nuspell, Spellbook, or other
+incompatible implementations is not.
 
-Compatibility work should be based on publicly documented formats,
-public specifications, independently created test cases, and observable
-behavior of existing implementations.
+Spellbook is explicitly off-limits as porting material: as a Rust
+implementation derived from Nuspell, code proximity to it is both the most
+likely temptation and the most easily detected.
+
+Compatibility work should be grounded in publicly documented formats,
+project-owned behavior documentation, independently created test cases,
+and observable behavior of existing implementations.
+
+AI-generated code is treated as a contribution of unknown provenance and
+must be reviewed for obvious closeness to known implementations before
+merging.
 
 All contributed production code must have clear provenance compatible with
 this project's licensing model.
@@ -302,6 +327,8 @@ docs/
 These documents must be written independently and in the project's own words.
 
 They should describe behavior rather than implementation.
+
+For the most intricate areas — affix and compound semantics in particular — these documents serve as the primary reference that implementation and tests are written against.
 
 ---
 
@@ -345,7 +372,6 @@ crates/
   spell-suggest/
   spell-code/
   spell-cli/
-  spell-wasm/
 ```
 
 Exact crate names may change, but separation of concerns should remain.
@@ -388,6 +414,8 @@ The actual API should prioritize:
 - thread safety
 - immutable shared dictionaries
 - compatibility with async applications without requiring async internally
+
+Suggestion APIs should offer allocation-conscious variants — writing into a caller-provided buffer or yielding candidates through an iterator — in addition to convenience methods returning `Vec`.
 
 ---
 
@@ -476,11 +504,20 @@ The importer should progressively support commonly encountered Hunspell function
 - compound rules
 - compound minimum lengths
 - compound flags
-- replacement rules
-- character conversion rules
+- replacement rules (`REP`)
+- character conversion rules (`ICONV`, `OCONV`)
 - capitalization behavior
 - Unicode
 - language-specific casing
+- legacy character encodings declared via `SET` (e.g., ISO-8859-1, ISO-8859-2, KOI8-R), decoded to UTF-8 during import
+- flag aliases (`AF`, `AM`)
+- suggestion-related directives (`TRY`, `KEY`, `MAP`, `PHONE`, `MAXDIFF`, `MAXNGRAMSUGS`)
+- `NOSUGGEST` (words that are recognized but must never be offered as suggestions, e.g., profanity)
+- `WARN` and `FORBIDWARN`
+- `BREAK` word-breaking rules
+- `WORDCHARS` tokenization hints
+- `IGNORE` characters (e.g., optional diacritics)
+- `COMPLEXPREFIXES` (two-step prefix stripping, required for Arabic and Hebrew)
 - complex morphology required by widely used dictionaries
 
 Feature implementation shall be driven by actual dictionary ecosystem requirements rather than the goal of reproducing every historical directive immediately.
@@ -511,6 +548,12 @@ Major real-world Hunspell dictionaries operate correctly without modification.
 
 The project does not promise identical suggestion ordering or undocumented bug compatibility.
 
+Compatibility shall be measured, not asserted:
+
+- A fixed reference set of dictionaries anchors testing, for example: `en_US`, `de_DE`, `fr_FR`, `nl_NL`, `hu_HU`, `ar`, `tr_TR`.
+- Hungarian (`hu_HU`) is the recognized stress test for affix machinery and shall be exercised early — during Phases 2–3 — rather than deferred to Level 4 validation.
+- Recognition agreement with Hunspell (accept/reject decisions over a word corpus) shall be tracked per dictionary as a scorecard for the supported feature set.
+
 ---
 
 # 12. Dictionary Compiler
@@ -520,13 +563,7 @@ A major architectural goal shall be the ability to compile source dictionaries i
 For example:
 
 ```bash
-spellc de_DE.aff de_DE.dic -o de_DE.spell
-```
-
-or:
-
-```bash
-spell compile de_DE.aff de_DE.dic --output de_DE.spell
+spell compile de_DE.aff de_DE.dic -o de_DE.spell
 ```
 
 The resulting format should:
@@ -580,6 +617,8 @@ ready
 ```
 
 The compiled format should therefore avoid unnecessary pointer-heavy structures and favor representations suitable for serialization and memory mapping.
+
+Memory mapping interacts with the security requirements (§39): a mapped file can be modified by other processes while in use, and its bytes must be treated as untrusted at all times. The design must choose explicitly between full validation at load time and a representation that tolerates arbitrary bytes without undefined behavior — corrupted input may at worst produce wrong results, never memory unsafety. Endianness and alignment of the compiled format must be specified as part of the format definition.
 
 ---
 
@@ -639,10 +678,12 @@ Special attention should eventually be given to languages commonly used to test 
 
 - German
 - Hungarian
-- Finnish
 - Turkish
 - Dutch
+- Arabic (complex prefix morphology)
 - languages requiring non-trivial Unicode casing
+
+Finnish is deliberately not listed: its morphology exceeds what the Hunspell dictionary ecosystem realistically provides and is traditionally served by dedicated tools such as Voikko.
 
 ---
 
@@ -687,6 +728,8 @@ The implementation shall correctly address:
 - Turkish dotted and dotless `i`
 - characters outside the Basic Multilingual Plane where relevant
 
+The runtime core is strictly UTF-8. Legacy dictionary encodings from the Hunspell ecosystem are handled at the import boundary (§10): the importer decodes them to UTF-8, and nothing downstream of the importer deals with non-UTF-8 data.
+
 Rust's standard Unicode functionality should be preferred where sufficient.
 
 External Unicode dependencies should only be introduced when justified by missing functionality.
@@ -724,6 +767,7 @@ candidate generation
       │
       ├── edit operations
       ├── dictionary replacement rules
+      ├── n-gram similarity
       ├── phonetic similarity
       ├── keyboard proximity
       ├── morphology
@@ -748,6 +792,7 @@ Suggestion ranking should be designed independently rather than attempting to re
 Possible ranking signals include:
 
 - weighted edit distance
+- n-gram similarity
 - character transposition
 - keyboard adjacency
 - dictionary replacement rules
@@ -783,6 +828,8 @@ archaic word
 
 without changing the fundamental spell-checking model.
 
+Frequency data is derived from corpora that carry their own licenses; the provenance requirements of §5 apply to frequency sources as well.
+
 ---
 
 # 22. Dictionary Layers
@@ -808,6 +855,8 @@ user vocabulary
 ```
 
 The API should support efficient dictionary layering without requiring all dictionaries to be physically merged.
+
+One layer type shall be a mutable user overlay: "add to dictionary" must take effect immediately at runtime without recompiling or reloading base dictionaries. Base dictionaries remain immutable (§30); mutability is confined to small overlay layers with their own thread-safe update and persistence story.
 
 Conceptually:
 
@@ -868,6 +917,8 @@ Segmentation should correctly handle boundaries involving:
 - Unicode letters
 
 Exact behavior should be configurable.
+
+Segmentation must also work in reverse: suggestions for a misspelled segment shall be recombined case-preservingly into a complete identifier (for example `OAuthAuthentcationProvider` → `OAuthAuthenticationProvider`), so that tools can offer whole-identifier replacements.
 
 ---
 
@@ -938,6 +989,15 @@ The analyzer should support ignoring:
 - selected file patterns
 - selected token categories
 - configured regular expressions
+
+The analyzer shall additionally support inline comment directives in checked files, for example:
+
+```text
+spell:ignore <words>
+spell:disable / spell:enable
+```
+
+Compatibility with the widely used cspell directive family should be considered, as it lowers migration cost for existing projects.
 
 Users should also be able to add words to:
 
@@ -1019,34 +1079,26 @@ without requiring global locks for ordinary lookup operations.
 
 Spell-check operations should be parallelizable.
 
+Immutability applies to loaded base dictionaries; mutable user overlays (§22) are the explicit exception and must provide their own thread-safe update mechanism.
+
 ---
 
-# 31. WebAssembly
+# 31. CPU and Memory Efficiency
 
-WebAssembly shall be treated as an important target.
+The engine shall be consistently optimized for native CPU execution, with memory-saving operations wherever feasible.
 
-The core architecture should avoid dependencies that unnecessarily prevent compilation to:
+The implementation should favor:
 
-```text
-wasm32
-```
+- cache-friendly, contiguous data layouts over pointer-heavy structures
+- allocation-free hot paths for ordinary lookup
+- amortized or arena allocation where allocation is unavoidable
+- compact encodings (interned strings, small-integer flag sets) when they reduce memory footprint and cache pressure
+- SIMD only where benchmarks demonstrate a measurable win
+- data structures sized for realistic dictionary workloads rather than theoretical worst cases
 
-The project should eventually provide a WASM-facing package suitable for:
+When memory savings and hot-path latency conflict, latency wins and the trade-off shall be documented.
 
-- browser applications
-- web editors
-- Node.js
-- editor extensions
-- sandboxed environments
-
-The WASM API may expose:
-
-```text
-loadDictionary()
-check()
-suggest()
-checkIdentifier()
-```
+Portability to non-native targets shall not constrain these optimizations (§4.5).
 
 ---
 
@@ -1100,6 +1152,8 @@ spell validate de_DE.aff de_DE.dic
 spell inspect de_DE.spell
 ```
 
+The binary name is an open question (§61): `spell` collides with the classic Unix tool of the same name, and the repository's working title is `ferrolex`. Examples in this document use `spell` as a placeholder.
+
 ---
 
 # 34. Dictionary Validation
@@ -1126,6 +1180,11 @@ compound-word recognition.
 ```
 
 Unsupported features should not silently produce incorrect results where detection is possible.
+
+Loading behavior for unsupported or malformed constructs shall be configurable:
+
+- strict: fail loading (suitable for CI)
+- lenient: load with diagnostics and degrade predictably (default)
 
 ---
 
@@ -1165,13 +1224,17 @@ Small independently created dictionaries shall test individual features in isola
 Example:
 
 ```text
-stem: test
+stem: party
 
-suffix:
+suffix rule:
   y → ies
 
-expected:
-  test...
+expected accepted:
+  party
+  parties
+
+expected rejected:
+  partys
 ```
 
 Synthetic fixtures should minimize ambiguity.
@@ -1185,6 +1248,8 @@ Widely used dictionaries should be loaded and exercised.
 The purpose is ecosystem interoperability.
 
 Dictionary licenses must be respected and fixtures must only be committed when redistribution is permitted.
+
+Dictionaries that cannot be redistributed shall be downloaded at test time (and cached) rather than committed to the repository.
 
 ---
 
@@ -1255,6 +1320,7 @@ The parser shall be hardened against:
 - maliciously large rule counts
 - malformed UTF-8 where applicable
 - denial-of-service through pathological compound rules
+- denial-of-service through pathological suggestion inputs (e.g., extremely long words)
 - decompression-like expansion behavior
 - invalid compiled dictionary files
 
@@ -1343,6 +1409,8 @@ This facilitates:
 - content-addressable storage
 - CI optimization
 - package distribution
+
+Runtime behavior shall be deterministic as well: given the same dictionary and input, `check()` and `suggest()` return identical results across runs and platforms. Suggestion effort shall be bounded by deterministic work budgets (candidate counts, edit operations) rather than wall-clock time — Hunspell's internal time limits make its suggestion output nondeterministic, which this project explicitly avoids.
 
 ---
 
@@ -1487,6 +1555,7 @@ Potential future importers include:
 Hunspell
 plain word list
 word-frequency list
+CSpell dictionaries (the MIT-licensed cspell-dicts collection of technical vocabularies)
 custom binary lexicon
 application-specific dictionary
 ```
@@ -1515,7 +1584,6 @@ Dependencies should be evaluated for:
 - maintenance status
 - security
 - binary size
-- WASM compatibility
 - performance
 - necessity
 
@@ -1546,6 +1614,7 @@ LICENSE-APACHE
 SECURITY.md
 
 docs/
+  adr/
   hunspell-compatibility.md
   dictionary-format.md
   morphology.md
@@ -1574,6 +1643,8 @@ Or:
 > A modern Rust spell-checking engine with Hunspell-compatible dictionaries.
 
 The wording "Hunspell port" should be avoided because it is technically inaccurate and creates unnecessary licensing ambiguity.
+
+The repository's working title is `ferrolex`; the final public name is an open question (§61).
 
 ---
 
@@ -1700,18 +1771,13 @@ The engine can serve as the foundation of a practical CSpell-class developer too
 
 ---
 
-## Phase 8 — WASM and Integrations
+## Phase 8 — Integrations
 
-Implement:
+Evaluate and, where justified, implement:
 
-- WASM bindings
-- JavaScript API
-- browser-compatible dictionary loading
-
-Evaluate:
-
-- C API
-- Node native bindings
+- C ABI
+- Node.js native bindings
+- Python bindings
 - LSP
 - editor integrations
 
@@ -1765,7 +1831,6 @@ The project should eventually be capable of serving as:
 
 - a Rust crate
 - a native spell-checking library
-- a WASM spell-checker
 - a CLI spell checker
 - the engine for an LSP
 - the engine for editor extensions
@@ -1814,6 +1879,10 @@ Support the enormous value contained in existing Hunspell dictionaries without i
 
 Static linking and commercial embedding must remain straightforward.
 
+## 9. Native CPU performance over portability abstractions
+
+The engine is optimized for native execution: cache-friendly layouts, allocation-free hot paths, and memory-frugal operations take precedence over portability to non-native targets such as WebAssembly.
+
 ---
 
 # 58. Conceptual Differentiation
@@ -1844,8 +1913,32 @@ This project
   modern morphology engine
   compiled native dictionaries
   source-code-aware analysis
-  native + WASM embedding
+  native embedding
 ```
+
+Beyond the classic engines, several Rust projects already occupy parts of this space:
+
+```text
+Spellbook
+  Rust rewrite of Nuspell, maintained in the Helix editor ecosystem
+  MPL-2.0, inherits Nuspell's design and provenance
+  off-limits as source material for this project (§3.1)
+
+zspell
+  Rust implementation with Hunspell-format support
+  top-level LICENSE is Apache-2.0; per-file notices must be checked
+  before using any of it as reference material
+
+typos
+  developer-focused typo finder in Rust (MIT OR Apache-2.0)
+  intentionally minimal lexicon, no Hunspell dictionary support
+
+Harper
+  grammar and spell checking in Rust with an LSP (Apache-2.0)
+  own dictionary approach, not focused on the Hunspell ecosystem
+```
+
+No existing project combines Hunspell-ecosystem compatibility, permissive licensing, compiled native dictionaries, and source-code-aware checking. That combination is this project's niche.
 
 The objective is not to duplicate any one of these projects.
 
@@ -1870,3 +1963,23 @@ The key licensing principle is:
 The key technical principle is:
 
 > Separate dictionary semantics, runtime representation, suggestion generation, and document tokenization so each can evolve independently.
+
+---
+
+# 60. Project Conventions
+
+- The project language is US English for all repository artifacts: identifiers, comments, documentation, commit messages, decision records, and issues.
+- Commit messages follow Conventional Commits.
+- Releases are automated with Release Please, using the shared setup from the `sebastian-software/standards` repository.
+- Durable decisions are recorded as living Architecture Decision Records under `docs/adr/`. The RFC describes requirements; ADRs carry decision rationale.
+
+---
+
+# 61. Open Questions
+
+- Final project and binary naming (working title: `ferrolex`; the CLI name `spell` collides with the classic Unix tool).
+- Memory-mapping strategy: full validation at load time versus a representation that tolerates arbitrary bytes without undefined behavior (§13, §39).
+- Expressiveness of the neutral IR against the hardest real dictionaries (`hu_HU`, `ar`) — to be validated during Phases 2–3, not afterwards.
+- Compiled-format details: endianness, alignment, and cross-platform reproducibility of compiler output.
+- Distribution story for dictionaries (packaging, registries, versioning).
+- Scope of cspell ecosystem interoperability (inline directives, `cspell.json` configuration, cspell-dicts import).
