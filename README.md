@@ -57,8 +57,10 @@ ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
 ferrolex analyze --dictionary words.txt --config .ferrolex/config src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
+ferrolex compile dictionary.aff dictionary.dic -o dictionary.flexh
 ferrolex validate --compiled words.flex
 ferrolex check --compiled words.flex Straße
+ferrolex check --compiled dictionary.flexh books
 ferrolex dictionary list
 ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
@@ -108,13 +110,16 @@ segmentation has its own contract. The
 acquisition from strict import and recognition evidence. Successful strict
 installs also create a [versioned Hunspell runtime cache](docs/hunspell-runtime-cache.md).
 
-`compile` turns the same plain-word-list syntax used by `check` into a
-deterministic native artifact. `check --compiled` uses its allocation-free
-exact lookup directly and can be layered with plain or installed Hunspell
-dictionaries. `validate --compiled` first performs the fast header/checksum
-load and then fully validates every offset, UTF-8 payload, and sort-order
-invariant. The [binary format](docs/binary-format.md) documents the artifact
-layout and compatibility policy.
+`compile --dictionary` turns the same plain-word-list syntax used by `check`
+into a deterministic native artifact. `compile <AFF> <DIC>` produces a
+standalone Hunspell artifact that retains ferrolex's supported affix semantics
+and can be copied to a machine without the source pair. `check --compiled`
+loads either artifact type and can be layered with plain or installed Hunspell
+dictionaries. `validate --compiled` verifies its format before use; native
+artifacts additionally receive the full offset, UTF-8 payload, and sort-order
+check. The [binary format](docs/binary-format.md) and
+[Hunspell runtime cache](docs/hunspell-runtime-cache.md) document the formats
+and compatibility policy.
 
 ## Benchmarks
 

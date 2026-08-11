@@ -332,6 +332,21 @@ pub fn compile_runtime_cache(
     Ok(output)
 }
 
+/// Compiles a standalone Hunspell artifact.
+///
+/// `sources` is retained as descriptive provenance in the artifact, while the
+/// standalone loader does not require the original files to be present.
+///
+/// # Errors
+///
+/// Returns [`RuntimeCacheError`] when the dictionary violates artifact bounds.
+pub fn compile_runtime_artifact(
+    dictionary: &HunspellDictionary,
+    sources: SourceDigests,
+) -> Result<Vec<u8>, RuntimeCacheError> {
+    compile_runtime_cache(dictionary, sources)
+}
+
 /// Reads self-describing metadata from a checksummed runtime cache.
 ///
 /// This only establishes that the artifact header and checksum are intact; use
@@ -364,6 +379,21 @@ pub fn inspect_runtime_cache(bytes: &[u8]) -> Result<RuntimeCacheMetadata, Runti
             reader.take_array::<CHECKSUM_BYTES>()?,
         ),
     })
+}
+
+/// Loads a standalone Hunspell artifact without requiring the original sources.
+///
+/// Source digests remain embedded as descriptive provenance, but are not used
+/// as a runtime availability requirement. The complete serialized dictionary
+/// is still checksum- and bounds-validated before it is returned.
+///
+/// # Errors
+///
+/// Returns the same errors as [`inspect_runtime_cache`] and
+/// [`load_runtime_cache`] for malformed or unsupported artifacts.
+pub fn load_runtime_artifact(bytes: &[u8]) -> Result<HunspellDictionary, RuntimeCacheError> {
+    let sources = inspect_runtime_cache(bytes)?.sources();
+    load_runtime_cache(bytes, sources)
 }
 
 /// Loads a fully validated Hunspell runtime cache for exact source provenance.
@@ -1762,9 +1792,9 @@ mod tests {
     use sha2::Digest as _;
 
     use super::{
-        compile_runtime_cache, inspect_runtime_cache, load_runtime_cache, CacheSource,
-        RuntimeCacheError, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
-        HUNSPELL_CACHE_SEMANTICS_VERSION,
+        compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache,
+        load_runtime_artifact, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
+        HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
     };
     use crate::{import, ImportMode};
 
@@ -1830,6 +1860,16 @@ mod tests {
         assert!(loaded.contains("fin-"));
         assert!(loaded.contains("worqd"));
         assert!(!loaded.contains("Teil"));
+    }
+
+    #[test]
+    fn standalone_artifact_loads_without_the_original_source_pair() {
+        let original = dictionary();
+        let artifact = compile_runtime_artifact(&original, sources()).expect("artifact compiles");
+        let loaded = load_runtime_artifact(&artifact).expect("artifact loads standalone");
+
+        assert!(loaded.contains("unwords"));
+        assert!(loaded.contains("BahnHofStraße"));
     }
 
     #[test]

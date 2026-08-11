@@ -25,15 +25,16 @@ use ferrolex_dictionaries::{
     LIBREOFFICE_CATALOG,
 };
 use ferrolex_hunspell::{
-    compile_runtime_cache, import_bytes as import_hunspell_bytes,
-    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, load_runtime_cache,
-    ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic, HunspellDictionary,
-    ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity, SourceDigests,
+    compile_runtime_artifact, compile_runtime_cache, import_bytes as import_hunspell_bytes,
+    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, load_runtime_artifact,
+    load_runtime_cache, ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic,
+    HunspellDictionary, ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity,
+    SourceDigests,
 };
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -85,18 +86,12 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
                 None,
             )
         }
-        (None, Some(path), None) => (
-            Box::new(
-                CompiledDictionary::load(read_compiled_artifact(path)?).map_err(|source| {
-                    CliError::LoadArtifact {
-                        path: path.clone(),
-                        source,
-                    }
-                })?,
-            ),
-            Vec::new(),
-            None,
-        ),
+        (None, Some(path), None) => {
+            let dictionary = load_artifact(path)?;
+            let replacements = dictionary.replacement_rules();
+            let output_dictionary = dictionary.hunspell_dictionary().cloned();
+            (Box::new(dictionary), replacements, output_dictionary)
+        }
         (None, None, Some(path)) => {
             let dictionary = load_installed_hunspell_dictionary(path)?;
             let replacements = dictionary.replacement_rules().to_vec();
@@ -218,23 +213,48 @@ fn fetch_catalog_dictionary(
 }
 
 fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
-    let text = fs::read_to_string(&command.dictionary_path).map_err(|source| {
-        CliError::ReadDictionary {
-            path: command.dictionary_path.clone(),
-            source,
+    let (compiled, description) = match &command.input {
+        CompileInput::WordList(path) => {
+            let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
+                path: path.clone(),
+                source,
+            })?;
+            let dictionary = WordList::from_text(Normalization::Exact, &text);
+            (
+                compile_words(dictionary.words()).map_err(CliError::CompileDictionary)?,
+                format!("{} words", dictionary.len()),
+            )
         }
-    })?;
-    let dictionary = WordList::from_text(Normalization::Exact, &text);
-    let compiled = compile_words(dictionary.words()).map_err(CliError::CompileDictionary)?;
+        CompileInput::Hunspell { aff_path, dic_path } => {
+            let (import, sources) = import_hunspell_files(aff_path, dic_path, None, true)?;
+            let dictionary = match import {
+                Ok(dictionary) => dictionary,
+                Err(error) => {
+                    for diagnostic in error.diagnostics() {
+                        print_import_diagnostic(diagnostic);
+                    }
+                    return Ok(RunOutcome::Misspelled);
+                }
+            };
+            for diagnostic in dictionary.diagnostics() {
+                print_import_diagnostic(diagnostic);
+            }
+            let lexemes = dictionary.ir().lexemes.len();
+            (
+                compile_runtime_artifact(dictionary.dictionary(), sources)
+                    .map_err(CliError::CompileHunspellCache)?,
+                format!("Hunspell, {lexemes} lexemes"),
+            )
+        }
+    };
     fs::write(&command.output_path, compiled).map_err(|source| CliError::WriteArtifact {
         path: command.output_path.clone(),
         source,
     })?;
 
     println!(
-        "compiled: {} ({} words)",
+        "compiled: {} ({description})",
         command.output_path.display(),
-        dictionary.len()
     );
     Ok(RunOutcome::Success)
 }
@@ -266,19 +286,70 @@ fn load_checker(
         builder = builder.dictionary(WordList::from_text(Normalization::Exact, &text));
     }
     for path in compiled_paths {
-        let bytes = read_compiled_artifact(path)?;
-        let dictionary =
-            CompiledDictionary::load(bytes).map_err(|source| CliError::LoadArtifact {
-                path: path.clone(),
-                source,
-            })?;
-        builder = builder.dictionary(dictionary);
+        builder = builder.dictionary(load_artifact(path)?);
     }
     for aff_path in hunspell_affix_paths {
         builder = builder.dictionary(load_installed_hunspell_dictionary(aff_path)?);
     }
 
     Ok(builder.build())
+}
+
+/// A standalone `--compiled` artifact, independent of its source-pair files.
+enum ArtifactDictionary {
+    Exact(CompiledDictionary),
+    Hunspell(Box<HunspellDictionary>),
+}
+
+impl ArtifactDictionary {
+    fn replacement_rules(&self) -> Vec<ReplacementRule> {
+        match self {
+            Self::Exact(_) => Vec::new(),
+            Self::Hunspell(dictionary) => dictionary.replacement_rules().to_vec(),
+        }
+    }
+
+    fn hunspell_dictionary(&self) -> Option<&HunspellDictionary> {
+        match self {
+            Self::Exact(_) => None,
+            Self::Hunspell(dictionary) => Some(dictionary.as_ref()),
+        }
+    }
+}
+
+impl Dictionary for ArtifactDictionary {
+    fn contains(&self, word: &str) -> bool {
+        match self {
+            Self::Exact(dictionary) => dictionary.contains(word),
+            Self::Hunspell(dictionary) => dictionary.contains(word),
+        }
+    }
+}
+
+impl CandidateSource for ArtifactDictionary {
+    fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        match self {
+            Self::Exact(dictionary) => dictionary.visit_candidates(visitor),
+            Self::Hunspell(dictionary) => dictionary.visit_candidates(visitor),
+        }
+    }
+}
+
+fn load_artifact(path: &Path) -> Result<ArtifactDictionary, CliError> {
+    let bytes = read_compiled_artifact(path)?;
+    match CompiledDictionary::load(bytes.clone()) {
+        Ok(dictionary) => Ok(ArtifactDictionary::Exact(dictionary)),
+        Err(LoadError::InvalidMagic) => load_runtime_artifact(&bytes)
+            .map(|dictionary| ArtifactDictionary::Hunspell(Box::new(dictionary)))
+            .map_err(|source| CliError::LoadHunspellArtifact {
+                path: path.to_path_buf(),
+                source,
+            }),
+        Err(source) => Err(CliError::LoadArtifact {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDictionary, CliError> {
@@ -560,17 +631,17 @@ fn atomic_write_runtime_cache(path: &Path, bytes: &[u8]) -> Result<(), CliError>
 }
 
 fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
-    let bytes = read_compiled_artifact(path)?;
-    let dictionary = CompiledDictionary::load(bytes).map_err(|source| CliError::LoadArtifact {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    dictionary
-        .validate()
-        .map_err(|source| CliError::ValidateArtifact {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    match load_artifact(path)? {
+        ArtifactDictionary::Exact(dictionary) => {
+            dictionary
+                .validate()
+                .map_err(|source| CliError::ValidateArtifact {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+        }
+        ArtifactDictionary::Hunspell(_) => {}
+    }
     println!("valid: {}", path.display());
     Ok(RunOutcome::Success)
 }
@@ -859,6 +930,7 @@ fn parse_compile_arguments(
 ) -> Result<Command, CliError> {
     let mut dictionary_path = None;
     let mut output_path = None;
+    let mut paths = Vec::new();
     let mut arguments = arguments.into_iter();
 
     while let Some(argument) = arguments.next() {
@@ -883,23 +955,31 @@ fn parse_compile_arguments(
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
-            _ => {
-                return Err(CliError::Usage(
-                    "compile does not accept positional arguments".to_owned(),
-                ));
-            }
+            _ => paths.push(PathBuf::from(argument)),
         }
     }
 
-    let dictionary_path = dictionary_path
-        .ok_or_else(|| CliError::Usage("compile requires a `--dictionary` path".to_owned()))?;
     let output_path = output_path
         .ok_or_else(|| CliError::Usage("compile requires an `-o` artifact path".to_owned()))?;
+    let input = match (dictionary_path, paths.as_slice()) {
+        (Some(path), []) => CompileInput::WordList(path),
+        (None, [aff_path, dic_path]) => CompileInput::Hunspell {
+            aff_path: aff_path.clone(),
+            dic_path: dic_path.clone(),
+        },
+        (Some(_), _) => {
+            return Err(CliError::Usage(
+                "compile accepts either `--dictionary` or exactly an AFF and DIC path".to_owned(),
+            ));
+        }
+        (None, _) => {
+            return Err(CliError::Usage(
+                "compile requires a `--dictionary` path or exactly an AFF and DIC path".to_owned(),
+            ));
+        }
+    };
 
-    Ok(Command::Compile(CompileCommand {
-        dictionary_path,
-        output_path,
-    }))
+    Ok(Command::Compile(CompileCommand { input, output_path }))
 }
 
 fn parse_analyze_arguments(
@@ -1127,8 +1207,17 @@ struct AnalyzeCommand {
 
 #[derive(Debug, Eq, PartialEq)]
 struct CompileCommand {
-    dictionary_path: PathBuf,
+    input: CompileInput,
     output_path: PathBuf,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum CompileInput {
+    WordList(PathBuf),
+    Hunspell {
+        aff_path: PathBuf,
+        dic_path: PathBuf,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1177,6 +1266,10 @@ enum CliError {
     LoadArtifact {
         path: PathBuf,
         source: LoadError,
+    },
+    LoadHunspellArtifact {
+        path: PathBuf,
+        source: RuntimeCacheError,
     },
     ValidateArtifact {
         path: PathBuf,
@@ -1259,6 +1352,13 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::LoadHunspellArtifact { path, source } => {
+                write!(
+                    formatter,
+                    "invalid standalone Hunspell artifact `{}`: {source}",
+                    path.display()
+                )
+            }
             Self::ValidateArtifact { path, source } => {
                 write!(
                     formatter,
@@ -1329,6 +1429,7 @@ impl Error for CliError {
             | Self::ReadProjectConfig { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
+            Self::LoadHunspellArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),
             Self::CompileHunspellCache(source) | Self::LoadHunspellCache { source, .. } => {
                 Some(source)
@@ -1354,8 +1455,8 @@ mod tests {
     use super::{
         catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
         read_compiled_artifact, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
-        CheckCommand, CheckTarget, CliError, Command, CompileCommand, DictionaryCommand,
-        RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
+        CheckCommand, CheckTarget, CliError, Command, CompileCommand, CompileInput,
+        DictionaryCommand, RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -1538,8 +1639,27 @@ mod tests {
         assert_eq!(
             command,
             Command::Compile(CompileCommand {
-                dictionary_path: PathBuf::from("words.txt"),
+                input: CompileInput::WordList(PathBuf::from("words.txt")),
                 output_path: PathBuf::from("words.flex"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_hunspell_pair_compilation() {
+        let command = parse_arguments(
+            ["ferrolex", "compile", "de.aff", "de.dic", "-o", "de.flexh"].map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Compile(CompileCommand {
+                input: CompileInput::Hunspell {
+                    aff_path: PathBuf::from("de.aff"),
+                    dic_path: PathBuf::from("de.dic"),
+                },
+                output_path: PathBuf::from("de.flexh"),
             })
         );
     }
@@ -1856,6 +1976,36 @@ mod tests {
                 "Straße".to_owned(),
             ])
             .expect("the artifact is readable"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn compiles_and_uses_a_standalone_hunspell_artifact() {
+        let affix = temporary_file("SET UTF-8\nSFX S Y 1\nSFX S 0 s .\n");
+        let dictionary = temporary_file("1\nbook/S\n");
+        let artifact = temporary_file("");
+        run([
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            affix.path.to_string_lossy().into_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            artifact.path.to_string_lossy().into_owned(),
+        ])
+        .expect("the Hunspell pair compiles");
+
+        drop(affix);
+        drop(dictionary);
+        assert_eq!(
+            run([
+                "ferrolex".to_owned(),
+                "check".to_owned(),
+                "--compiled".to_owned(),
+                artifact.path.to_string_lossy().into_owned(),
+                "books".to_owned(),
+            ])
+            .expect("the standalone artifact is readable"),
             RunOutcome::Success
         );
     }

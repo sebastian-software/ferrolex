@@ -7,9 +7,8 @@ files and derives a local runtime cache beside the affix file:
 <cache>/<locale>/<affix-stem>.ferrolex-hunspell-v1.flexh
 ```
 
-The cache is an implementation artifact, not a dictionary distribution. The
-original `.aff` and `.dic` bytes remain the authoritative, license-bearing
-inputs.
+The cache is an implementation artifact. The original `.aff` and `.dic` bytes
+remain the authoritative, license-bearing inputs.
 
 ## Validity contract
 
@@ -63,9 +62,25 @@ ferrolex analyze \
 
 The option derives the adjacent `.dic` source and versioned runtime cache from
 the affix stem. It reads all three local files and verifies the cache against
-the exact `.aff` and `.dic` bytes before any lookup. This is deliberately not a
-standalone cache-file option: the source pair is required to enforce
-provenance. `--dictionary` and `--hunspell` may be repeated and composed in the
-same invocation. No network access, reimport, or cache rebuild occurs while
-checking; a missing, malformed, or stale cache is an error that instructs the
-caller to rerun `ferrolex dictionary install`.
+the exact `.aff` and `.dic` bytes before any lookup. `--dictionary` and
+`--hunspell` may be repeated and composed in the same invocation. No network
+access, reimport, or cache rebuild occurs while checking; a missing, malformed,
+or stale cache is an error that instructs the caller to rerun `ferrolex
+dictionary install`.
+
+## Standalone artifact
+
+For distribution, compile a strict Hunspell pair directly:
+
+```sh
+ferrolex compile dictionary.aff dictionary.dic -o dictionary.flexh
+ferrolex validate --compiled dictionary.flexh
+ferrolex check --compiled dictionary.flexh derived-form
+```
+
+The resulting `FLXHSP` artifact is self-contained: `--compiled` verifies its
+format, semantics version, checksum, bounds, and parsed structure without
+reading the original pair. Its embedded source digests remain descriptive
+provenance, not an availability requirement. Preserve the upstream license and
+notice alongside any redistributed artifact; the artifact does not alter those
+obligations.
