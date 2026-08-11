@@ -272,6 +272,7 @@ fn write_scorecard(
 
     let mut corpus = dictionary
         .stems()
+        .filter(|word| word.chars().all(char::is_alphabetic))
         .take(128)
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
