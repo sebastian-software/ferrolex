@@ -79,7 +79,9 @@ malformed aliases never cause a later row to shift position. `AM` is a counted
 morphology-alias table. Its references are validated, but their morphology text
 is discarded because the current runtime does not expose morphology metadata.
 Malformed `AF` is an error because it can change recognition; malformed `AM`
-is a warning because it cannot.
+is a warning because it cannot. `AF` follows the current single-Unicode-scalar
+flag model; dictionaries declaring `FLAG long` or `FLAG num` remain outside
+this compatibility level.
 
 `ICONV` is a counted input-conversion table. ferrolex applies its literal
 rules in source order to every lookup input before dictionary recognition; a
@@ -88,7 +90,7 @@ declares Unicode scalar values removed from input, dictionary stems, and affix
 strip/add text. Both directives can change recognition, so malformed input is
 an error. An ignored character inside an affix condition remains an explicit
 error rather than receiving guessed condition semantics. The importer limits
-`ICONV` to 4,096 rules.
+`ICONV` to 4,096 rules. An `ICONV` target of `0` represents the empty string.
 
 `AF`, aliases, complex prefix modes, capitalization fallbacks, compound
 compound quantifiers and suggestion directives beyond the

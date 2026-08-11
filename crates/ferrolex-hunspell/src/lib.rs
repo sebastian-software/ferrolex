@@ -1843,17 +1843,14 @@ fn parse_input_conversions(
         } else {
             from
         };
-        if from.is_empty()
-            || to.is_empty()
-            || from.len() > MAX_LINE_BYTES
-            || to.len() > MAX_LINE_BYTES
-        {
+        let to = if to == "0" { "" } else { to };
+        if from.is_empty() || from.len() > MAX_LINE_BYTES || to.len() > MAX_LINE_BYTES {
             parsed.diagnostics.push(diagnostic(
                 source,
                 index + 1,
                 "ICONV",
                 Severity::Error,
-                "ICONV rules require bounded non-empty source and target strings",
+                "ICONV rules require a bounded non-empty source string",
             ));
             continue;
         }
@@ -2926,7 +2923,7 @@ mod tests {
     fn normalizes_iconv_and_ignore_before_every_lookup_strategy() {
         let result = import(
             "normalization.aff",
-            "IGNORE \u{301}\nICONV 2\nICONV æ ae\nICONV -_ x\nSFX A Y 1\nSFX A 0 s .\n",
+            "IGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nSFX A Y 1\nSFX A 0 s .\n",
             "normalization.dic",
             "3\naer\nfinx\nword/A\n",
             ImportMode::Strict,
@@ -2937,6 +2934,7 @@ mod tests {
         assert!(dictionary.contains("ær"));
         assert!(dictionary.contains("fin-"));
         assert!(dictionary.contains("wo\u{301}rds"));
+        assert!(dictionary.contains("worqds"));
         assert!(!dictionary.contains("fins"));
     }
 

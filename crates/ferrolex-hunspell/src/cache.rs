@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 10;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 11;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -492,7 +492,6 @@ fn validate_dictionary(
     }
     for conversion in &dictionary.input_conversions {
         if conversion.from.is_empty()
-            || conversion.to.is_empty()
             || conversion.from.len() > MAX_LINE_BYTES
             || conversion.to.len() > MAX_LINE_BYTES
         {
@@ -770,9 +769,9 @@ fn read_input_conversions(
                 ))
             }
         };
-        if from.is_empty() || to.is_empty() {
+        if from.is_empty() {
             return Err(RuntimeCacheError::InvalidArtifact(
-                "input conversion has empty string text",
+                "input conversion has an empty source string",
             ));
         }
         conversions.push(InputConversion {
@@ -1048,7 +1047,7 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP teh the\nIGNORE \u{301}\nICONV 2\nICONV æ ae\nICONV -_ x\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP teh the\nIGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
     const DIC: &str =
         "11\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
 
@@ -1106,6 +1105,7 @@ mod tests {
         assert_eq!(loaded.replacement_rules(), original.replacement_rules());
         assert!(loaded.contains("ær"));
         assert!(loaded.contains("fin-"));
+        assert!(loaded.contains("worqd"));
         assert!(!loaded.contains("Teil"));
     }
 
