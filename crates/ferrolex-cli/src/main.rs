@@ -15,8 +15,8 @@ use ferrolex_code::{
     Analyzer, AnalyzerConfigError, CommentSyntax, Document, ProjectConfig, ProjectConfigError,
 };
 use ferrolex_compiler::{
-    compile_words, CompileError, CompiledDictionary, LoadError, ValidationError,
-    MAX_COMPILED_ARTIFACT_BYTES,
+    compile_words, inspect_compiled_artifact, CompileError, CompiledDictionary, LoadError,
+    ValidationError, MAX_COMPILED_ARTIFACT_BYTES,
 };
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
 use ferrolex_dictionaries::{
@@ -26,15 +26,15 @@ use ferrolex_dictionaries::{
 };
 use ferrolex_hunspell::{
     compile_runtime_artifact, compile_runtime_cache, import_bytes as import_hunspell_bytes,
-    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, load_runtime_artifact,
-    load_runtime_cache, ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic,
-    HunspellDictionary, ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity,
-    SourceDigests,
+    import_bytes_with_encodings as import_hunspell_bytes_with_encodings, inspect_runtime_cache,
+    load_runtime_artifact, load_runtime_cache, ByteEncoding, ByteImportEncodings,
+    Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError, ImportMode, ImportResult,
+    RuntimeCacheError, Severity, SourceDigests,
 };
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -60,6 +60,7 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
         Command::Suggest(command) => suggest(&command),
         Command::Analyze(command) => analyze(&command),
         Command::Compile(command) => compile(&command),
+        Command::Inspect(path) => inspect_artifact(&path),
         Command::Validate(command) => validate(&command),
         Command::Dictionary(command) => dictionary(&command),
     }
@@ -646,6 +647,53 @@ fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
     Ok(RunOutcome::Success)
 }
 
+fn inspect_artifact(path: &Path) -> Result<RunOutcome, CliError> {
+    let bytes = read_compiled_artifact(path)?;
+    match inspect_compiled_artifact(&bytes) {
+        Ok(metadata) => {
+            println!("artifact: {}", path.display());
+            println!("format: FLEXDIC");
+            println!("format-version: {}", metadata.format_version());
+            println!("source-metadata: not recorded (plain word-list artifact)");
+            println!("required-features: exact-word-lookup");
+            println!("feature-bits: {:#x}", metadata.feature_bits());
+            println!("entries: {}", metadata.word_count());
+        }
+        Err(LoadError::InvalidMagic) => {
+            let metadata =
+                inspect_runtime_cache(&bytes).map_err(|source| CliError::LoadHunspellArtifact {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            let sources = metadata.sources();
+            println!("artifact: {}", path.display());
+            println!("format: FLXHSP");
+            println!("format-version: {}", metadata.format_version());
+            println!("semantics-version: {}", metadata.semantics_version());
+            println!("source-aff-sha256: {}", hex_digest(sources.aff()));
+            println!("source-dic-sha256: {}", hex_digest(sources.dic()));
+            println!("required-features: lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, compounds, breaks, input-conversions, replacement-rules, output-conversions");
+        }
+        Err(source) => {
+            return Err(CliError::LoadArtifact {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
+    Ok(RunOutcome::Success)
+}
+
+fn hex_digest(digest: [u8; 32]) -> String {
+    use std::fmt::Write as _;
+
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
+}
+
 fn read_compiled_artifact(path: &Path) -> Result<Vec<u8>, CliError> {
     let size = fs::metadata(path)
         .map_err(|source| CliError::ReadInput {
@@ -722,11 +770,32 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some("suggest") => parse_suggest_arguments(arguments),
         Some("analyze") => parse_analyze_arguments(arguments),
         Some("compile") => parse_compile_arguments(arguments),
+        Some("inspect") => parse_inspect_arguments(arguments),
         Some("validate") => parse_validate_arguments(arguments),
         Some("dictionary") => parse_dictionary_arguments(arguments),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
+}
+
+fn parse_inspect_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut arguments = arguments.into_iter();
+    let Some(path) = arguments.next() else {
+        return Err(CliError::Usage(
+            "inspect requires an artifact path".to_owned(),
+        ));
+    };
+    if path == "--help" || path == "-h" {
+        return Ok(Command::Help);
+    }
+    if path.starts_with('-') || arguments.next().is_some() {
+        return Err(CliError::Usage(
+            "inspect accepts exactly one artifact path".to_owned(),
+        ));
+    }
+    Ok(Command::Inspect(PathBuf::from(path)))
 }
 
 fn parse_suggest_arguments(
@@ -1164,6 +1233,7 @@ enum Command {
     Suggest(SuggestCommand),
     Analyze(AnalyzeCommand),
     Compile(CompileCommand),
+    Inspect(PathBuf),
     Validate(ValidateCommand),
     Dictionary(DictionaryCommand),
     Help,
@@ -1665,6 +1735,15 @@ mod tests {
     }
 
     #[test]
+    fn parses_artifact_inspection() {
+        let command =
+            parse_arguments(["ferrolex", "inspect", "dictionary.flexh"].map(str::to_owned))
+                .expect("the command is valid");
+
+        assert_eq!(command, Command::Inspect(PathBuf::from("dictionary.flexh")));
+    }
+
+    #[test]
     fn parses_bounded_plain_word_list_suggestions() {
         let command = parse_arguments(
             [
@@ -2006,6 +2085,52 @@ mod tests {
                 "books".to_owned(),
             ])
             .expect("the standalone artifact is readable"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn inspects_native_and_standalone_hunspell_artifacts() {
+        let words = temporary_dictionary("ant\nzebra\n");
+        let native = temporary_file("");
+        run([
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            words.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            native.path.to_string_lossy().into_owned(),
+        ])
+        .expect("the word list compiles");
+        assert_eq!(
+            run([
+                "ferrolex".to_owned(),
+                "inspect".to_owned(),
+                native.path.to_string_lossy().into_owned(),
+            ])
+            .expect("the native artifact is inspectable"),
+            RunOutcome::Success
+        );
+
+        let affix = temporary_file("SET UTF-8\n");
+        let dictionary = temporary_file("1\nbook\n");
+        let hunspell = temporary_file("");
+        run([
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            affix.path.to_string_lossy().into_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            hunspell.path.to_string_lossy().into_owned(),
+        ])
+        .expect("the Hunspell pair compiles");
+        assert_eq!(
+            run([
+                "ferrolex".to_owned(),
+                "inspect".to_owned(),
+                hunspell.path.to_string_lossy().into_owned(),
+            ])
+            .expect("the Hunspell artifact is inspectable"),
             RunOutcome::Success
         );
     }

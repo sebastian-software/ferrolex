@@ -70,3 +70,12 @@ contents, following [ADR-0006](adr/0006-compiled-format-safety-and-layout.md).
 Version 1 readers reject a nonzero feature-bit field and any version other than
 one. This fails closed when a future compiler emits semantics that an older
 runtime cannot recognize.
+
+## Inspection
+
+Use `ferrolex inspect <artifact>` to report the format version, feature bits,
+exact-word entry count, and source-metadata availability without decoding every
+word. `FLEXDIC` version 1 requires only `exact-word-lookup` and deliberately
+does not record source provenance. The command reports a `FLXHSP` artifact's
+format and semantics versions, embedded source SHA-256 digests, and the full
+Hunspell feature set required by that format.

@@ -38,11 +38,62 @@ const DATA_OFFSET: usize = 40;
 const DATA_LEN_OFFSET: usize = 48;
 const FILE_LEN_OFFSET: usize = 56;
 
+/// Self-describing metadata available without decoding dictionary words.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompiledArtifactMetadata {
+    format_version: u16,
+    feature_bits: u32,
+    word_count: u64,
+}
+
+impl CompiledArtifactMetadata {
+    /// Serialized layout version.
+    #[must_use]
+    pub const fn format_version(self) -> u16 {
+        self.format_version
+    }
+
+    /// Feature bits declared by the artifact.
+    #[must_use]
+    pub const fn feature_bits(self) -> u32 {
+        self.feature_bits
+    }
+
+    /// Number of unique exact words.
+    #[must_use]
+    pub const fn word_count(self) -> u64 {
+        self.word_count
+    }
+}
+
 /// Largest compiled artifact accepted by the version-1 runtime.
 ///
 /// Command-line callers should check a file's metadata before reading it; the
 /// in-memory loader repeats the limit for embedded callers.
 pub const MAX_COMPILED_ARTIFACT_BYTES: usize = 128 * 1024 * 1024;
+
+/// Inspects a `FLEXDIC` header after its integrity checks.
+///
+/// This validates the fixed header and checksum without decoding every entry.
+/// Use [`CompiledDictionary::validate`] when the complete structural scan is
+/// required.
+///
+/// # Errors
+///
+/// Returns [`LoadError`] when the artifact cannot be recognized safely.
+pub fn inspect_compiled_artifact(bytes: &[u8]) -> Result<CompiledArtifactMetadata, LoadError> {
+    if bytes.len() > MAX_COMPILED_ARTIFACT_BYTES {
+        return Err(LoadError::ArtifactTooLarge {
+            actual: bytes.len(),
+        });
+    }
+    validate_header(bytes)?;
+    Ok(CompiledArtifactMetadata {
+        format_version: required_u16(bytes, VERSION_OFFSET)?,
+        feature_bits: required_u32(bytes, FLAGS_OFFSET)?,
+        word_count: required_u64(bytes, WORD_COUNT_OFFSET)?,
+    })
+}
 
 /// Reports a failure while compiling a textual word collection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -770,8 +821,9 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use super::{
-        checksum, compile_exact_ir, compile_words, put_u64, CompileError, CompiledDictionary,
-        ExactDictionaryIr, LoadError, ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
+        checksum, compile_exact_ir, compile_words, inspect_compiled_artifact, put_u64,
+        CompileError, CompiledDictionary, ExactDictionaryIr, LoadError, ValidationError,
+        CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
     use ferrolex_suggest::CandidateSource;
@@ -783,6 +835,17 @@ mod tests {
         let second = compile_words(["東京", "apple", "zebra"]).expect("valid words compile");
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn inspection_exposes_exact_artifact_metadata_without_loading_words() {
+        let bytes = compile_words(["zebra", "ant"]).expect("the words compile");
+
+        let metadata = inspect_compiled_artifact(&bytes).expect("the header is valid");
+
+        assert_eq!(metadata.format_version(), super::FORMAT_VERSION);
+        assert_eq!(metadata.feature_bits(), 0);
+        assert_eq!(metadata.word_count(), 2);
     }
 
     #[test]

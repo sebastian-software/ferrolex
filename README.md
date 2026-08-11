@@ -58,6 +58,7 @@ ferrolex analyze --dictionary words.txt --config .ferrolex/config src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex compile --dictionary words.txt -o words.flex
 ferrolex compile dictionary.aff dictionary.dic -o dictionary.flexh
+ferrolex inspect dictionary.flexh
 ferrolex validate --compiled words.flex
 ferrolex check --compiled words.flex Straße
 ferrolex check --compiled dictionary.flexh books
@@ -120,6 +121,11 @@ artifacts additionally receive the full offset, UTF-8 payload, and sort-order
 check. The [binary format](docs/binary-format.md) and
 [Hunspell runtime cache](docs/hunspell-runtime-cache.md) document the formats
 and compatibility policy.
+
+`inspect` makes the compatibility boundary visible before deployment. It prints
+the artifact format and version, source metadata where the format records it,
+and the recognition features the reader must support. This gives release and
+locale-matrix automation a stable, human-readable artifact report.
 
 ## Benchmarks
 
