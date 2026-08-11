@@ -13,7 +13,7 @@ use std::fmt;
 
 use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
-use ferrolex_suggest::CandidateSource;
+use ferrolex_suggest::{CandidateSource, ReplacementRule};
 
 pub use cache::{
     compile_runtime_cache, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
@@ -33,6 +33,7 @@ const MAX_COMPOUND_SCALARS: usize = 256;
 const MAX_COMPOUND_RULES: usize = 1_024;
 const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
 const MAX_BREAK_PATTERNS: usize = 256;
+const MAX_REPLACEMENT_RULES: usize = 4_096;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -233,6 +234,7 @@ pub struct HunspellDictionary {
     break_characters: BTreeSet<char>,
     sharp_uppercase_forms: BTreeSet<Box<str>>,
     word_characters: BTreeSet<char>,
+    replacement_rules: Vec<ReplacementRule>,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -266,6 +268,7 @@ impl HunspellDictionary {
         compound: CompoundConfig,
         break_characters: BTreeSet<char>,
         word_characters: BTreeSet<char>,
+        replacement_rules: Vec<ReplacementRule>,
     ) -> Self {
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
@@ -288,6 +291,7 @@ impl HunspellDictionary {
             break_characters,
             sharp_uppercase_forms,
             word_characters,
+            replacement_rules,
         }
     }
 
@@ -307,6 +311,16 @@ impl HunspellDictionary {
     /// a lookup dictionary into an unbounded expansion engine.
     pub fn stems(&self) -> impl Iterator<Item = &str> + '_ {
         self.stems.keys().map(Box::as_ref)
+    }
+
+    /// Returns the imported `REP` rules in source order.
+    ///
+    /// These rules do not affect dictionary recognition. Suggestion clients can
+    /// pass them to [`ferrolex_suggest::Suggester::with_replacement_rules`] to
+    /// prefer a dictionary's explicit typo corrections.
+    #[must_use]
+    pub fn replacement_rules(&self) -> &[ReplacementRule] {
+        &self.replacement_rules
     }
 
     fn matches_single_affix_word(&self, word: &str) -> bool {
@@ -478,7 +492,7 @@ impl HunspellDictionary {
             && (self.compound.begin.is_none() || self.compound.end.is_none())
         {
             return false;
-        };
+        }
         // Retain at most the bounded number of split positions. Building an
         // index for an arbitrarily long untrusted query would defeat the
         // compound-evaluation limit before it can reject the query.
@@ -1218,6 +1232,7 @@ fn import_decoded(
         parsed_aff.compound,
         parsed_aff.break_characters,
         parsed_aff.word_characters,
+        parsed_aff.replacement_rules,
     );
 
     if mode == ImportMode::Strict
@@ -1371,6 +1386,8 @@ struct ParsedAff {
     compound: CompoundConfig,
     break_characters: BTreeSet<char>,
     word_characters: BTreeSet<char>,
+    replacement_rules: Vec<ReplacementRule>,
+    replacement_rules_declared: bool,
 }
 
 #[allow(
@@ -1509,6 +1526,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.word_characters,
                 &mut parsed.diagnostics,
             ),
+            "REP" => parse_replacement_rules(source, &mut lines, line_number, &fields, &mut parsed),
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
@@ -1522,6 +1540,79 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
     }
 
     parsed
+}
+
+fn parse_replacement_rules(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = fields
+        .get(1)
+        .filter(|_| fields.len() == 2)
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "REP",
+            Severity::Warning,
+            "REP header requires exactly one non-negative rule count",
+        ));
+        return;
+    };
+    if count > MAX_REPLACEMENT_RULES {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "REP",
+            Severity::Warning,
+            "REP rule count exceeds the configured limit of 4096",
+        ));
+        return;
+    }
+    if parsed.replacement_rules_declared {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "REP",
+            Severity::Warning,
+            "REP may only be declared once",
+        ));
+        return;
+    }
+    parsed.replacement_rules_declared = true;
+
+    for _ in 0..count {
+        let Some((index, line)) = lines.next() else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "REP",
+                Severity::Warning,
+                "REP header ended before all declared rules were supplied",
+            ));
+            return;
+        };
+        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let rule = match rule_fields.as_slice() {
+            ["REP", from, to] => ReplacementRule::new(*from, *to),
+            _ => None,
+        };
+        let Some(rule) = rule else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "REP",
+                Severity::Warning,
+                "REP rules require exactly two non-empty literal spellings",
+            ));
+            continue;
+        };
+        parsed.replacement_rules.push(rule);
+    }
 }
 
 fn parse_unknown_directive(
@@ -2292,7 +2383,6 @@ fn is_suggestion_only_directive(directive: &str) -> bool {
             | "NOSPLITSUGS"
             | "NOSUGGEST"
             | "PHONE"
-            | "REP"
             | "SUGSWITHDOTS"
             | "TRY"
     )
@@ -2322,7 +2412,7 @@ mod tests {
     use std::thread;
 
     use ferrolex_core::Dictionary;
-    use ferrolex_suggest::CandidateSource;
+    use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
 
     use super::{
         import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
@@ -2371,6 +2461,50 @@ mod tests {
 
         assert_eq!(candidates, ["kind", "party"]);
         assert!(!candidates.contains(&"parties".to_owned()));
+    }
+
+    #[test]
+    fn imports_replacement_rules_for_suggestion_ranking() {
+        let result = import(
+            "test.aff",
+            "REP 1\nREP teh the\n",
+            "test.dic",
+            "2\ntea\nthe\n",
+            ImportMode::Strict,
+        )
+        .expect("REP is a supported suggestion directive");
+        let dictionary = result.dictionary();
+
+        assert_eq!(dictionary.replacement_rules().len(), 1);
+        assert_eq!(dictionary.replacement_rules()[0].from(), "teh");
+        assert_eq!(dictionary.replacement_rules()[0].to(), "the");
+        assert_eq!(
+            Suggester::new(dictionary, SuggestConfig::default())
+                .with_replacement_rules(dictionary.replacement_rules())
+                .suggest("teh")
+                .suggestions()[0]
+                .word(),
+            "the"
+        );
+    }
+
+    #[test]
+    fn malformed_replacement_rules_remain_warning_diagnostics() {
+        let result = import(
+            "test.aff",
+            "REP 1\nREP missing-target\n",
+            "test.dic",
+            "1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect("suggestion-only malformed input does not change recognition");
+
+        assert!(result.dictionary().replacement_rules().is_empty());
+        assert!(result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "REP"
+                && diagnostic.severity() == Severity::Warning));
     }
 
     #[test]

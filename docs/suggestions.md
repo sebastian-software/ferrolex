@@ -19,6 +19,13 @@ into an enumerated candidate gives that candidate ranking distance zero; it
 does not add unverified words, alter `Dictionary::contains`, or emulate a
 third-party suggestion order.
 
+`HunspellDictionary::replacement_rules` exposes supported counted `REP`
+entries in their source order. The CLI automatically applies those rules for
+`ferrolex suggest --hunspell …`, including when the dictionary was loaded from
+its provenance-bound runtime cache. A `REP` rule is two non-empty,
+whitespace-free literal spellings; unsupported variants produce a warning and
+never affect word recognition.
+
 All work is bounded by explicit candidate, word-length, and edit-cell limits.
 The result reports whether it is complete or stopped by a configured budget, so
 partial output is never presented as exhaustive. Case is used only for display:

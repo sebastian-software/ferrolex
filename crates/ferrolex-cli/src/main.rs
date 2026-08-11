@@ -30,7 +30,7 @@ use ferrolex_hunspell::{
     ByteEncoding, ByteImportEncodings, Diagnostic as ImportDiagnostic, HunspellDictionary,
     ImportError, ImportMode, ImportResult, RuntimeCacheError, Severity, SourceDigests,
 };
-use ferrolex_suggest::{CandidateSource, Completeness, SuggestConfig, Suggester};
+use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
 const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile --dictionary <PLAIN_WORD_LIST> -o <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
@@ -65,7 +65,7 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
 }
 
 fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
-    let source: Box<dyn CandidateSource> = match (
+    let (source, replacements): (Box<dyn CandidateSource>, Vec<ReplacementRule>) = match (
         command.dictionary_path.as_ref(),
         command.compiled_path.as_ref(),
         command.hunspell_affix_path.as_ref(),
@@ -75,17 +75,27 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
                 path: path.clone(),
                 source,
             })?;
-            Box::new(WordList::from_text(Normalization::Exact, &text))
+            (
+                Box::new(WordList::from_text(Normalization::Exact, &text)),
+                Vec::new(),
+            )
         }
-        (None, Some(path), None) => Box::new(
-            CompiledDictionary::load(read_compiled_artifact(path)?).map_err(|source| {
-                CliError::LoadArtifact {
-                    path: path.clone(),
-                    source,
-                }
-            })?,
+        (None, Some(path), None) => (
+            Box::new(
+                CompiledDictionary::load(read_compiled_artifact(path)?).map_err(|source| {
+                    CliError::LoadArtifact {
+                        path: path.clone(),
+                        source,
+                    }
+                })?,
+            ),
+            Vec::new(),
         ),
-        (None, None, Some(path)) => Box::new(load_installed_hunspell_dictionary(path)?),
+        (None, None, Some(path)) => {
+            let dictionary = load_installed_hunspell_dictionary(path)?;
+            let replacements = dictionary.replacement_rules().to_vec();
+            (Box::new(dictionary), replacements)
+        }
         _ => unreachable!("suggest command parsing requires exactly one source"),
     };
     let mut config = SuggestConfig::default();
@@ -101,7 +111,9 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     if let Some(max_edit_cells) = command.max_edit_cells {
         config.max_edit_cells = max_edit_cells;
     }
-    let result = Suggester::new(source.as_ref(), config).suggest(&command.word);
+    let result = Suggester::new(source.as_ref(), config)
+        .with_replacement_rules(&replacements)
+        .suggest(&command.word);
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",

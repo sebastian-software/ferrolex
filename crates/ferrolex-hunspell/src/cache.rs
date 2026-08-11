@@ -18,8 +18,9 @@ use super::{
     AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag,
     HunspellDictionary, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
     MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES,
-    MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES,
+    MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
 };
+use ferrolex_suggest::ReplacementRule;
 
 const MAGIC: [u8; 8] = *b"FLXHSP\0\0";
 const CHECKSUM_BYTES: usize = 32;
@@ -33,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 8;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 9;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -217,6 +218,7 @@ pub fn compile_runtime_cache(
     for character in &dictionary.word_characters {
         write_u32(&mut output, u32::from(*character));
     }
+    write_replacement_rules(&mut output, &dictionary.replacement_rules)?;
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -328,6 +330,7 @@ pub fn load_runtime_cache(
             ));
         }
     }
+    let replacement_rules = read_replacement_rules(&mut reader)?;
     let compound = CompoundConfig {
         flag,
         begin,
@@ -356,6 +359,7 @@ pub fn load_runtime_cache(
         compound,
         break_characters,
         word_characters,
+        replacement_rules,
     );
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)
@@ -453,6 +457,14 @@ fn validate_dictionary(
     }
     if dictionary.word_characters.len() > MAX_LINE_BYTES {
         return Err(error.error("word character count exceeds importer line limit"));
+    }
+    if dictionary.replacement_rules.len() > MAX_REPLACEMENT_RULES {
+        return Err(error.error("replacement rule count exceeds importer limit"));
+    }
+    for rule in &dictionary.replacement_rules {
+        if rule.from().len() > MAX_LINE_BYTES || rule.to().len() > MAX_LINE_BYTES {
+            return Err(error.error("replacement rule has invalid spelling text"));
+        }
     }
     Ok(())
 }
@@ -617,6 +629,18 @@ fn write_string(
     Ok(())
 }
 
+fn write_replacement_rules(
+    output: &mut Vec<u8>,
+    rules: &[ReplacementRule],
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, rules.len(), "replacement rule count")?;
+    for rule in rules {
+        write_string(output, rule.from(), "replacement source spelling")?;
+        write_string(output, rule.to(), "replacement target spelling")?;
+    }
+    Ok(())
+}
+
 fn write_count(
     output: &mut Vec<u8>,
     count: usize,
@@ -656,6 +680,25 @@ fn read_lexemes(reader: &mut Reader<'_>) -> Result<Vec<Lexeme>, RuntimeCacheErro
         });
     }
     Ok(lexemes)
+}
+
+fn read_replacement_rules(
+    reader: &mut Reader<'_>,
+) -> Result<Vec<ReplacementRule>, RuntimeCacheError> {
+    let count = reader.count(MAX_REPLACEMENT_RULES, "replacement rule count")?;
+    reader.require_minimum_items(count, 8, "replacement rules")?;
+    let mut rules = Vec::with_capacity(count);
+    for _ in 0..count {
+        let from = reader.string(MAX_LINE_BYTES, "replacement source spelling")?;
+        let to = reader.string(MAX_LINE_BYTES, "replacement target spelling")?;
+        let Some(rule) = ReplacementRule::new(from, to) else {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "replacement rule has empty spelling text",
+            ));
+        };
+        rules.push(rule);
+    }
+    Ok(rules)
 }
 
 fn read_rules(
@@ -922,7 +965,7 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP teh the\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
     const DIC: &str =
         "9\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\n";
 
@@ -977,6 +1020,7 @@ mod tests {
             loaded.word_characters().collect::<Vec<_>>(),
             ['-', '.', 'ß']
         );
+        assert_eq!(loaded.replacement_rules(), original.replacement_rules());
         assert!(!loaded.contains("Teil"));
     }
 

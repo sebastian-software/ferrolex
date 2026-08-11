@@ -84,6 +84,18 @@ impl ReplacementRule {
         let to = to.into();
         (!from.is_empty() && !to.is_empty()).then_some(Self { from, to })
     }
+
+    /// Returns the typo spelling matched in a query.
+    #[must_use]
+    pub fn from(&self) -> &str {
+        &self.from
+    }
+
+    /// Returns the preferred replacement spelling.
+    #[must_use]
+    pub fn to(&self) -> &str {
+        &self.to
+    }
 }
 
 impl Suggestion {
