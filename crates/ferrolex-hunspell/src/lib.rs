@@ -253,7 +253,7 @@ pub struct HunspellDictionary {
     suffix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
     special_flags: SpecialFlags,
     compound: CompoundConfig,
-    break_characters: BTreeSet<char>,
+    break_patterns: Vec<BreakPattern>,
     sharp_uppercase_forms: BTreeSet<Box<str>>,
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
@@ -276,6 +276,11 @@ impl Dictionary for HunspellDictionary {
 
 impl HunspellDictionary {
     fn contains_normalized(&self, word: &str, allow_keep_case: bool) -> bool {
+        self.matches_without_break(word, allow_keep_case)
+            || self.matches_break_word(word, allow_keep_case)
+    }
+
+    fn matches_without_break(&self, word: &str, allow_keep_case: bool) -> bool {
         self.lexemes_for_stem(word).any(|lexeme| {
             !self.is_forbidden(&lexeme.flags)
                 && !self.requires_affix(&lexeme.flags)
@@ -288,7 +293,6 @@ impl HunspellDictionary {
                 .flatten()
                 .any(|index| self.matches_derived_word(&self.lexemes[index], word, allow_keep_case))
             || self.matches_simple_compound(word, allow_keep_case)
-            || self.matches_break_word(word, allow_keep_case)
             || (allow_keep_case && self.sharp_uppercase_forms.contains(word))
     }
 
@@ -305,7 +309,7 @@ impl HunspellDictionary {
         suffixes: Vec<AffixRule>,
         special_flags: SpecialFlags,
         compound: CompoundConfig,
-        break_characters: BTreeSet<char>,
+        break_patterns: Vec<BreakPattern>,
         word_characters: BTreeSet<char>,
         replacement_rules: Vec<ReplacementRule>,
         ignored_characters: BTreeSet<char>,
@@ -335,7 +339,7 @@ impl HunspellDictionary {
             suffix_parent_flags,
             special_flags,
             compound,
-            break_characters,
+            break_patterns,
             sharp_uppercase_forms,
             word_characters,
             replacement_rules,
@@ -1125,24 +1129,33 @@ impl HunspellDictionary {
     }
 
     fn matches_break_word(&self, word: &str, allow_keep_case: bool) -> bool {
-        if self.break_characters.is_empty() || word.chars().count() > MAX_COMPOUND_SCALARS {
+        if self.break_patterns.is_empty() || word.chars().count() > MAX_COMPOUND_SCALARS {
             return false;
         }
-        let mut parts = word.split(|character| self.break_characters.contains(&character));
-        let Some(first) = parts.next() else {
-            return false;
-        };
-        if first.is_empty() {
-            return false;
-        }
-        let mut had_break = false;
-        for part in parts {
-            had_break = true;
-            if part.is_empty() || !self.contains_normalized(part, allow_keep_case) {
-                return false;
+        self.break_patterns.iter().any(|pattern| {
+            if pattern.at_start {
+                return word
+                    .strip_prefix(pattern.text.as_ref())
+                    .is_some_and(|rest| {
+                        !rest.is_empty() && self.matches_without_break(rest, allow_keep_case)
+                    });
             }
-        }
-        had_break && self.contains_normalized(first, allow_keep_case)
+            if pattern.at_end {
+                return word
+                    .strip_suffix(pattern.text.as_ref())
+                    .is_some_and(|rest| {
+                        !rest.is_empty() && self.matches_without_break(rest, allow_keep_case)
+                    });
+            }
+            word.match_indices(pattern.text.as_ref()).any(|(start, _)| {
+                let end = start + pattern.text.len();
+                let (left, right) = (&word[..start], &word[end..]);
+                !left.is_empty()
+                    && !right.is_empty()
+                    && self.matches_without_break(left, allow_keep_case)
+                    && self.matches_without_break(right, allow_keep_case)
+            })
+        })
     }
 }
 
@@ -1863,7 +1876,7 @@ fn import_decoded(
         parsed_aff.suffixes,
         parsed_aff.special_flags,
         parsed_aff.compound,
-        parsed_aff.break_characters,
+        parsed_aff.break_patterns,
         parsed_aff.word_characters,
         parsed_aff.replacement_rules,
         parsed_aff.ignored_characters,
@@ -2092,7 +2105,7 @@ struct ParsedAff {
     rule_count: usize,
     special_flags: SpecialFlags,
     compound: CompoundConfig,
-    break_characters: BTreeSet<char>,
+    break_patterns: Vec<BreakPattern>,
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
     flag_aliases: Vec<Option<BTreeSet<Flag>>>,
@@ -2102,6 +2115,33 @@ struct ParsedAff {
     output_conversions: Vec<InputConversion>,
     full_strip: bool,
     declared_sections: BTreeSet<CountedSection>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BreakPattern {
+    text: Box<str>,
+    at_start: bool,
+    at_end: bool,
+}
+
+fn default_break_patterns() -> Vec<BreakPattern> {
+    vec![
+        BreakPattern {
+            text: Box::from("-"),
+            at_start: false,
+            at_end: false,
+        },
+        BreakPattern {
+            text: Box::from("-"),
+            at_start: true,
+            at_end: false,
+        },
+        BreakPattern {
+            text: Box::from("-"),
+            at_start: false,
+            at_end: true,
+        },
+    ]
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -2121,7 +2161,7 @@ enum CountedSection {
 )]
 fn parse_aff(source: &str, text: &str) -> ParsedAff {
     let mut parsed = ParsedAff {
-        break_characters: BTreeSet::from(['-']),
+        break_patterns: default_break_patterns(),
         ..ParsedAff::default()
     };
     let mut lines = text.lines().enumerate();
@@ -3476,13 +3516,13 @@ fn parse_break_patterns(
         ));
         return;
     };
-    if fields.len() != 2 || pattern_count == 0 || pattern_count > MAX_BREAK_PATTERNS {
+    if fields.len() != 2 || pattern_count > MAX_BREAK_PATTERNS {
         parsed.diagnostics.push(diagnostic(
             source,
             line_number,
             "BREAK",
             Severity::Error,
-            "BREAK count must be between 1 and 256",
+            "BREAK count must be between 0 and 256",
         ));
         return;
     }
@@ -3490,11 +3530,7 @@ fn parse_break_patterns(
         .declared_sections
         .contains(&CountedSection::BreakPatterns)
     {
-        // Hunspell's default BREAK set is `-`, `^-`, and `-$`. The latter two
-        // only reject a leading or trailing separator, which the component
-        // splitter already does, so the stored literal `-` preserves the
-        // supported recognition behavior.
-        parsed.break_characters.clear();
+        parsed.break_patterns.clear();
         parsed
             .declared_sections
             .insert(CountedSection::BreakPatterns);
@@ -3510,28 +3546,45 @@ fn parse_break_patterns(
             ));
             return;
         };
-        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let rule_fields = aff_fields(line);
         let pattern = rule_fields.get(1).copied().unwrap_or_default();
-        let mut characters = pattern.chars();
-        let character = characters.next();
-        if rule_fields.len() != 2
-            || rule_fields[0] != "BREAK"
-            || character.is_none()
-            || characters.next().is_some()
-        {
+        let Some(pattern) = parse_break_pattern(pattern) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 index + 1,
                 "BREAK",
                 Severity::Error,
-                "only one literal Unicode-scalar break character is supported",
+                "BREAK requires a non-empty literal pattern with an optional start or end anchor",
+            ));
+            continue;
+        };
+        if rule_fields.len() != 2 || rule_fields[0] != "BREAK" {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "BREAK",
+                Severity::Error,
+                "BREAK rules require exactly one pattern",
             ));
             continue;
         }
-        parsed
-            .break_characters
-            .insert(character.expect("checked above"));
+        parsed.break_patterns.push(pattern);
     }
+}
+
+fn parse_break_pattern(value: &str) -> Option<BreakPattern> {
+    let at_start = value.starts_with('^');
+    let at_end = value.ends_with('$');
+    if at_start && at_end {
+        return None;
+    }
+    let value = value.strip_prefix('^').unwrap_or(value);
+    let value = value.strip_suffix('$').unwrap_or(value);
+    (!value.is_empty() && !value.contains(['^', '$'])).then(|| BreakPattern {
+        text: Box::from(value),
+        at_start,
+        at_end,
+    })
 }
 
 fn parse_word_characters(
@@ -5200,20 +5253,35 @@ mod tests {
     }
 
     #[test]
-    fn complex_break_patterns_remain_explicit_strict_errors() {
-        let error = import(
+    fn break_patterns_support_anchors_and_bounded_multiscalar_splits() {
+        let imported = import(
             "test.aff",
-            "BREAK 1\nBREAK ^-\n",
+            "BREAK 3\nBREAK --\nBREAK ^'\nBREAK '$\n",
             "test.dic",
-            "1\nWort\n",
+            "3\nfoo\nbar\nword\n",
             ImportMode::Strict,
         )
-        .expect_err("complex BREAK patterns are not approximated");
+        .expect("anchored and multi-scalar BREAK patterns import");
+        let dictionary = imported.dictionary();
 
-        assert!(error
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.directive() == "BREAK"));
+        assert!(dictionary.contains("foo--bar"));
+        assert!(dictionary.contains("'word"));
+        assert!(dictionary.contains("word'"));
+        assert!(
+            !dictionary.contains("foo--bar--foo"),
+            "BREAK matching is non-recursive"
+        );
+
+        let disabled = import(
+            "disabled-break.aff",
+            "BREAK 0\n",
+            "disabled-break.dic",
+            "2\nfoo\nbar\n",
+            ImportMode::Strict,
+        )
+        .expect("BREAK 0 disables the default patterns");
+
+        assert!(!disabled.dictionary().contains("foo-bar"));
     }
 
     #[test]
@@ -5228,7 +5296,7 @@ mod tests {
         .expect("the default BREAK patterns are supported");
 
         assert!(imported.dictionary().contains("E-Mail"));
-        assert!(!imported.dictionary().contains("-Mail"));
+        assert!(imported.dictionary().contains("-Mail"));
     }
 
     #[test]

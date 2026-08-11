@@ -15,9 +15,9 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    AffixKind, AffixRule, CaseLanguage, CompoundConfig, CompoundPattern, CompoundRule,
-    CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode, HunspellDictionary,
-    InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
+    AffixKind, AffixRule, BreakPattern, CaseLanguage, CompoundConfig, CompoundPattern,
+    CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode,
+    HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
     MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
     MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS,
     MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS,
@@ -37,7 +37,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 22;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 23;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -253,14 +253,7 @@ pub fn compile_runtime_cache(
     }
     write_compound_patterns(&mut output, &dictionary.compound.patterns)?;
     write_compound_syllable_limit(&mut output, dictionary.compound.syllable_limit.as_ref())?;
-    write_count(
-        &mut output,
-        dictionary.break_characters.len(),
-        "break character count",
-    )?;
-    for character in &dictionary.break_characters {
-        write_u32(&mut output, u32::from(*character));
-    }
+    write_break_patterns(&mut output, &dictionary.break_patterns)?;
     write_count(
         &mut output,
         dictionary.word_characters.len(),
@@ -432,19 +425,7 @@ pub fn load_runtime_cache(
     }
     let patterns = read_compound_patterns(&mut reader, flag_mode)?;
     let syllable_limit = read_compound_syllable_limit(&mut reader)?;
-    let break_count = reader.count(MAX_BREAK_PATTERNS, "break character count")?;
-    reader.require_minimum_items(break_count, 4, "break characters")?;
-    let mut break_characters = BTreeSet::new();
-    for _ in 0..break_count {
-        let character = char::from_u32(reader.u32()?).ok_or(RuntimeCacheError::InvalidArtifact(
-            "break character is invalid",
-        ))?;
-        if !break_characters.insert(character) {
-            return Err(RuntimeCacheError::InvalidArtifact(
-                "duplicate break character",
-            ));
-        }
-    }
+    let break_patterns = read_break_patterns(&mut reader)?;
     let word_character_count = reader.count(MAX_LINE_BYTES, "word character count")?;
     reader.require_minimum_items(word_character_count, 4, "word characters")?;
     let mut word_characters = BTreeSet::new();
@@ -507,7 +488,7 @@ pub fn load_runtime_cache(
         suffixes,
         special_flags,
         compound,
-        break_characters,
+        break_patterns,
         word_characters,
         replacement_rules,
         ignored_characters,
@@ -699,8 +680,13 @@ fn validate_dictionary(
             }
         }
     }
-    if dictionary.break_characters.len() > MAX_BREAK_PATTERNS {
-        return Err(error.error("break character count exceeds importer limit"));
+    if dictionary.break_patterns.len() > MAX_BREAK_PATTERNS
+        || dictionary
+            .break_patterns
+            .iter()
+            .any(|pattern| pattern.text.is_empty() || pattern.text.len() > MAX_LINE_BYTES)
+    {
+        return Err(error.error("break pattern is outside the importer limit"));
     }
     if dictionary.word_characters.len() > MAX_LINE_BYTES {
         return Err(error.error("word character count exceeds importer line limit"));
@@ -994,6 +980,19 @@ fn write_optional_usize(
     Ok(())
 }
 
+fn write_break_patterns(
+    output: &mut Vec<u8>,
+    patterns: &[BreakPattern],
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, patterns.len(), "break pattern count")?;
+    for pattern in patterns {
+        write_string(output, &pattern.text, "break pattern text")?;
+        output.push(u8::from(pattern.at_start));
+        output.push(u8::from(pattern.at_end));
+    }
+    Ok(())
+}
+
 fn write_compound_patterns(
     output: &mut Vec<u8>,
     patterns: &[CompoundPattern],
@@ -1123,6 +1122,26 @@ fn read_optional_usize(
     let value =
         usize::try_from(reader.u64()?).map_err(|_| RuntimeCacheError::InvalidArtifact(name))?;
     Ok((value != 0).then_some(value))
+}
+
+fn read_break_patterns(reader: &mut Reader<'_>) -> Result<Vec<BreakPattern>, RuntimeCacheError> {
+    let count = reader.count(MAX_BREAK_PATTERNS, "break pattern count")?;
+    reader.require_minimum_items(count, 10, "break patterns")?;
+    let mut patterns = Vec::with_capacity(count);
+    for _ in 0..count {
+        let text = reader.string(MAX_LINE_BYTES, "break pattern text")?;
+        let at_start = read_boolean(reader, "invalid break start marker")?;
+        let at_end = read_boolean(reader, "invalid break end marker")?;
+        if text.is_empty() || (at_start && at_end) {
+            return Err(RuntimeCacheError::InvalidArtifact("invalid break pattern"));
+        }
+        patterns.push(BreakPattern {
+            text: Box::from(text),
+            at_start,
+            at_end,
+        });
+    }
+    Ok(patterns)
 }
 
 fn read_compound_patterns(
