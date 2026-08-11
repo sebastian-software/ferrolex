@@ -302,6 +302,7 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     let sources = SourceDigests::from_source_bytes(&aff_bytes, &dic_bytes);
     let cache = compile_runtime_cache(imported.dictionary(), sources)
         .unwrap_or_else(|error| panic!("{} cache compilation failed: {error}", fixture.id));
+    drop(imported);
     let dictionary = load_runtime_cache(&cache, sources)
         .unwrap_or_else(|error| panic!("{} cache loading failed: {error}", fixture.id));
     writeln!(report, "  runtime_cache=compiled-and-validated")

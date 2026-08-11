@@ -31,13 +31,13 @@ const HEADER_BYTES: usize = MAGIC.len() + 2 + 4 + (CHECKSUM_BYTES * 2);
 const MAX_RUNTIME_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 /// The on-disk layout version for a Hunspell runtime cache.
-pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
+pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 2;
 
 /// The recognition semantics encoded by a Hunspell runtime cache.
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 23;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 24;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,6 +188,10 @@ impl std::error::Error for RuntimeCacheError {}
 ///
 /// Returns [`RuntimeCacheError::InvalidDictionary`] if a manually constructed
 /// or otherwise invalid dictionary violates an importer invariant.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the cache header and each recognition-affecting section are emitted together"
+)]
 pub fn compile_runtime_cache(
     dictionary: &HunspellDictionary,
     sources: SourceDigests,
@@ -203,17 +207,45 @@ pub fn compile_runtime_cache(
     write_flag_mode(&mut output, dictionary.flag_mode);
     output.push(u8::from(dictionary.case_fallback));
     write_case_language(&mut output, dictionary.case_language);
-    write_lexemes(&mut output, &dictionary.lexemes)?;
-    write_rules(&mut output, &dictionary.prefixes)?;
-    write_rules(&mut output, &dictionary.suffixes)?;
-    write_special_flags(&mut output, &dictionary.special_flags)?;
-    write_optional_flag(&mut output, dictionary.compound.flag.as_ref())?;
-    write_optional_flag(&mut output, dictionary.compound.begin.as_ref())?;
-    write_optional_flag(&mut output, dictionary.compound.middle.as_ref())?;
-    write_optional_flag(&mut output, dictionary.compound.end.as_ref())?;
-    write_optional_flag(&mut output, dictionary.compound.permit.as_ref())?;
-    write_optional_flag(&mut output, dictionary.compound.forbid.as_ref())?;
-    write_optional_flag(&mut output, dictionary.compound.force_uppercase.as_ref())?;
+    write_lexemes(&mut output, &dictionary.lexemes, dictionary.flag_mode)?;
+    write_rules(&mut output, &dictionary.prefixes, dictionary.flag_mode)?;
+    write_rules(&mut output, &dictionary.suffixes, dictionary.flag_mode)?;
+    write_special_flags(&mut output, &dictionary.special_flags, dictionary.flag_mode)?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.flag.as_ref(),
+        dictionary.flag_mode,
+    )?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.begin.as_ref(),
+        dictionary.flag_mode,
+    )?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.middle.as_ref(),
+        dictionary.flag_mode,
+    )?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.end.as_ref(),
+        dictionary.flag_mode,
+    )?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.permit.as_ref(),
+        dictionary.flag_mode,
+    )?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.forbid.as_ref(),
+        dictionary.flag_mode,
+    )?;
+    write_optional_flag(
+        &mut output,
+        dictionary.compound.force_uppercase.as_ref(),
+        dictionary.flag_mode,
+    )?;
     write_u64(
         &mut output,
         u64::try_from(dictionary.compound.minimum_length)
@@ -247,11 +279,15 @@ pub fn compile_runtime_cache(
         for pattern in &rule.patterns {
             write_count(&mut output, pattern.len(), "compound rule component count")?;
             for flag in pattern {
-                write_flag(&mut output, flag)?;
+                write_flag(&mut output, flag, dictionary.flag_mode)?;
             }
         }
     }
-    write_compound_patterns(&mut output, &dictionary.compound.patterns)?;
+    write_compound_patterns(
+        &mut output,
+        &dictionary.compound.patterns,
+        dictionary.flag_mode,
+    )?;
     write_compound_syllable_limit(&mut output, dictionary.compound.syllable_limit.as_ref())?;
     write_break_patterns(&mut output, &dictionary.break_patterns)?;
     write_count(
@@ -787,22 +823,30 @@ fn validate_flag(
     flag_mode: FlagMode,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
-    if flag_mode.flag_count(&flag.0) != Some(1) {
+    if !flag.is_valid_for(flag_mode) {
         return Err(error.error("flag does not match the dictionary FLAG mode"));
     }
     Ok(())
 }
 
-fn write_lexemes(output: &mut Vec<u8>, lexemes: &[Lexeme]) -> Result<(), RuntimeCacheError> {
+fn write_lexemes(
+    output: &mut Vec<u8>,
+    lexemes: &[Lexeme],
+    flag_mode: FlagMode,
+) -> Result<(), RuntimeCacheError> {
     write_count(output, lexemes.len(), "dictionary entry count")?;
     for lexeme in lexemes {
         write_string(output, &lexeme.stem, "lexeme stem")?;
-        write_flags(output, &lexeme.flags)?;
+        write_flags(output, &lexeme.flags, flag_mode)?;
     }
     Ok(())
 }
 
-fn write_rules(output: &mut Vec<u8>, rules: &[AffixRule]) -> Result<(), RuntimeCacheError> {
+fn write_rules(
+    output: &mut Vec<u8>,
+    rules: &[AffixRule],
+    flag_mode: FlagMode,
+) -> Result<(), RuntimeCacheError> {
     write_count(output, rules.len(), "affix rule count")?;
     for rule in rules {
         write_u32(
@@ -814,12 +858,12 @@ fn write_rules(output: &mut Vec<u8>, rules: &[AffixRule]) -> Result<(), RuntimeC
             AffixKind::Prefix => 0,
             AffixKind::Suffix => 1,
         });
-        write_flag(output, &rule.flag)?;
+        write_flag(output, &rule.flag, flag_mode)?;
         write_string(output, &rule.strip, "affix strip")?;
         write_string(output, &rule.add, "affix add")?;
         write_condition(output, &rule.condition)?;
         output.push(u8::from(rule.cross_product));
-        write_flags(output, &rule.continuation_flags)?;
+        write_flags(output, &rule.continuation_flags, flag_mode)?;
     }
     Ok(())
 }
@@ -827,36 +871,60 @@ fn write_rules(output: &mut Vec<u8>, rules: &[AffixRule]) -> Result<(), RuntimeC
 fn write_special_flags(
     output: &mut Vec<u8>,
     special_flags: &SpecialFlags,
+    flag_mode: FlagMode,
 ) -> Result<(), RuntimeCacheError> {
-    write_optional_flag(output, special_flags.circumfix.as_ref())?;
-    write_optional_flag(output, special_flags.forbidden_word.as_ref())?;
-    write_optional_flag(output, special_flags.keep_case.as_ref())?;
-    write_optional_flag(output, special_flags.need_affix.as_ref())?;
-    write_optional_flag(output, special_flags.only_in_compound.as_ref())?;
+    write_optional_flag(output, special_flags.circumfix.as_ref(), flag_mode)?;
+    write_optional_flag(output, special_flags.forbidden_word.as_ref(), flag_mode)?;
+    write_optional_flag(output, special_flags.keep_case.as_ref(), flag_mode)?;
+    write_optional_flag(output, special_flags.need_affix.as_ref(), flag_mode)?;
+    write_optional_flag(output, special_flags.only_in_compound.as_ref(), flag_mode)?;
     output.push(u8::from(special_flags.check_sharps));
     Ok(())
 }
 
-fn write_optional_flag(output: &mut Vec<u8>, flag: Option<&Flag>) -> Result<(), RuntimeCacheError> {
+fn write_optional_flag(
+    output: &mut Vec<u8>,
+    flag: Option<&Flag>,
+    flag_mode: FlagMode,
+) -> Result<(), RuntimeCacheError> {
     if let Some(flag) = flag {
         output.push(1);
-        write_flag(output, flag)
+        write_flag(output, flag, flag_mode)
     } else {
         output.push(0);
         Ok(())
     }
 }
 
-fn write_flags(output: &mut Vec<u8>, flags: &BTreeSet<Flag>) -> Result<(), RuntimeCacheError> {
+fn write_flags(
+    output: &mut Vec<u8>,
+    flags: &BTreeSet<Flag>,
+    flag_mode: FlagMode,
+) -> Result<(), RuntimeCacheError> {
     write_count(output, flags.len(), "flag count")?;
     for flag in flags {
-        write_flag(output, flag)?;
+        write_flag(output, flag, flag_mode)?;
     }
     Ok(())
 }
 
-fn write_flag(output: &mut Vec<u8>, flag: &Flag) -> Result<(), RuntimeCacheError> {
-    write_string(output, &flag.0, "flag")
+fn write_flag(
+    output: &mut Vec<u8>,
+    flag: &Flag,
+    flag_mode: FlagMode,
+) -> Result<(), RuntimeCacheError> {
+    match (flag, flag_mode) {
+        (Flag::Numeric(value), FlagMode::Numeric) => {
+            write_u32(output, *value);
+            Ok(())
+        }
+        (Flag::Text(value), mode) if mode != FlagMode::Numeric => {
+            write_string(output, value, "flag")
+        }
+        _ => Err(RuntimeCacheError::InvalidDictionary(
+            "flag does not match the dictionary FLAG mode",
+        )),
+    }
 }
 
 fn write_flag_mode(output: &mut Vec<u8>, flag_mode: FlagMode) {
@@ -996,13 +1064,14 @@ fn write_break_patterns(
 fn write_compound_patterns(
     output: &mut Vec<u8>,
     patterns: &[CompoundPattern],
+    flag_mode: FlagMode,
 ) -> Result<(), RuntimeCacheError> {
     write_count(output, patterns.len(), "compound pattern count")?;
     for pattern in patterns {
         write_string(output, &pattern.ending, "compound pattern ending")?;
-        write_optional_flag(output, pattern.ending_flag.as_ref())?;
+        write_optional_flag(output, pattern.ending_flag.as_ref(), flag_mode)?;
         write_string(output, &pattern.beginning, "compound pattern beginning")?;
-        write_optional_flag(output, pattern.beginning_flag.as_ref())?;
+        write_optional_flag(output, pattern.beginning_flag.as_ref(), flag_mode)?;
         match &pattern.replacement {
             None => output.push(0),
             Some(replacement) => {
@@ -1514,13 +1583,16 @@ impl<'a> Reader<'a> {
     }
 
     fn flag(&mut self, flag_mode: FlagMode) -> Result<Flag, RuntimeCacheError> {
+        if flag_mode == FlagMode::Numeric {
+            return Ok(Flag::Numeric(self.u32()?));
+        }
         let value = self.string(MAX_LINE_BYTES, "flag")?;
         if flag_mode.flag_count(&value) != Some(1) {
             return Err(RuntimeCacheError::InvalidArtifact(
                 "flag does not match the dictionary FLAG mode",
             ));
         }
-        Ok(Flag(Box::<str>::from(value)))
+        Ok(Flag::Text(Box::<str>::from(value)))
     }
 
     fn character(&mut self) -> Result<char, RuntimeCacheError> {
@@ -1775,11 +1847,12 @@ mod tests {
     fn malformed_versions_and_bounded_counts_are_rejected() {
         let cache = compile_runtime_cache(&dictionary(), sources()).expect("cache compiles");
         let mut format = cache.clone();
-        format[8..10].copy_from_slice(&2_u16.to_le_bytes());
+        let unsupported_format = HUNSPELL_CACHE_FORMAT_VERSION.saturating_add(1);
+        format[8..10].copy_from_slice(&unsupported_format.to_le_bytes());
         rewrite_checksum(&mut format);
         assert_eq!(
             load_runtime_cache(&format, sources()).expect_err("format is rejected"),
-            RuntimeCacheError::UnsupportedFormatVersion(2)
+            RuntimeCacheError::UnsupportedFormatVersion(unsupported_format)
         );
 
         let mut semantics = cache.clone();

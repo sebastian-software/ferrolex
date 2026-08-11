@@ -12,6 +12,8 @@ ISO-8859-1, or ISO-8859-2. A missing `SET` uses the established UTF-8 default;
 a UTF-8 BOM before `SET` is ignored. UTF-8 is decoded without replacement, and
 the two ISO encodings use their defined one-byte mappings. An unsupported
 declared encoding or malformed UTF-8 becomes a source-aware error diagnostic.
+For example, `SET KOI8-R` is deliberately unsupported until a reviewed source
+requires it, and reports that error without importing a partial dictionary.
 
 [`import_bytes_with_encodings`] accepts independently reviewed affix and
 dictionary encodings for exceptional mixed pairs. Its affix encoding must still
@@ -29,8 +31,8 @@ could silently accept words is an error; a suggestion-only unsupported
 directive is a warning.
 
 The public importer treats files as untrusted input. Its initial fixed limits
-are 32 MiB for `.aff`, 64 MiB for `.dic`, 16 KiB per line, 100,000 parsed
-affix rules, 1,000,000 parsed dictionary entries, 256 flags per entry, and 256
+are 32 MiB for `.aff`, 64 MiB for `.dic`, 32 KiB per line, 100,000 parsed
+affix rules, 1,000,000 parsed dictionary entries, 4,096 flags per entry, and 256
 condition atoms. The byte-oriented entry points reject an oversized source
 before scanning its `SET` declaration or decoding it. Exceeding any limit
 reports an error and discards the affected input or entry; later configuration

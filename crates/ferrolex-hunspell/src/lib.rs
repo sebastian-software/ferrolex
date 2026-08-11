@@ -24,10 +24,12 @@ pub use cache::{
 
 const MAX_AFF_BYTES: usize = 32 * 1024 * 1024;
 const MAX_DIC_BYTES: usize = 64 * 1024 * 1024;
-const MAX_LINE_BYTES: usize = 16 * 1024;
+// The digest-pinned tr_TR fixture needs at most 22,835 bytes on one entry line.
+const MAX_LINE_BYTES: usize = 32 * 1024;
 const MAX_AFFIX_RULES: usize = 100_000;
 const MAX_DICTIONARY_ENTRIES: usize = 1_000_000;
-const MAX_FLAGS_PER_ENTRY: usize = 256;
+// The digest-pinned tr_TR fixture needs at most 3,926 numeric flags on one entry.
+const MAX_FLAGS_PER_ENTRY: usize = 4_096;
 const MAX_CONDITION_ATOMS: usize = 256;
 const MAX_AFFIX_CHAIN: usize = 8;
 const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
@@ -1247,7 +1249,20 @@ struct Lexeme {
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct Flag(Box<str>);
+enum Flag {
+    Numeric(u32),
+    Text(Box<str>),
+}
+
+impl Flag {
+    fn is_valid_for(&self, mode: FlagMode) -> bool {
+        match (self, mode) {
+            (Self::Numeric(_), FlagMode::Numeric) => true,
+            (Self::Text(value), mode) => mode.flag_count(value) == Some(1),
+            _ => false,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum FlagMode {
@@ -2178,7 +2193,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 "line",
                 Severity::Error,
-                "line exceeds the configured 16 KiB importer limit",
+                "line exceeds the configured 32 KiB importer limit",
             ));
             continue;
         }
@@ -3466,7 +3481,7 @@ fn parse_compound_rule_patterns(
             }
             _ => (1, 1),
         };
-        parts.push((Flag(Box::from(token)), minimum, maximum));
+        parts.push((Flag::Text(Box::from(token)), minimum, maximum));
     }
     let mut patterns = vec![Vec::new()];
     for (flag, minimum, maximum) in parts {
@@ -3682,7 +3697,7 @@ fn parse_affix_group(
                 rule_line_number,
                 directive,
                 Severity::Error,
-                "line exceeds the configured 16 KiB importer limit",
+                "line exceeds the configured 32 KiB importer limit",
             ));
             consumed_rules += 1;
             continue;
@@ -3775,7 +3790,7 @@ fn parse_affix_rule(
                     .flag_count(flags)
                     .is_some_and(|count| count <= MAX_FLAGS_PER_ENTRY) =>
         {
-            return Err("affix continuation flags exceed the 256-flag importer limit".to_owned())
+            return Err("affix continuation flags exceed the 4096-flag importer limit".to_owned())
         }
         Some((add, flags)) => decode_entry_flags(flags, flag_mode, flag_aliases)
             .map(|flags| (add, flags))
@@ -3956,7 +3971,7 @@ fn parse_dic(
                 index + 1,
                 "entry",
                 Severity::Error,
-                "line exceeds the configured 16 KiB importer limit",
+                "line exceeds the configured 32 KiB importer limit",
             ));
             continue;
         }
@@ -4017,7 +4032,7 @@ fn parse_dic(
                     index + 1,
                     "entry",
                     Severity::Error,
-                    "dictionary entry exceeds the 256-flag importer limit",
+                    "dictionary entry exceeds the 4096-flag importer limit",
                 ));
                 continue;
             }
@@ -4120,19 +4135,14 @@ fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
     if flag_mode == FlagMode::Numeric {
         return value
             .split(',')
-            .map(|flag| {
-                flag.parse::<u32>()
-                    .ok()
-                    .filter(|flag| *flag > 0)
-                    .map(|flag| Flag(Box::<str>::from(flag.to_string())))
-            })
+            .map(|flag| flag.parse::<u32>().ok().map(Flag::Numeric))
             .collect();
     }
     if flag_mode == FlagMode::Unicode {
         return unicode_flag_tokens(value).map(|tokens| {
             tokens
                 .into_iter()
-                .map(|token| Flag(Box::from(token)))
+                .map(|token| Flag::Text(Box::from(token)))
                 .collect()
         });
     }
@@ -4140,7 +4150,7 @@ fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
     (!characters.is_empty() && characters.len() % 2 == 0).then(|| {
         characters
             .chunks_exact(2)
-            .map(|chunk| Flag(Box::<str>::from(chunk.iter().collect::<String>())))
+            .map(|chunk| Flag::Text(Box::<str>::from(chunk.iter().collect::<String>())))
             .collect()
     })
 }
@@ -4192,11 +4202,8 @@ impl FlagMode {
 
     fn flag_count(self, value: &str) -> Option<usize> {
         if self == Self::Numeric {
-            return (!value.is_empty()
-                && value
-                    .split(',')
-                    .all(|flag| flag.parse::<u32>().is_ok_and(|flag| flag > 0)))
-            .then(|| value.split(',').count());
+            return (!value.is_empty() && value.split(',').all(|flag| flag.parse::<u32>().is_ok()))
+                .then(|| value.split(',').count());
         }
         if self == Self::Unicode {
             return unicode_flag_tokens(value).map(|tokens| tokens.len());
@@ -4327,6 +4334,7 @@ mod tests {
         compile_runtime_cache, import, import_bytes, import_bytes_with_encodings,
         load_runtime_cache, ByteEncoding, ByteImportEncodings, ImportMode, Severity, SourceDigests,
         MAX_AFF_BYTES, MAX_COMPOUND_SCALARS, MAX_DERIVED_CANDIDATES_PER_LOOKUP, MAX_DIC_BYTES,
+        MAX_FLAGS_PER_ENTRY,
     };
 
     const AFFIXES: &str =
@@ -4432,6 +4440,28 @@ mod tests {
         assert!(result.dictionary().contains("plain"));
         assert!(result.dictionary().contains("plained"));
         assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn numeric_zero_flags_are_valid_affix_identifiers() {
+        let affixes = "FLAG num\nSFX 0 N 1\nSFX 0 0 s .\n";
+        let entries = "1\nword/0\n";
+        let imported = import(
+            "numeric-zero.aff",
+            affixes,
+            "numeric-zero.dic",
+            entries,
+            ImportMode::Strict,
+        )
+        .expect("zero is a valid numeric Hunspell flag");
+
+        assert!(imported.dictionary().contains("words"));
+        let sources = SourceDigests::from_source_bytes(affixes.as_bytes(), entries.as_bytes());
+        let cache = compile_runtime_cache(imported.dictionary(), sources)
+            .expect("numeric zero flags compile into the runtime cache");
+        let loaded = load_runtime_cache(&cache, sources)
+            .expect("numeric zero flags load from the runtime cache");
+        assert!(loaded.contains("words"));
     }
 
     #[test]
@@ -4913,7 +4943,7 @@ mod tests {
 
     #[test]
     fn resource_limits_produce_diagnostics_without_panicking() {
-        let excessive_flags = "A".repeat(257);
+        let excessive_flags = "A".repeat(MAX_FLAGS_PER_ENTRY + 1);
         let dictionary = format!("1\nword/{excessive_flags}\n");
         let result = import("test.aff", "", "test.dic", &dictionary, ImportMode::Lenient)
             .expect("lenient import returns diagnostics");
@@ -4921,7 +4951,7 @@ mod tests {
         assert!(result
             .diagnostics()
             .iter()
-            .any(|item| item.message().contains("256-flag importer limit")));
+            .any(|item| item.message().contains("4096-flag importer limit")));
         assert!(!result.dictionary().contains("word"));
     }
 
@@ -4948,7 +4978,7 @@ mod tests {
 
     #[test]
     fn deterministic_adversarial_import_corpus_never_panics() {
-        let excessive_flags = "A".repeat(257);
+        let excessive_flags = "A".repeat(MAX_FLAGS_PER_ENTRY + 1);
         let excessive_condition = ".".repeat(257);
         let affixes = [
             String::new(),
@@ -5170,7 +5200,7 @@ mod tests {
     }
 
     #[test]
-    fn literal_break_characters_join_recognized_components() {
+    fn literal_break_characters_join_one_recognized_boundary() {
         let imported = import(
             "test.aff",
             "BREAK 2\nBREAK -\nBREAK .\n",
@@ -5181,7 +5211,12 @@ mod tests {
         .expect("literal breaks import");
 
         let dictionary = imported.dictionary();
-        assert!(dictionary.contains("E-Mail.Adresse"));
+        assert!(dictionary.contains("E-Mail"));
+        assert!(dictionary.contains("Mail.Adresse"));
+        assert!(
+            !dictionary.contains("E-Mail.Adresse"),
+            "BREAK matching is non-recursive"
+        );
         assert!(!dictionary.contains("E-Mail.unbekannt"));
         assert!(!dictionary.contains(".Adresse"));
     }

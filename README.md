@@ -41,7 +41,7 @@ scorecard artifact contains the current differential evidence.
 | `nl_NL` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
 | `hu_HU` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
 | `ar` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
-| `tr_TR` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
+| `tr_TR` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 <!-- compat-status:end -->
 
 ## Try it
