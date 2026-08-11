@@ -15,6 +15,36 @@ recognition probes, and a negative probe for every fixture. It deliberately
 contains only this bounded metadata and probe set, never dictionary source data
 or affix rules.
 
+`hu_HU.aff` declares UTF-8 but has isolated ISO-8859-2 legacy bytes and NEL
+line separators. Its manifest entry therefore uses the reviewed
+`utf-8+iso-8859-2-fallback` decoder for the AFF file only; the paired DIC stays
+strict UTF-8. This is a source-specific import boundary, not a relaxed UTF-8
+mode for arbitrary dictionaries.
+
+### Hungarian compatibility boundary
+
+`hu_HU` now imports in lenient mode and protects stored (`szó`, `ház`), affixed
+(`házban`), and compound (`házszó`) recognition through the runtime-cache
+roundtrip. Strict import remains intentionally disabled until these observed
+source constructs have their project-owned semantics:
+
+- compound safeguards and restrictions (`COMPOUNDFORBIDFLAG`,
+  `COMPOUNDWORDMAX`, `COMPOUNDSYLLABLE`, `COMPOUNDFIRST`, `COMPOUNDLAST`,
+  `COMPOUNDROOT`, and `CHECKCOMPOUND*`) are tracked by [#23](https://github.com/sebastian-software/ferrolex/issues/23) and the directive-completeness epic [#6](https://github.com/sebastian-software/ferrolex/issues/6);
+- multi-scalar `BREAK` patterns are tracked by [#24](https://github.com/sebastian-software/ferrolex/issues/24);
+- header metadata (`HOME`, `NAME`, `VERSION`) is tracked by [#26](https://github.com/sebastian-software/ferrolex/issues/26), and `AM` plus affix morphology fields by [#29](https://github.com/sebastian-software/ferrolex/issues/29);
+- Hungarian-specific recognition directives (`HU_KOTOHANGZO`, `ONLYROOT`,
+  `SUBSTANDARD`, `GENERATE`, `LEMMA_PRESENT`, and `SYLLABLENUM`) remain in
+  [#6](https://github.com/sebastian-software/ferrolex/issues/6) until their
+  semantics are documented; and
+- the pinned DIC declares 97,663 entries but has malformed/empty rows, while
+  one `REP` row is malformed. ferrolex retains the safely parsed subset and
+  reports these as `count`, `entry`, and `REP` diagnostics; the bounded format
+  policy belongs to [#27](https://github.com/sebastian-software/ferrolex/issues/27).
+
+This list is the explicit strict-import boundary for the locale. It is not an
+oracle-parity claim for unlisted Hungarian forms.
+
 The current reviewed LibreOffice fixtures are `en_US`, `de_DE`, `fr_FR`,
 `nl_NL`, `hu_HU`, `ar`, and `tr_TR`. Their source-specific license evidence is
 the final column of the manifest. Those terms govern the dictionary data, not

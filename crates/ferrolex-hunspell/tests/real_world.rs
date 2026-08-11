@@ -16,8 +16,8 @@ use std::process::{Command, Stdio};
 use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
 use ferrolex_hunspell::{
-    compile_runtime_cache, import_bytes, load_runtime_cache, HunspellDictionary, ImportMode,
-    SourceDigests,
+    compile_runtime_cache, import_bytes, import_bytes_with_encodings, load_runtime_cache,
+    ByteEncoding, ByteImportEncodings, HunspellDictionary, ImportMode, SourceDigests,
 };
 
 const MANIFEST: &str = include_str!("real_world/manifest.tsv");
@@ -86,6 +86,7 @@ enum Decode {
     Utf8,
     Latin1,
     Latin2,
+    Utf8WithLatin2Fallback,
     NotUtf8,
 }
 
@@ -95,6 +96,7 @@ impl Decode {
             "utf-8" => Ok(Self::Utf8),
             "iso-8859-1" => Ok(Self::Latin1),
             "iso-8859-2" => Ok(Self::Latin2),
+            "utf-8+iso-8859-2-fallback" => Ok(Self::Utf8WithLatin2Fallback),
             "not-utf-8" => Ok(Self::NotUtf8),
             _ => Err(format!("unknown decoding mode `{value}`")),
         }
@@ -117,9 +119,48 @@ impl Decode {
                     .then(|| text.into_owned())
                     .ok_or_else(|| "ISO-8859-2 decoding replaced invalid input".to_owned())
             }
+            Self::Utf8WithLatin2Fallback => Ok(decode_utf8_with_latin2_fallback(bytes)),
             Self::NotUtf8 => Err("fixture is intentionally recorded as non-UTF-8".to_owned()),
         }
     }
+}
+
+fn decode_utf8_with_latin2_fallback(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len());
+    let mut remaining = bytes;
+
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                text.push_str(
+                    std::str::from_utf8(&remaining[..valid_up_to])
+                        .expect("UTF-8 error valid prefix is valid UTF-8"),
+                );
+                let invalid_len = error.error_len().unwrap_or(remaining.len() - valid_up_to);
+                for byte in &remaining[valid_up_to..valid_up_to + invalid_len] {
+                    if *byte == 0x85 {
+                        text.push('\n');
+                    } else {
+                        let encoded = [*byte];
+                        let (decoded, _, had_replacements) = ISO_8859_2.decode(&encoded);
+                        assert!(
+                            !had_replacements,
+                            "one ISO-8859-2 byte decodes without replacement"
+                        );
+                        text.push_str(&decoded);
+                    }
+                }
+                remaining = &remaining[valid_up_to + invalid_len..];
+            }
+        }
+    }
+
+    text.replace('\u{0085}', "\n")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -242,14 +283,9 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     };
     let directives = directives_in(&aff_text);
     assert_strict_probe_coverage(fixture, &directives);
-    let imported = import_bytes(
-        &aff_path.display().to_string(),
-        &aff_bytes,
-        &dic_path.display().to_string(),
-        &dic_bytes,
-        mode,
-    )
-    .unwrap_or_else(|error| panic!("{} import unexpectedly failed: {error}", fixture.id));
+    let imported =
+        import_fixture_bytes(fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes, mode)
+            .unwrap_or_else(|error| panic!("{} import unexpectedly failed: {error}", fixture.id));
     let diagnostics = imported
         .diagnostics()
         .iter()
@@ -297,6 +333,39 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     .expect("writing to String does not fail");
     write_scorecard(fixture, &dictionary, &aff_path, report);
     report_keepcase_coverage(fixture, &aff_text, &dic_text, report);
+}
+
+fn import_fixture_bytes(
+    fixture: &Fixture,
+    aff_path: &Path,
+    aff_bytes: &[u8],
+    dic_path: &Path,
+    dic_bytes: &[u8],
+    mode: ImportMode,
+) -> Result<ferrolex_hunspell::ImportResult, ferrolex_hunspell::ImportError> {
+    let aff_source = aff_path.display().to_string();
+    let dic_source = dic_path.display().to_string();
+    match fixture.aff_decode {
+        Decode::Utf8WithLatin2Fallback => {
+            assert_eq!(
+                fixture.dic_decode,
+                Decode::Utf8,
+                "the UTF-8/ISO-8859-2 AFF fallback only supports a UTF-8 DIC"
+            );
+            import_bytes_with_encodings(
+                &aff_source,
+                aff_bytes,
+                &dic_source,
+                dic_bytes,
+                ByteImportEncodings::new(
+                    ByteEncoding::Utf8WithIso8859_2Fallback,
+                    ByteEncoding::Utf8,
+                ),
+                mode,
+            )
+        }
+        _ => import_bytes(&aff_source, aff_bytes, &dic_source, dic_bytes, mode),
+    }
 }
 
 fn assert_strict_probe_coverage(fixture: &Fixture, directives: &BTreeSet<&str>) {

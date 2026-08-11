@@ -193,6 +193,10 @@ fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodi
             ByteEncoding::Iso8859_1,
             ByteEncoding::Utf8,
         )),
+        SourceEncoding::MixedUtf8AndIso8859_2Fallback => Some(ByteImportEncodings::new(
+            ByteEncoding::Utf8WithIso8859_2Fallback,
+            ByteEncoding::Utf8,
+        )),
         SourceEncoding::Utf8 | SourceEncoding::Iso8859_1 | SourceEncoding::Iso8859_2 => None,
     }
 }

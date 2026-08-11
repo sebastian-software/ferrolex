@@ -26,9 +26,9 @@ static TEMPORARY_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Text encoding of the upstream Hunspell pair.
 ///
-/// Installation preserves source bytes exactly. The current Hunspell import
-/// CLI accepts UTF-8 input, so callers must transcode legacy encodings before
-/// import; their checked source digests remain useful for provenance.
+/// Installation preserves source bytes exactly. The Hunspell import CLI uses
+/// this metadata to select a reviewed decoding policy while retaining the
+/// source digests for provenance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceEncoding {
     /// UTF-8 source bytes.
@@ -39,6 +39,9 @@ pub enum SourceEncoding {
     Iso8859_2,
     /// An ASCII-compatible ISO-8859-1 affix file and UTF-8 word list.
     MixedUtf8AndIso8859_1,
+    /// A UTF-8-declared affix file with isolated ISO-8859-2 legacy bytes and
+    /// a UTF-8 word list.
+    MixedUtf8AndIso8859_2Fallback,
 }
 
 impl SourceEncoding {
@@ -50,6 +53,9 @@ impl SourceEncoding {
             Self::Iso8859_1 => "ISO-8859-1",
             Self::Iso8859_2 => "ISO-8859-2",
             Self::MixedUtf8AndIso8859_1 => "mixed: AFF ISO-8859-1, DIC UTF-8",
+            Self::MixedUtf8AndIso8859_2Fallback => {
+                "mixed: AFF UTF-8 with ISO-8859-2 fallback, DIC UTF-8"
+            }
         }
     }
 }
@@ -162,7 +168,7 @@ impl LibreOfficeDictionary {
 /// digests. Use [`find_locale`] and [`LibreOfficeDictionary::manifest`] before
 /// downloading. `CJK` locales are intentionally outside this catalog because
 /// text tokenization for them is a separate future capability.
-pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 17] = [
+pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
     LibreOfficeDictionary {
         locale: "en_US",
         aff_path: "en/en_US.aff",
@@ -182,6 +188,16 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 17] = [
         encoding: SourceEncoding::Iso8859_1,
         aff_sha256: "646bf3333ac69c23e9d794533ee5241d6f755c359e8fe10a648f87613743d594",
         dic_sha256: "4ca3c958b0e5545910999bc246f668840bf8ede3df8e5e6790d05edd5a586c38",
+    },
+    LibreOfficeDictionary {
+        locale: "hu_HU",
+        aff_path: "hu_HU/hu_HU.aff",
+        dic_path: "hu_HU/hu_HU.dic",
+        license_notice_path: "hu_HU/README_hu_HU.txt",
+        license_label: "MPL-2.0-or-later OR LGPL-3.0-or-later (LibreOffice/hu_HU/README_hu_HU.txt)",
+        encoding: SourceEncoding::MixedUtf8AndIso8859_2Fallback,
+        aff_sha256: "f3a2748dd535cfde2142ab17d0f7f8e4787b03fb25a60829c69ac8d493db4802",
+        dic_sha256: "97293d670ad4a3b8e7eebef7e25c6e8e939b914c64b6b4672b2bf416b768f990",
     },
     LibreOfficeDictionary {
         locale: "es_ES",
@@ -845,10 +861,10 @@ mod tests {
 
     #[test]
     fn catalog_pins_all_requested_locales_and_exact_upstream_paths() {
-        assert_eq!(LIBREOFFICE_CATALOG.len(), 17);
+        assert_eq!(LIBREOFFICE_CATALOG.len(), 18);
         for locale in [
-            "en_US", "de_DE", "es_ES", "fr_FR", "it_IT", "pt_BR", "pt_PT", "nl_NL", "pl_PL",
-            "ru_RU", "tr_TR", "ar", "uk_UA", "sv_SE", "id_ID", "hi_IN", "bn_BD",
+            "en_US", "de_DE", "hu_HU", "es_ES", "fr_FR", "it_IT", "pt_BR", "pt_PT", "nl_NL",
+            "pl_PL", "ru_RU", "tr_TR", "ar", "uk_UA", "sv_SE", "id_ID", "hi_IN", "bn_BD",
         ] {
             let dictionary = find_locale(locale).expect("catalog contains requested locale");
             assert_eq!(dictionary.revision(), LIBREOFFICE_REVISION);
@@ -874,6 +890,10 @@ mod tests {
         assert_eq!(
             find_locale("pl_PL").expect("Polish exists").encoding(),
             SourceEncoding::Iso8859_2
+        );
+        assert_eq!(
+            find_locale("hu_HU").expect("Hungarian exists").encoding(),
+            SourceEncoding::MixedUtf8AndIso8859_2Fallback
         );
     }
 

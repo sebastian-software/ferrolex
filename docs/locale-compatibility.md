@@ -126,7 +126,7 @@ is recorded in the `recognition-scorecard` artifact.
 | `de_DE` | measured | 135 | 135 | 0 |
 | `fr_FR` | measured | 135 | 135 | 0 |
 | `nl_NL` | measured | 135 | 61 | 74 |
-| `hu_HU` | blocked (non-UTF-8 AFF) | 0 | 0 | 0 |
+| `hu_HU` | lenient local fixture validated (reviewed UTF-8/ISO-8859-2 AFF fallback; oracle pending) | — | — | — |
 | `ar` | measured | 133 | 133 | 0 |
 | `tr_TR` | measured | 132 | 132 | 0 |
 

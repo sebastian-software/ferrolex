@@ -68,6 +68,12 @@ pub enum ByteEncoding {
     Iso8859_1,
     /// ISO-8859-2, decoded with the standard ISO-8859-2 mapping.
     Iso8859_2,
+    /// UTF-8 with a per-byte ISO-8859-2 fallback for malformed affix-source
+    /// bytes.
+    ///
+    /// This is for reviewed legacy sources that declare UTF-8 but contain a
+    /// small number of ISO-8859-2 bytes. It is never selected from `SET`.
+    Utf8WithIso8859_2Fallback,
 }
 
 impl ByteEncoding {
@@ -85,6 +91,7 @@ impl ByteEncoding {
             Self::Utf8 => "UTF-8",
             Self::Iso8859_1 => "ISO-8859-1",
             Self::Iso8859_2 => "ISO-8859-2",
+            Self::Utf8WithIso8859_2Fallback => "UTF-8 with ISO-8859-2 fallback",
         }
     }
 }
@@ -1420,9 +1427,12 @@ pub fn import_bytes(
 /// Imports a raw `.aff`/`.dic` pair with independently reviewed file encodings.
 ///
 /// The affix file's `SET` declaration must still name the configured affix
-/// encoding. This prevents an override from silently interpreting a pair with
-/// an incompatible declared format. Use this only when a source catalog
-/// establishes a dictionary-file exception to the normal shared encoding.
+/// encoding. The only exception is [`ByteEncoding::Utf8WithIso8859_2Fallback`],
+/// which remains compatible with `SET UTF-8` while preserving a reviewed
+/// legacy-byte boundary. This prevents an override from silently interpreting
+/// a pair with an incompatible declared format. Use this only when a source
+/// catalog establishes a dictionary-file exception to the normal shared
+/// encoding.
 ///
 /// # Errors
 ///
@@ -1450,7 +1460,7 @@ pub fn import_bytes_with_encodings(
     let Some(declared) = declared_encoding(aff_source, aff_bytes, &mut diagnostics) else {
         return import_decoded(aff_source, "", dic_source, "", mode, diagnostics);
     };
-    if declared != encodings.aff() {
+    if !affix_encoding_matches_set(declared, encodings.aff()) {
         diagnostics.push(diagnostic(
             aff_source,
             1,
@@ -1473,6 +1483,14 @@ pub fn import_bytes_with_encodings(
         mode,
         diagnostics,
     )
+}
+
+fn affix_encoding_matches_set(declared: ByteEncoding, configured: ByteEncoding) -> bool {
+    declared == configured
+        || matches!(
+            (declared, configured),
+            (ByteEncoding::Utf8, ByteEncoding::Utf8WithIso8859_2Fallback)
+        )
 }
 
 fn import_bytes_with_declared_encodings(
@@ -1644,15 +1662,9 @@ fn decode_bytes(
     strip_utf8_bom: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> String {
-    match encoding {
+    let text = match encoding {
         ByteEncoding::Utf8 => match std::str::from_utf8(bytes) {
-            Ok(text) => {
-                if strip_utf8_bom {
-                    text.strip_prefix('\u{feff}').unwrap_or(text).to_owned()
-                } else {
-                    text.to_owned()
-                }
-            }
+            Ok(text) => text.to_owned(),
             Err(error) => {
                 diagnostics.push(diagnostic(
                     source,
@@ -1683,7 +1695,53 @@ fn decode_bytes(
                 text.into_owned()
             }
         }
+        ByteEncoding::Utf8WithIso8859_2Fallback => decode_utf8_with_iso8859_2_fallback(bytes),
+    };
+    if strip_utf8_bom {
+        text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned()
+    } else {
+        text
     }
+}
+
+fn decode_utf8_with_iso8859_2_fallback(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len());
+    let mut remaining = bytes;
+
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                text.push_str(
+                    std::str::from_utf8(&remaining[..valid_up_to])
+                        .expect("UTF-8 error valid prefix is valid UTF-8"),
+                );
+                let invalid_len = error.error_len().unwrap_or(remaining.len() - valid_up_to);
+                for byte in &remaining[valid_up_to..valid_up_to + invalid_len] {
+                    if *byte == 0x85 {
+                        // The reviewed source uses the ISO-8859-2 C1 NEL
+                        // byte as a line separator. The parser expects LF.
+                        text.push('\n');
+                    } else {
+                        let encoded = [*byte];
+                        let (decoded, had_errors) =
+                            ISO_8859_2.decode_without_bom_handling(&encoded);
+                        debug_assert!(!had_errors, "one ISO-8859-2 byte always decodes");
+                        text.push_str(&decoded);
+                    }
+                }
+                remaining = &remaining[valid_up_to + invalid_len..];
+            }
+        }
+    }
+
+    // Normalize an already-valid UTF-8 NEL too, so both encodings of the
+    // source's line separator reach the parser as a normal line boundary.
+    text.replace('\u{0085}', "\n")
 }
 
 fn byte_line_number(bytes: &[u8], byte_index: usize) -> usize {
@@ -4068,6 +4126,21 @@ mod tests {
         .expect("the per-file override decodes the reviewed mixed pair");
 
         assert!(result.dictionary().contains("café"));
+    }
+
+    #[test]
+    fn byte_import_allows_a_reviewed_utf8_affix_with_iso_8859_2_fallback() {
+        let result = import_bytes_with_encodings(
+            "mixed-utf8.aff",
+            b"SET UTF-8\n# legacy byte: \xe1\nSFX S N 1\x85SFX S 0 s .\n",
+            "mixed-utf8.dic",
+            b"1\nword/S\n",
+            ByteImportEncodings::new(ByteEncoding::Utf8WithIso8859_2Fallback, ByteEncoding::Utf8),
+            ImportMode::Strict,
+        )
+        .expect("the reviewed fallback retains UTF-8 and legacy affix bytes");
+
+        assert!(result.dictionary().contains("words"));
     }
 
     #[test]

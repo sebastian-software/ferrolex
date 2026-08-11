@@ -28,7 +28,8 @@ semantics so that a runtime can reject an incompatible artifact before lookup.
 The opt-in real-world fixture suite compares ferrolex accept/reject decisions
 with the external Hunspell command over digest-verified source pairs. It emits a
 TSV CI artifact for `en_US`, `de_DE`, `fr_FR`, `nl_NL`, `hu_HU`, `ar`, and
-`tr_TR`; a blocked source encoding is recorded as a blocked row rather than
-silently omitted. See [Compatibility fixtures](compatibility-fixtures.md) for
-the reproducible command and oracle boundary. The tracked per-locale baseline
-is in [Locale compatibility scorecard](locale-compatibility.md).
+`tr_TR`. A reviewed source-specific decoding boundary remains visible in its
+fixture metadata rather than being silently omitted. See [Compatibility
+fixtures](compatibility-fixtures.md) for the reproducible command and oracle
+boundary. The tracked per-locale baseline is in [Locale compatibility
+scorecard](locale-compatibility.md).
