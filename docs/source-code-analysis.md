@@ -18,8 +18,13 @@ user_profile_image              -> user, profile, image
 
 Unicode letter boundaries are respected. A caller can select whether a leading
 single uppercase letter remains attached to its following word (`OAuth`) or is
-returned independently (`O`, `Auth`). Suggestions can later use the retained
-whole-token range and segment index to reconstruct identifiers case-preservingly.
+returned independently (`O`, `Auth`).
+
+`recombine_identifier_suggestion` turns a suggested replacement for an
+identifier segment into one complete token edit. It retains the surrounding
+identifier text and follows lower-, upper-, and initial-uppercase segment
+casing, for example `OAuthAuthentcationProvider` becomes
+`OAuthAuthenticationProvider`.
 
 ## Classification and ignores
 

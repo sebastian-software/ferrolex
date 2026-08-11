@@ -618,6 +618,46 @@ impl<'source> Finding<'source> {
     }
 }
 
+/// Replaces an identifier finding with `suggestion` in its complete token.
+///
+/// The replacement follows the finding's lower-, upper-, or initial-uppercase
+/// casing so callers can offer one whole-identifier edit.
+#[must_use]
+pub fn recombine_identifier_suggestion(finding: &Finding<'_>, suggestion: &str) -> Option<String> {
+    finding.segment_index?;
+    let relative_start = finding.range.start.checked_sub(finding.token_range.start)?;
+    let relative_end = finding.range.end.checked_sub(finding.token_range.start)?;
+    let replacement = preserve_segment_casing(finding.word, suggestion);
+    let mut token = String::with_capacity(finding.token.len() + replacement.len());
+    token.push_str(&finding.token[..relative_start]);
+    token.push_str(&replacement);
+    token.push_str(&finding.token[relative_end..]);
+    Some(token)
+}
+
+fn preserve_segment_casing(original: &str, suggestion: &str) -> String {
+    if original.chars().all(char::is_lowercase) {
+        return suggestion.to_lowercase();
+    }
+    if original.chars().all(char::is_uppercase) {
+        return suggestion.to_uppercase();
+    }
+    let mut original_characters = original.chars();
+    if original_characters.next().is_some_and(char::is_uppercase)
+        && original_characters.all(char::is_lowercase)
+    {
+        let mut characters = suggestion.chars();
+        let Some(first) = characters.next() else {
+            return String::new();
+        };
+        return first
+            .to_uppercase()
+            .chain(characters.flat_map(char::to_lowercase))
+            .collect();
+    }
+    suggestion.to_owned()
+}
+
 /// A non-fatal inline-directive error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectiveDiagnostic {
@@ -953,8 +993,9 @@ mod tests {
     use ferrolex_core::{Checker, Normalization, UserDictionary, WordList};
 
     use super::{
-        classify, split_identifier, Analyzer, CommentSyntax, DirectiveProblem, Document,
-        IdentifierSplitConfig, ProjectConfig, ProjectConfigError, SingleLetterPrefix, TokenClass,
+        classify, recombine_identifier_suggestion, split_identifier, Analyzer, CommentSyntax,
+        DirectiveProblem, Document, IdentifierSplitConfig, ProjectConfig, ProjectConfigError,
+        SingleLetterPrefix, TokenClass,
     };
 
     #[test]
@@ -1131,5 +1172,18 @@ mod tests {
             .check(&Document::new("FerrolexProject"))
             .findings()
             .is_empty());
+    }
+
+    #[test]
+    fn recombines_identifier_suggestions_with_segment_casing() {
+        let dictionary = WordList::new(["OAuth", "Provider"]).expect("test words");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let analysis = analyzer.check(&Document::new("OAuthAuthentcationProvider"));
+        let finding = analysis.findings().first().expect("one misspelled segment");
+
+        assert_eq!(
+            recombine_identifier_suggestion(finding, "authentication"),
+            Some("OAuthAuthenticationProvider".to_owned())
+        );
     }
 }
