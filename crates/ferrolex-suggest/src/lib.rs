@@ -74,15 +74,33 @@ pub struct Suggestion {
 pub struct ReplacementRule {
     from: String,
     to: String,
+    at_word_start: bool,
+    at_word_end: bool,
 }
 
 impl ReplacementRule {
     /// Creates a non-empty replacement rule.
     #[must_use]
     pub fn new(from: impl Into<String>, to: impl Into<String>) -> Option<Self> {
+        Self::with_boundaries(from, to, false, false)
+    }
+
+    /// Creates a replacement rule with optional whole-word boundaries.
+    #[must_use]
+    pub fn with_boundaries(
+        from: impl Into<String>,
+        to: impl Into<String>,
+        at_word_start: bool,
+        at_word_end: bool,
+    ) -> Option<Self> {
         let from = from.into();
         let to = to.into();
-        (!from.is_empty() && !to.is_empty()).then_some(Self { from, to })
+        (!from.is_empty() && !to.is_empty()).then_some(Self {
+            from,
+            to,
+            at_word_start,
+            at_word_end,
+        })
     }
 
     /// Returns the typo spelling matched in a query.
@@ -95,6 +113,18 @@ impl ReplacementRule {
     #[must_use]
     pub fn to(&self) -> &str {
         &self.to
+    }
+
+    /// Whether the typo spelling must be at the start of the query.
+    #[must_use]
+    pub const fn at_word_start(&self) -> bool {
+        self.at_word_start
+    }
+
+    /// Whether the typo spelling must be at the end of the query.
+    #[must_use]
+    pub const fn at_word_end(&self) -> bool {
+        self.at_word_end
     }
 }
 
@@ -235,6 +265,11 @@ fn replacement_distance(
             return None;
         }
         (0..=query.len() - from.len()).find_map(|start| {
+            if (rule.at_word_start && start != 0)
+                || (rule.at_word_end && start + from.len() != query.len())
+            {
+                return None;
+            }
             if query[start..start + from.len()] != from {
                 return None;
             }
@@ -316,7 +351,10 @@ fn osa_distance(left: &[char], right: &[char], maximum: usize) -> Option<usize> 
 mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
+    use super::{
+        replacement_distance, CandidateSource, Completeness, ReplacementRule, SuggestConfig,
+        Suggester,
+    };
     use ferrolex_core::{Normalization, UserDictionary, WordList};
 
     struct TestSource<'candidate> {
@@ -373,6 +411,29 @@ mod tests {
         assert_eq!(result.suggestions()[0].word(), "the");
         assert_eq!(result.suggestions()[0].distance(), 0);
         assert!(ReplacementRule::new("", "the").is_none());
+    }
+
+    #[test]
+    fn respects_replacement_word_boundaries() {
+        let replacements = [ReplacementRule::with_boundaries("teh", "the", true, true)
+            .expect("bounded replacement")];
+        let candidates = ["the", "other"];
+        let source = TestSource {
+            candidates: &candidates,
+        };
+        let result = Suggester::new(&source, SuggestConfig::default())
+            .with_replacement_rules(&replacements)
+            .suggest("teh");
+
+        assert_eq!(result.suggestions()[0].word(), "the");
+        assert_ne!(
+            replacement_distance(
+                &"ateh".chars().collect::<Vec<_>>(),
+                &"athe".chars().collect::<Vec<_>>(),
+                &replacements,
+            ),
+            Some(0)
+        );
     }
 
     #[test]

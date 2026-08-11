@@ -2044,7 +2044,7 @@ fn parse_replacement_rules(
         };
         let rule_fields = aff_fields(line);
         let rule = match rule_fields.as_slice() {
-            ["REP", from, to] => ReplacementRule::new(*from, *to),
+            ["REP", from, to] => parse_replacement_rule(from, to),
             _ => None,
         };
         let Some(rule) = rule else {
@@ -2059,6 +2059,14 @@ fn parse_replacement_rules(
         };
         parsed.replacement_rules.push(rule);
     }
+}
+
+fn parse_replacement_rule(from: &str, to: &str) -> Option<ReplacementRule> {
+    let at_word_start = from.starts_with('^');
+    let from = from.strip_prefix('^').unwrap_or(from);
+    let at_word_end = from.ends_with('$');
+    let from = from.strip_suffix('$').unwrap_or(from);
+    ReplacementRule::with_boundaries(from, to, at_word_start, at_word_end)
 }
 
 fn parse_unknown_directive(
@@ -3264,7 +3272,7 @@ mod tests {
     fn imports_replacement_rules_for_suggestion_ranking() {
         let result = import(
             "test.aff",
-            "REP 1\nREP teh the\n",
+            "REP 1\nREP ^teh$ the\n",
             "test.dic",
             "2\ntea\nthe\n",
             ImportMode::Strict,
@@ -3275,6 +3283,8 @@ mod tests {
         assert_eq!(dictionary.replacement_rules().len(), 1);
         assert_eq!(dictionary.replacement_rules()[0].from(), "teh");
         assert_eq!(dictionary.replacement_rules()[0].to(), "the");
+        assert!(dictionary.replacement_rules()[0].at_word_start());
+        assert!(dictionary.replacement_rules()[0].at_word_end());
         assert_eq!(
             Suggester::new(dictionary, SuggestConfig::default())
                 .with_replacement_rules(dictionary.replacement_rules())

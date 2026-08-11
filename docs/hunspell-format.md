@@ -114,6 +114,8 @@ the generic source analyzer keeps its own explicit tokenizer policy.
 
 Counted `REP` blocks are retained for suggestion ranking. A header has the
 form `REP count`, followed by exactly `count` lines shaped as `REP from to`.
-Both spellings are non-empty literal whitespace-delimited strings. They do not
+Both spellings are non-empty literal whitespace-delimited strings. A leading
+`^` and trailing `$` on the source spelling anchor it to the corresponding word
+boundary for ranking. They do not
 alter recognition; malformed `REP` input is a warning rather than an attempted
 approximation. The importer retains at most 4,096 rules.

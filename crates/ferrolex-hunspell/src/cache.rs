@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 15;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 16;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -758,6 +758,8 @@ fn write_replacement_rules(
     for rule in rules {
         write_string(output, rule.from(), "replacement source spelling")?;
         write_string(output, rule.to(), "replacement target spelling")?;
+        output.push(u8::from(rule.at_word_start()));
+        output.push(u8::from(rule.at_word_end()));
     }
     Ok(())
 }
@@ -837,7 +839,10 @@ fn read_replacement_rules(
     for _ in 0..count {
         let from = reader.string(MAX_LINE_BYTES, "replacement source spelling")?;
         let to = reader.string(MAX_LINE_BYTES, "replacement target spelling")?;
-        let Some(rule) = ReplacementRule::new(from, to) else {
+        let at_word_start = read_boolean(reader, "replacement start marker")?;
+        let at_word_end = read_boolean(reader, "replacement end marker")?;
+        let Some(rule) = ReplacementRule::with_boundaries(from, to, at_word_start, at_word_end)
+        else {
             return Err(RuntimeCacheError::InvalidArtifact(
                 "replacement rule has empty spelling text",
             ));
@@ -845,6 +850,14 @@ fn read_replacement_rules(
         rules.push(rule);
     }
     Ok(rules)
+}
+
+fn read_boolean(reader: &mut Reader<'_>, name: &'static str) -> Result<bool, RuntimeCacheError> {
+    match reader.byte()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(RuntimeCacheError::InvalidArtifact(name)),
+    }
 }
 
 fn read_input_conversions(
@@ -1182,7 +1195,7 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP teh the\nIGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP ^teh$ the\nIGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
     const DIC: &str =
         "11\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
 
