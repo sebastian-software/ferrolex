@@ -15,7 +15,7 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag,
+    AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag, FlagMode,
     HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
     MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES,
     MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 11;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 12;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,6 +169,7 @@ pub fn compile_runtime_cache(
     write_u32(&mut output, HUNSPELL_CACHE_SEMANTICS_VERSION);
     output.extend_from_slice(&sources.aff);
     output.extend_from_slice(&sources.dic);
+    write_flag_mode(&mut output, dictionary.flag_mode);
     write_lexemes(&mut output, &dictionary.lexemes)?;
     write_rules(&mut output, &dictionary.prefixes)?;
     write_rules(&mut output, &dictionary.suffixes)?;
@@ -282,16 +283,17 @@ pub fn load_runtime_cache(
     if reader.take_array::<CHECKSUM_BYTES>()? != sources.dic {
         return Err(RuntimeCacheError::SourceDigestMismatch(CacheSource::Dic));
     }
+    let flag_mode = read_flag_mode(&mut reader)?;
 
-    let lexemes = read_lexemes(&mut reader)?;
-    let prefixes = read_rules(&mut reader, AffixKind::Prefix)?;
-    let suffixes = read_rules(&mut reader, AffixKind::Suffix)?;
-    let special_flags = read_special_flags(&mut reader)?;
-    let flag = read_optional_flag(&mut reader)?;
-    let begin = read_optional_flag(&mut reader)?;
-    let middle = read_optional_flag(&mut reader)?;
-    let end = read_optional_flag(&mut reader)?;
-    let permit = read_optional_flag(&mut reader)?;
+    let lexemes = read_lexemes(&mut reader, flag_mode)?;
+    let prefixes = read_rules(&mut reader, AffixKind::Prefix, flag_mode)?;
+    let suffixes = read_rules(&mut reader, AffixKind::Suffix, flag_mode)?;
+    let special_flags = read_special_flags(&mut reader, flag_mode)?;
+    let flag = read_optional_flag(&mut reader, flag_mode)?;
+    let begin = read_optional_flag(&mut reader, flag_mode)?;
+    let middle = read_optional_flag(&mut reader, flag_mode)?;
+    let end = read_optional_flag(&mut reader, flag_mode)?;
+    let permit = read_optional_flag(&mut reader, flag_mode)?;
     let minimum_length = usize::try_from(reader.u64()?)
         .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
@@ -306,10 +308,10 @@ pub fn load_runtime_cache(
                 "compound rule has fewer than two components",
             ));
         }
-        reader.require_minimum_items(component_count, 4, "compound rule components")?;
+        reader.require_minimum_items(component_count, 5, "compound rule components")?;
         let mut flags = Vec::with_capacity(component_count);
         for _ in 0..component_count {
-            flags.push(reader.flag()?);
+            flags.push(reader.flag(flag_mode)?);
         }
         rules.push(CompoundRule { flags });
     }
@@ -372,6 +374,7 @@ pub fn load_runtime_cache(
         .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
         .collect();
     let dictionary = HunspellDictionary::from_parts(
+        flag_mode,
         stems,
         lexemes,
         prefixes,
@@ -403,6 +406,10 @@ impl DictionaryError {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the cache invariant checks stay together as one auditable boundary"
+)]
 fn validate_dictionary(
     dictionary: &HunspellDictionary,
     error: DictionaryError,
@@ -422,7 +429,7 @@ fn validate_dictionary(
             return Err(error.error("lexemes are not in strictly sorted stem order"));
         }
         previous_stem = Some(lexeme.stem.as_ref());
-        validate_flags(&lexeme.flags, error)?;
+        validate_flags(&lexeme.flags, dictionary.flag_mode, error)?;
     }
     for ((stem, flags), lexeme) in dictionary.stems.iter().zip(&dictionary.lexemes) {
         if lexeme.stem != *stem {
@@ -446,21 +453,61 @@ fn validate_dictionary(
         if rule.id >= rule_count || !rule_ids.insert(rule.id) {
             return Err(error.error("affix rule IDs are not a unique dense range"));
         }
-        validate_rule(rule, error)?;
+        validate_rule(rule, dictionary.flag_mode, error)?;
     }
     if rule_ids.len() != rule_count {
         return Err(error.error("affix rule IDs are not a unique dense range"));
     }
-    validate_optional_flag(dictionary.special_flags.circumfix.as_ref(), error)?;
-    validate_optional_flag(dictionary.special_flags.forbidden_word.as_ref(), error)?;
-    validate_optional_flag(dictionary.special_flags.keep_case.as_ref(), error)?;
-    validate_optional_flag(dictionary.special_flags.need_affix.as_ref(), error)?;
-    validate_optional_flag(dictionary.special_flags.only_in_compound.as_ref(), error)?;
-    validate_optional_flag(dictionary.compound.flag.as_ref(), error)?;
-    validate_optional_flag(dictionary.compound.begin.as_ref(), error)?;
-    validate_optional_flag(dictionary.compound.middle.as_ref(), error)?;
-    validate_optional_flag(dictionary.compound.end.as_ref(), error)?;
-    validate_optional_flag(dictionary.compound.permit.as_ref(), error)?;
+    validate_optional_flag(
+        dictionary.special_flags.circumfix.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.special_flags.forbidden_word.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.special_flags.keep_case.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.special_flags.need_affix.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.special_flags.only_in_compound.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.compound.flag.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.compound.begin.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.compound.middle.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.compound.end.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.compound.permit.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
     if dictionary.compound.minimum_length == 0 {
         return Err(error.error("compound minimum must be greater than zero"));
     }
@@ -472,7 +519,7 @@ fn validate_dictionary(
             return Err(error.error("compound rule has an invalid component count"));
         }
         for flag in &rule.flags {
-            validate_flag(flag, error)?;
+            validate_flag(flag, dictionary.flag_mode, error)?;
         }
     }
     if dictionary.break_characters.len() > MAX_BREAK_PATTERNS {
@@ -506,12 +553,16 @@ fn validate_dictionary(
     Ok(())
 }
 
-fn validate_rule(rule: &AffixRule, error: DictionaryError) -> Result<(), RuntimeCacheError> {
-    validate_flag(&rule.flag, error)?;
+fn validate_rule(
+    rule: &AffixRule,
+    flag_mode: FlagMode,
+    error: DictionaryError,
+) -> Result<(), RuntimeCacheError> {
+    validate_flag(&rule.flag, flag_mode, error)?;
     if rule.strip.len() > MAX_LINE_BYTES || rule.add.len() > MAX_LINE_BYTES {
         return Err(error.error("affix rule text exceeds importer line limit"));
     }
-    validate_flags(&rule.continuation_flags, error)?;
+    validate_flags(&rule.continuation_flags, flag_mode, error)?;
     if rule.condition.atoms.len() > MAX_CONDITION_ATOMS {
         return Err(error.error("affix condition exceeds importer atom limit"));
     }
@@ -527,27 +578,36 @@ fn validate_rule(rule: &AffixRule, error: DictionaryError) -> Result<(), Runtime
 
 fn validate_optional_flag(
     flag: Option<&Flag>,
+    flag_mode: FlagMode,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
     if let Some(flag) = flag {
-        validate_flag(flag, error)?;
+        validate_flag(flag, flag_mode, error)?;
     }
     Ok(())
 }
 
-fn validate_flags(flags: &BTreeSet<Flag>, error: DictionaryError) -> Result<(), RuntimeCacheError> {
+fn validate_flags(
+    flags: &BTreeSet<Flag>,
+    flag_mode: FlagMode,
+    error: DictionaryError,
+) -> Result<(), RuntimeCacheError> {
     if flags.len() > MAX_FLAGS_PER_ENTRY {
         return Err(error.error("flag count exceeds importer limit"));
     }
     for flag in flags {
-        validate_flag(flag, error)?;
+        validate_flag(flag, flag_mode, error)?;
     }
     Ok(())
 }
 
-fn validate_flag(flag: &Flag, error: DictionaryError) -> Result<(), RuntimeCacheError> {
-    if flag.0.chars().count() != 1 {
-        return Err(error.error("flag is not one Unicode scalar"));
+fn validate_flag(
+    flag: &Flag,
+    flag_mode: FlagMode,
+    error: DictionaryError,
+) -> Result<(), RuntimeCacheError> {
+    if flag_mode.flag_count(&flag.0) != Some(1) {
+        return Err(error.error("flag does not match the dictionary FLAG mode"));
     }
     Ok(())
 }
@@ -615,17 +675,14 @@ fn write_flags(output: &mut Vec<u8>, flags: &BTreeSet<Flag>) -> Result<(), Runti
 }
 
 fn write_flag(output: &mut Vec<u8>, flag: &Flag) -> Result<(), RuntimeCacheError> {
-    let mut characters = flag.0.chars();
-    let Some(character) = characters.next() else {
-        return Err(RuntimeCacheError::InvalidDictionary("flag is empty"));
-    };
-    if characters.next().is_some() {
-        return Err(RuntimeCacheError::InvalidDictionary(
-            "flag is not one Unicode scalar",
-        ));
-    }
-    write_u32(output, u32::from(character));
-    Ok(())
+    write_string(output, &flag.0, "flag")
+}
+
+fn write_flag_mode(output: &mut Vec<u8>, flag_mode: FlagMode) {
+    output.push(match flag_mode {
+        FlagMode::Unicode => 0,
+        FlagMode::Long => 1,
+    });
 }
 
 fn write_condition(output: &mut Vec<u8>, condition: &Condition) -> Result<(), RuntimeCacheError> {
@@ -715,7 +772,18 @@ fn write_u64(output: &mut Vec<u8>, value: u64) {
     output.extend_from_slice(&value.to_le_bytes());
 }
 
-fn read_lexemes(reader: &mut Reader<'_>) -> Result<Vec<Lexeme>, RuntimeCacheError> {
+fn read_flag_mode(reader: &mut Reader<'_>) -> Result<FlagMode, RuntimeCacheError> {
+    match reader.byte()? {
+        0 => Ok(FlagMode::Unicode),
+        1 => Ok(FlagMode::Long),
+        _ => Err(RuntimeCacheError::InvalidArtifact("invalid FLAG mode")),
+    }
+}
+
+fn read_lexemes(
+    reader: &mut Reader<'_>,
+    flag_mode: FlagMode,
+) -> Result<Vec<Lexeme>, RuntimeCacheError> {
     let count = reader.count(MAX_DICTIONARY_ENTRIES, "dictionary entry count")?;
     reader.require_minimum_items(count, 8, "dictionary entries")?;
     let mut lexemes = Vec::new();
@@ -726,7 +794,7 @@ fn read_lexemes(reader: &mut Reader<'_>) -> Result<Vec<Lexeme>, RuntimeCacheErro
         }
         lexemes.push(Lexeme {
             stem: Box::<str>::from(stem),
-            flags: read_flags(reader)?,
+            flags: read_flags(reader, flag_mode)?,
         });
     }
     Ok(lexemes)
@@ -786,6 +854,7 @@ fn read_input_conversions(
 fn read_rules(
     reader: &mut Reader<'_>,
     expected_kind: AffixKind,
+    flag_mode: FlagMode,
 ) -> Result<Vec<AffixRule>, RuntimeCacheError> {
     let count = reader.count(MAX_AFFIX_RULES, "affix rule count")?;
     reader.require_minimum_items(count, 26, "affix rules")?;
@@ -807,7 +876,7 @@ fn read_rules(
                 "affix rule is in the wrong kind section",
             ));
         }
-        let flag = reader.flag()?;
+        let flag = reader.flag(flag_mode)?;
         let strip = Box::<str>::from(reader.string(MAX_LINE_BYTES, "affix strip")?);
         let add = Box::<str>::from(reader.string(MAX_LINE_BYTES, "affix add")?);
         let condition = read_condition(reader)?;
@@ -828,19 +897,22 @@ fn read_rules(
             add,
             condition,
             cross_product,
-            continuation_flags: read_flags(reader)?,
+            continuation_flags: read_flags(reader, flag_mode)?,
         });
     }
     Ok(rules)
 }
 
-fn read_special_flags(reader: &mut Reader<'_>) -> Result<SpecialFlags, RuntimeCacheError> {
+fn read_special_flags(
+    reader: &mut Reader<'_>,
+    flag_mode: FlagMode,
+) -> Result<SpecialFlags, RuntimeCacheError> {
     Ok(SpecialFlags {
-        circumfix: read_optional_flag(reader)?,
-        forbidden_word: read_optional_flag(reader)?,
-        keep_case: read_optional_flag(reader)?,
-        need_affix: read_optional_flag(reader)?,
-        only_in_compound: read_optional_flag(reader)?,
+        circumfix: read_optional_flag(reader, flag_mode)?,
+        forbidden_word: read_optional_flag(reader, flag_mode)?,
+        keep_case: read_optional_flag(reader, flag_mode)?,
+        need_affix: read_optional_flag(reader, flag_mode)?,
+        only_in_compound: read_optional_flag(reader, flag_mode)?,
         check_sharps: match reader.byte()? {
             0 => false,
             1 => true,
@@ -853,22 +925,28 @@ fn read_special_flags(reader: &mut Reader<'_>) -> Result<SpecialFlags, RuntimeCa
     })
 }
 
-fn read_optional_flag(reader: &mut Reader<'_>) -> Result<Option<Flag>, RuntimeCacheError> {
+fn read_optional_flag(
+    reader: &mut Reader<'_>,
+    flag_mode: FlagMode,
+) -> Result<Option<Flag>, RuntimeCacheError> {
     match reader.byte()? {
         0 => Ok(None),
-        1 => reader.flag().map(Some),
+        1 => reader.flag(flag_mode).map(Some),
         _ => Err(RuntimeCacheError::InvalidArtifact(
             "invalid optional flag marker",
         )),
     }
 }
 
-fn read_flags(reader: &mut Reader<'_>) -> Result<BTreeSet<Flag>, RuntimeCacheError> {
+fn read_flags(
+    reader: &mut Reader<'_>,
+    flag_mode: FlagMode,
+) -> Result<BTreeSet<Flag>, RuntimeCacheError> {
     let count = reader.count(MAX_FLAGS_PER_ENTRY, "flag count")?;
-    reader.require_minimum_items(count, 4, "flags")?;
+    reader.require_minimum_items(count, 5, "flags")?;
     let mut flags = BTreeSet::new();
     for _ in 0..count {
-        let flag = reader.flag()?;
+        let flag = reader.flag(flag_mode)?;
         if !flags.insert(flag) {
             return Err(RuntimeCacheError::InvalidArtifact("duplicate flag"));
         }
@@ -1002,8 +1080,14 @@ impl<'a> Reader<'a> {
             .map_err(|_| RuntimeCacheError::InvalidArtifact("string is not valid UTF-8"))
     }
 
-    fn flag(&mut self) -> Result<Flag, RuntimeCacheError> {
-        Ok(Flag(Box::<str>::from(self.character()?.to_string())))
+    fn flag(&mut self, flag_mode: FlagMode) -> Result<Flag, RuntimeCacheError> {
+        let value = self.string(MAX_LINE_BYTES, "flag")?;
+        if flag_mode.flag_count(&value) != Some(1) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "flag does not match the dictionary FLAG mode",
+            ));
+        }
+        Ok(Flag(Box::<str>::from(value)))
     }
 
     fn character(&mut self) -> Result<char, RuntimeCacheError> {
@@ -1183,7 +1267,7 @@ mod tests {
         );
 
         let mut excessive_entries = cache;
-        excessive_entries[78..82].copy_from_slice(&u32::MAX.to_le_bytes());
+        excessive_entries[79..83].copy_from_slice(&u32::MAX.to_le_bytes());
         rewrite_checksum(&mut excessive_entries);
         assert_eq!(
             load_runtime_cache(&excessive_entries, sources())

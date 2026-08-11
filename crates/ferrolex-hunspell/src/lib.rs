@@ -223,6 +223,7 @@ impl ImportResult {
 /// lookup, so importing does not pre-expand a potentially unbounded word set.
 #[derive(Clone, Debug, Default)]
 pub struct HunspellDictionary {
+    flag_mode: FlagMode,
     stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
@@ -270,6 +271,7 @@ impl HunspellDictionary {
         reason = "the importer and cache hand over every owned runtime section explicitly"
     )]
     fn from_parts(
+        flag_mode: FlagMode,
         stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
         lexemes: Vec<Lexeme>,
         prefixes: Vec<AffixRule>,
@@ -289,6 +291,7 @@ impl HunspellDictionary {
         let suffix_parent_flags = parent_flags_by_continuation(&suffixes);
         let sharp_uppercase_forms = sharp_uppercase_forms(&stems, &special_flags);
         Self {
+            flag_mode,
             stems,
             lexemes,
             prefixes,
@@ -838,6 +841,13 @@ struct Lexeme {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct Flag(Box<str>);
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum FlagMode {
+    #[default]
+    Unicode,
+    Long,
+}
+
 #[derive(Clone, Debug)]
 struct InputConversion {
     from: Box<str>,
@@ -1261,6 +1271,7 @@ fn import_decoded(
         parse_dic(
             dic_source,
             dic_text,
+            parsed_aff.flag_mode,
             &parsed_aff.flag_aliases,
             parsed_aff.morphology_aliases.len(),
             &parsed_aff.ignored_characters,
@@ -1274,6 +1285,7 @@ fn import_decoded(
         .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
         .collect();
     let dictionary = HunspellDictionary::from_parts(
+        parsed_aff.flag_mode,
         stems,
         lexemes,
         parsed_aff.prefixes,
@@ -1430,6 +1442,8 @@ fn byte_line_number(bytes: &[u8], byte_index: usize) -> usize {
 
 #[derive(Default)]
 struct ParsedAff {
+    flag_mode: FlagMode,
+    has_flag_mode: bool,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
     diagnostics: Vec<Diagnostic>,
@@ -1479,16 +1493,17 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
             continue;
         }
 
-        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let fields = aff_fields(line);
         let directive = fields[0];
         match directive {
             "SET" => parse_set(source, line_number, &fields, &mut parsed.diagnostics),
-            "FLAG" => parse_flag_mode(source, line_number, &fields, &mut parsed.diagnostics),
+            "FLAG" => parse_flag_mode(source, line_number, &fields, &mut parsed),
             "CIRCUMFIX" => parse_special_flag(
                 source,
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.special_flags.circumfix,
                 &mut parsed.diagnostics,
             ),
@@ -1497,6 +1512,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.special_flags.forbidden_word,
                 &mut parsed.diagnostics,
             ),
@@ -1505,6 +1521,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.special_flags.keep_case,
                 &mut parsed.diagnostics,
             ),
@@ -1513,6 +1530,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.special_flags.need_affix,
                 &mut parsed.diagnostics,
             ),
@@ -1529,6 +1547,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.special_flags.only_in_compound,
                 &mut parsed.diagnostics,
             ),
@@ -1537,6 +1556,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.compound.flag,
                 &mut parsed.diagnostics,
             ),
@@ -1545,6 +1565,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.compound.begin,
                 &mut parsed.diagnostics,
             ),
@@ -1553,6 +1574,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.compound.middle,
                 &mut parsed.diagnostics,
             ),
@@ -1561,6 +1583,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.compound.end,
                 &mut parsed.diagnostics,
             ),
@@ -1569,6 +1592,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
+                parsed.flag_mode,
                 &mut parsed.compound.permit,
                 &mut parsed.diagnostics,
             ),
@@ -1671,10 +1695,17 @@ fn parse_flag_aliases(
             ));
             return;
         };
-        let alias_fields = line.split_whitespace().collect::<Vec<_>>();
+        let alias_fields = aff_fields(line);
         let flags = match alias_fields.as_slice() {
             ["AF"] => Some(BTreeSet::new()),
-            ["AF", flags] if flags.chars().count() <= MAX_FLAGS_PER_ENTRY => decode_flags(flags),
+            ["AF", flags]
+                if parsed
+                    .flag_mode
+                    .flag_count(flags)
+                    .is_some_and(|count| count <= MAX_FLAGS_PER_ENTRY) =>
+            {
+                decode_flags(flags, parsed.flag_mode)
+            }
             _ => None,
         };
         if flags.is_none() {
@@ -1824,7 +1855,7 @@ fn parse_input_conversions(
             ));
             return;
         };
-        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let rule_fields = aff_fields(line);
         let Some((from, to)) = matches!(rule_fields.as_slice(), ["ICONV", _, _])
             .then(|| (rule_fields[1], rule_fields[2]))
         else {
@@ -2004,7 +2035,7 @@ fn parse_replacement_rules(
             ));
             return;
         };
-        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let rule_fields = aff_fields(line);
         let rule = match rule_fields.as_slice() {
             ["REP", from, to] => ReplacementRule::new(*from, *to),
             _ => None,
@@ -2063,22 +2094,33 @@ fn parse_set(source: &str, line: usize, fields: &[&str], diagnostics: &mut Vec<D
     }
 }
 
-fn parse_flag_mode(source: &str, line: usize, fields: &[&str], diagnostics: &mut Vec<Diagnostic>) {
+fn parse_flag_mode(source: &str, line: usize, fields: &[&str], parsed: &mut ParsedAff) {
     if fields.len() != 2 {
-        diagnostics.push(diagnostic(
+        parsed.diagnostics.push(diagnostic(
             source,
             line,
             "FLAG",
             Severity::Error,
             "FLAG requires exactly one mode",
         ));
-    } else if !matches!(fields[1].to_ascii_uppercase().as_str(), "UTF-8" | "UTF8") {
-        diagnostics.push(diagnostic(
+    } else if parsed.has_flag_mode {
+        parsed.diagnostics.push(diagnostic(
             source,
             line,
             "FLAG",
             Severity::Error,
-            "only single-Unicode-scalar flags are supported in the current compatibility level",
+            "FLAG may only be declared once",
+        ));
+    } else if let Some(flag_mode) = FlagMode::parse(fields[1]) {
+        parsed.flag_mode = flag_mode;
+        parsed.has_flag_mode = true;
+    } else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line,
+            "FLAG",
+            Severity::Error,
+            "FLAG must name UTF-8, UTF8, or long",
         ));
     }
 }
@@ -2088,6 +2130,7 @@ fn parse_special_flag(
     line: usize,
     directive: &str,
     fields: &[&str],
+    flag_mode: FlagMode,
     target: &mut Option<Flag>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2107,7 +2150,7 @@ fn parse_special_flag(
             Severity::Error,
             "directive may only be declared once",
         ));
-    } else if let Some(flag) = decode_flag(fields[1]) {
+    } else if let Some(flag) = decode_flag(fields[1], flag_mode) {
         *target = Some(flag);
     } else {
         diagnostics.push(diagnostic(
@@ -2115,7 +2158,7 @@ fn parse_special_flag(
             line,
             directive,
             Severity::Error,
-            "directive flag must contain exactly one Unicode scalar",
+            "directive flag is invalid for the selected FLAG mode",
         ));
     }
 }
@@ -2226,28 +2269,26 @@ fn parse_compound_rules(
             return;
         };
         let line = line.trim();
-        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let rule_fields = aff_fields(line);
         let pattern = rule_fields.get(1).copied().unwrap_or_default();
-        let flags = pattern.chars().collect::<Vec<_>>();
+        let flags = decode_flag_sequence(pattern, parsed.flag_mode);
         if rule_fields.len() != 2
             || rule_fields[0] != "COMPOUNDRULE"
-            || flags.iter().any(|flag| matches!(flag, '*' | '+' | '?'))
-            || !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len())
+            || pattern.chars().any(|flag| matches!(flag, '*' | '+' | '?'))
+            || flags.is_none()
+            || !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.as_ref().map_or(0, Vec::len))
         {
             parsed.diagnostics.push(diagnostic(
                 source,
                 index + 1,
                 "COMPOUNDRULE",
                 Severity::Error,
-                "only 2–16 literal single-scalar component flags are supported",
+                "only 2–16 literal component flags are supported",
             ));
             continue;
         }
         parsed.compound.rules.push(CompoundRule {
-            flags: flags
-                .into_iter()
-                .map(|flag| Flag(Box::<str>::from(flag.to_string())))
-                .collect(),
+            flags: flags.expect("validated above"),
         });
     }
 }
@@ -2363,13 +2404,13 @@ fn parse_affix_group(
         ));
         return;
     }
-    let Some(flag) = decode_flag(fields[1]) else {
+    let Some(flag) = decode_flag(fields[1], parsed.flag_mode) else {
         parsed.diagnostics.push(diagnostic(
             source,
             line_number,
             directive,
             Severity::Error,
-            "affix flags must contain exactly one Unicode scalar",
+            "affix flag is invalid for the selected FLAG mode",
         ));
         return;
     };
@@ -2440,10 +2481,12 @@ fn parse_affix_group(
             directive,
             &flag,
             cross_product,
+            parsed.flag_mode,
+            &parsed.flag_aliases,
             rule_line,
         ) {
             Ok(rule) => {
-                let rule_fields = rule_line.split_whitespace().collect::<Vec<_>>();
+                let rule_fields = aff_fields(rule_line);
                 if rule_fields.len() > 5 {
                     parsed.diagnostics.push(diagnostic(
                         source,
@@ -2484,17 +2527,19 @@ fn parse_affix_rule(
     expected_directive: &str,
     header_flag: &Flag,
     cross_product: bool,
+    flag_mode: FlagMode,
+    flag_aliases: &[Option<BTreeSet<Flag>>],
     line: &str,
 ) -> Result<AffixRule, String> {
-    let fields = line.split_whitespace().collect::<Vec<_>>();
-    if fields.len() < 5 {
-        return Err("affix rule requires a directive, flag, strip, add, and condition".to_owned());
+    let fields = aff_fields(line);
+    if fields.len() < 4 {
+        return Err("affix rule requires a directive, flag, strip, and add".to_owned());
     }
     if fields[0] != expected_directive {
         return Err("affix rule does not match its header directive".to_owned());
     }
-    let Some(rule_flag) = decode_flag(fields[1]) else {
-        return Err("affix rule flag must contain exactly one Unicode scalar".to_owned());
+    let Some(rule_flag) = decode_flag(fields[1], flag_mode) else {
+        return Err("affix rule flag is invalid for the selected FLAG mode".to_owned());
     };
     if &rule_flag != header_flag {
         return Err("affix rule flag does not match its header".to_owned());
@@ -2502,14 +2547,19 @@ fn parse_affix_rule(
     let (add, continuation_flags) = match fields[3].split_once('/') {
         None => (fields[3], BTreeSet::new()),
         Some((_, "")) => return Err("affix continuation flags must not be empty".to_owned()),
-        Some((_, flags)) if flags.chars().count() > MAX_FLAGS_PER_ENTRY => {
+        Some((_, flags))
+            if !is_flag_alias_reference(flags, flag_aliases)
+                && !flag_mode
+                    .flag_count(flags)
+                    .is_some_and(|count| count <= MAX_FLAGS_PER_ENTRY) =>
+        {
             return Err("affix continuation flags exceed the 256-flag importer limit".to_owned())
         }
-        Some((add, flags)) => decode_flags(flags)
+        Some((add, flags)) => decode_entry_flags(flags, flag_mode, flag_aliases)
             .map(|flags| (add, flags))
             .ok_or_else(|| "affix continuation flags are invalid".to_owned())?,
     };
-    let condition = parse_condition(fields[4])?;
+    let condition = parse_condition(fields.get(4).copied().unwrap_or("."))?;
     Ok(AffixRule {
         id,
         kind: if expected_directive == "PFX" {
@@ -2589,6 +2639,7 @@ fn empty_marker(value: &str) -> Box<str> {
 fn parse_dic(
     source: &str,
     text: &str,
+    flag_mode: FlagMode,
     flag_aliases: &[Option<BTreeSet<Flag>>],
     morphology_alias_count: usize,
     ignored_characters: &BTreeSet<char>,
@@ -2660,7 +2711,12 @@ fn parse_dic(
                 ));
                 continue;
             }
-            Some(value) if value.chars().count() > MAX_FLAGS_PER_ENTRY => {
+            Some(value)
+                if !is_flag_alias_reference(value, flag_aliases)
+                    && !flag_mode
+                        .flag_count(value)
+                        .is_some_and(|count| count <= MAX_FLAGS_PER_ENTRY) =>
+            {
                 diagnostics.push(diagnostic(
                     source,
                     index + 1,
@@ -2671,7 +2727,7 @@ fn parse_dic(
                 continue;
             }
             Some(value) => {
-                if let Some(flags) = decode_entry_flags(value, flag_aliases) {
+                if let Some(flags) = decode_entry_flags(value, flag_mode, flag_aliases) {
                     flags
                 } else {
                     diagnostics.push(diagnostic(
@@ -2712,13 +2768,21 @@ fn parse_dic(
         .collect()
 }
 
-fn decode_entry_flags(value: &str, aliases: &[Option<BTreeSet<Flag>>]) -> Option<BTreeSet<Flag>> {
-    if !aliases.is_empty() && value.chars().all(char::is_numeric) {
+fn decode_entry_flags(
+    value: &str,
+    flag_mode: FlagMode,
+    aliases: &[Option<BTreeSet<Flag>>],
+) -> Option<BTreeSet<Flag>> {
+    if is_flag_alias_reference(value, aliases) {
         let alias = value.parse::<usize>().ok()?.checked_sub(1)?;
         aliases.get(alias)?.clone()
     } else {
-        decode_flags(value)
+        decode_flags(value, flag_mode)
     }
+}
+
+fn is_flag_alias_reference(value: &str, aliases: &[Option<BTreeSet<Flag>>]) -> bool {
+    !aliases.is_empty() && value.chars().all(char::is_numeric)
 }
 
 fn validate_morphology_alias_reference(
@@ -2752,22 +2816,52 @@ fn validate_morphology_alias_reference(
     }
 }
 
-fn decode_flags(value: &str) -> Option<BTreeSet<Flag>> {
-    (!value.is_empty()).then(|| {
-        value
-            .chars()
-            .map(|character| Flag(Box::<str>::from(character.to_string())))
+fn decode_flags(value: &str, flag_mode: FlagMode) -> Option<BTreeSet<Flag>> {
+    decode_flag_sequence(value, flag_mode).map(|flags| flags.into_iter().collect())
+}
+
+fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
+    let characters = value.chars().collect::<Vec<_>>();
+    let width = flag_mode.width();
+    (!characters.is_empty() && characters.len() % width == 0).then(|| {
+        characters
+            .chunks_exact(width)
+            .map(|chunk| Flag(Box::<str>::from(chunk.iter().collect::<String>())))
             .collect()
     })
 }
 
-fn decode_flag(value: &str) -> Option<Flag> {
-    let mut characters = value.chars();
-    let character = characters.next()?;
-    characters
-        .next()
-        .is_none()
-        .then(|| Flag(Box::<str>::from(character.to_string())))
+fn decode_flag(value: &str, flag_mode: FlagMode) -> Option<Flag> {
+    let mut flags = decode_flag_sequence(value, flag_mode)?;
+    (flags.len() == 1).then(|| flags.pop().expect("one flag"))
+}
+
+impl FlagMode {
+    fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_uppercase().as_str() {
+            "UTF-8" | "UTF8" => Some(Self::Unicode),
+            "LONG" => Some(Self::Long),
+            _ => None,
+        }
+    }
+
+    const fn width(self) -> usize {
+        match self {
+            Self::Unicode => 1,
+            Self::Long => 2,
+        }
+    }
+
+    fn flag_count(self, value: &str) -> Option<usize> {
+        let count = value.chars().count();
+        (count % self.width() == 0).then_some(count / self.width())
+    }
+}
+
+fn aff_fields(line: &str) -> Vec<&str> {
+    line.split_whitespace()
+        .take_while(|field| !field.starts_with('#'))
+        .collect()
 }
 
 fn is_ignored_line(line: &str) -> bool {
@@ -2916,6 +3010,23 @@ mod tests {
 
         assert!(result.dictionary().contains("roots"));
         assert!(result.dictionary().contains("othered"));
+        assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn imports_long_flags_in_aliases_affixes_and_dictionary_entries() {
+        let result = import(
+            "long.aff",
+            "FLAG long\nAF 2\nAF AaBb # root and suffix\nAF Cc\nNEEDAFFIX Aa\nSFX Bb N 1\nSFX Bb 0 s .\n",
+            "long.dic",
+            "2\nroot/1\nplain/2\n",
+            ImportMode::Strict,
+        )
+        .expect("long flags import cleanly");
+
+        assert!(!result.dictionary().contains("root"));
+        assert!(result.dictionary().contains("roots"));
+        assert!(result.dictionary().contains("plain"));
         assert!(result.diagnostics().is_empty());
     }
 
