@@ -357,6 +357,7 @@ fn parse_hunspell_output(output: &str, expected: usize) -> Vec<bool> {
     let decisions = output
         .lines()
         .skip(1)
+        .filter(|line| !line.is_empty())
         .map(|line| matches!(line.as_bytes().first(), Some(b'*' | b'+' | b'-')))
         .collect::<Vec<_>>();
     assert_eq!(
@@ -365,6 +366,13 @@ fn parse_hunspell_output(output: &str, expected: usize) -> Vec<bool> {
         "hunspell emitted an unexpected number of decision lines: {output}"
     );
     decisions
+}
+
+#[test]
+fn hunspell_oracle_output_ignores_separator_lines() {
+    let output = "@(#) International Ispell Version\n*\n\n& misspelled 1 0: suggested\n\n";
+
+    assert_eq!(parse_hunspell_output(output, 2), vec![true, false]);
 }
 
 fn read_verified_fixture(root: &Path, fixture: &Fixture) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {
