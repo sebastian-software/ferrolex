@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 14;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 15;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -693,6 +693,7 @@ fn write_flag_mode(output: &mut Vec<u8>, flag_mode: FlagMode) {
     output.push(match flag_mode {
         FlagMode::Unicode => 0,
         FlagMode::Long => 1,
+        FlagMode::Numeric => 2,
     });
 }
 
@@ -802,6 +803,7 @@ fn read_flag_mode(reader: &mut Reader<'_>) -> Result<FlagMode, RuntimeCacheError
     match reader.byte()? {
         0 => Ok(FlagMode::Unicode),
         1 => Ok(FlagMode::Long),
+        2 => Ok(FlagMode::Numeric),
         _ => Err(RuntimeCacheError::InvalidArtifact("invalid FLAG mode")),
     }
 }

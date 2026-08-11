@@ -846,6 +846,7 @@ enum FlagMode {
     #[default]
     Unicode,
     Long,
+    Numeric,
 }
 
 #[derive(Clone, Debug)]
@@ -2126,7 +2127,7 @@ fn parse_flag_mode(source: &str, line: usize, fields: &[&str], parsed: &mut Pars
             line,
             "FLAG",
             Severity::Error,
-            "FLAG must name UTF-8, UTF8, or long",
+            "FLAG must name UTF-8, UTF8, long, or num",
         ));
     }
 }
@@ -2900,6 +2901,17 @@ fn decode_flags(value: &str, flag_mode: FlagMode) -> Option<BTreeSet<Flag>> {
 }
 
 fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
+    if flag_mode == FlagMode::Numeric {
+        return value
+            .split(',')
+            .map(|flag| {
+                flag.parse::<u32>()
+                    .ok()
+                    .filter(|flag| *flag > 0)
+                    .map(|flag| Flag(Box::<str>::from(flag.to_string())))
+            })
+            .collect();
+    }
     let characters = value.chars().collect::<Vec<_>>();
     let width = flag_mode.width();
     (!characters.is_empty() && characters.len() % width == 0).then(|| {
@@ -2920,18 +2932,26 @@ impl FlagMode {
         match value.to_ascii_uppercase().as_str() {
             "UTF-8" | "UTF8" => Some(Self::Unicode),
             "LONG" => Some(Self::Long),
+            "NUM" => Some(Self::Numeric),
             _ => None,
         }
     }
 
     const fn width(self) -> usize {
         match self {
-            Self::Unicode => 1,
             Self::Long => 2,
+            Self::Unicode | Self::Numeric => 1,
         }
     }
 
     fn flag_count(self, value: &str) -> Option<usize> {
+        if self == Self::Numeric {
+            return (!value.is_empty()
+                && value
+                    .split(',')
+                    .all(|flag| flag.parse::<u32>().is_ok_and(|flag| flag > 0)))
+            .then(|| value.split(',').count());
+        }
         let count = value.chars().count();
         (count % self.width() == 0).then_some(count / self.width())
     }
@@ -3106,6 +3126,24 @@ mod tests {
         assert!(!result.dictionary().contains("root"));
         assert!(result.dictionary().contains("roots"));
         assert!(result.dictionary().contains("plain"));
+        assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn imports_numeric_flags_in_aliases_and_affix_continuations() {
+        let result = import(
+            "numeric.aff",
+            "FLAG num\nAF 2\nAF 1,2\nAF 3\nNEEDAFFIX 1\nSFX 2 N 1\nSFX 2 0 s/2 .\nSFX 3 N 1\nSFX 3 0 ed .\n",
+            "numeric.dic",
+            "2\nroot/1\nplain/2\n",
+            ImportMode::Strict,
+        )
+        .expect("numeric flags import cleanly");
+
+        assert!(!result.dictionary().contains("root"));
+        assert!(result.dictionary().contains("roots"));
+        assert!(result.dictionary().contains("plain"));
+        assert!(result.dictionary().contains("plained"));
         assert!(result.diagnostics().is_empty());
     }
 
