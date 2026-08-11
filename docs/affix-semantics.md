@@ -24,10 +24,14 @@ The initial condition language supports:
 - a literal character;
 - a bracket class such as `[abc]`;
 - a negated bracket class such as `[^abc]`.
+- a bounded negative one-scalar lookbehind such as `(?<!і)[з]вати`;
+- `(^|[^о])…` for an initial stem or a one-scalar negative predecessor; and
+- a start-anchored literal or bracket pattern such as `(^весь)`.
 
 Prefix conditions match at the start and suffix conditions at the end. A
 condition is not a general regular expression: unsupported syntax produces a
-diagnostic.
+diagnostic. The supported lookbehind and start-anchor forms are normalized into
+bounded character checks before lookup.
 
 ## Cross-product
 

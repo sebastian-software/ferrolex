@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 12;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 14;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -567,10 +567,21 @@ fn validate_rule(
         return Err(error.error("affix condition exceeds importer atom limit"));
     }
     for atom in &rule.condition.atoms {
-        if let ConditionAtom::Class { members, .. } = atom {
-            if members.is_empty() || members.len() > MAX_LINE_BYTES {
-                return Err(error.error("affix condition class has an invalid member count"));
-            }
+        validate_condition_atom(atom, error)?;
+    }
+    if let Some(atom) = &rule.condition.not_preceded_by {
+        validate_condition_atom(atom, error)?;
+    }
+    Ok(())
+}
+
+fn validate_condition_atom(
+    atom: &ConditionAtom,
+    error: DictionaryError,
+) -> Result<(), RuntimeCacheError> {
+    if let ConditionAtom::Class { members, .. } = atom {
+        if members.is_empty() || members.len() > MAX_LINE_BYTES {
+            return Err(error.error("affix condition class has an invalid member count"));
         }
     }
     Ok(())
@@ -686,25 +697,40 @@ fn write_flag_mode(output: &mut Vec<u8>, flag_mode: FlagMode) {
 }
 
 fn write_condition(output: &mut Vec<u8>, condition: &Condition) -> Result<(), RuntimeCacheError> {
+    output.push(u8::from(condition.anchored_at_start));
+    match &condition.not_preceded_by {
+        None => output.push(0),
+        Some(atom) => {
+            output.push(1);
+            write_condition_atom(output, atom);
+        }
+    }
     write_count(output, condition.atoms.len(), "condition atom count")?;
     for atom in &condition.atoms {
-        match atom {
-            ConditionAtom::Any => output.push(0),
-            ConditionAtom::Literal(character) => {
-                output.push(1);
+        write_condition_atom(output, atom);
+    }
+    Ok(())
+}
+
+fn write_condition_atom(output: &mut Vec<u8>, atom: &ConditionAtom) {
+    match atom {
+        ConditionAtom::Any => output.push(0),
+        ConditionAtom::Literal(character) => {
+            output.push(1);
+            write_u32(output, u32::from(*character));
+        }
+        ConditionAtom::Class { members, negated } => {
+            output.push(2);
+            output.push(u8::from(*negated));
+            write_u32(
+                output,
+                u32::try_from(members.len()).expect("validated class size"),
+            );
+            for character in members {
                 write_u32(output, u32::from(*character));
-            }
-            ConditionAtom::Class { members, negated } => {
-                output.push(2);
-                output.push(u8::from(*negated));
-                write_count(output, members.len(), "condition class member count")?;
-                for character in members {
-                    write_u32(output, u32::from(*character));
-                }
             }
         }
     }
-    Ok(())
 }
 
 fn write_string(
@@ -955,50 +981,73 @@ fn read_flags(
 }
 
 fn read_condition(reader: &mut Reader<'_>) -> Result<Condition, RuntimeCacheError> {
+    let anchored_at_start = match reader.byte()? {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "invalid condition start-anchor marker",
+            ))
+        }
+    };
+    let not_preceded_by = match reader.byte()? {
+        0 => None,
+        1 => Some(read_condition_atom(reader)?),
+        _ => {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "invalid condition lookbehind marker",
+            ))
+        }
+    };
     let count = reader.count(MAX_CONDITION_ATOMS, "condition atom count")?;
     reader.require_minimum_items(count, 1, "condition atoms")?;
     let mut atoms = Vec::new();
     for _ in 0..count {
-        let atom = match reader.byte()? {
-            0 => ConditionAtom::Any,
-            1 => ConditionAtom::Literal(reader.character()?),
-            2 => {
-                let negated = match reader.byte()? {
-                    0 => false,
-                    1 => true,
-                    _ => {
-                        return Err(RuntimeCacheError::InvalidArtifact(
-                            "invalid condition class negation marker",
-                        ))
-                    }
-                };
-                let member_count = reader.count(MAX_LINE_BYTES, "condition class member count")?;
-                if member_count == 0 {
+        atoms.push(read_condition_atom(reader)?);
+    }
+    Ok(Condition {
+        atoms,
+        not_preceded_by,
+        anchored_at_start,
+    })
+}
+
+fn read_condition_atom(reader: &mut Reader<'_>) -> Result<ConditionAtom, RuntimeCacheError> {
+    match reader.byte()? {
+        0 => Ok(ConditionAtom::Any),
+        1 => Ok(ConditionAtom::Literal(reader.character()?)),
+        2 => {
+            let negated = match reader.byte()? {
+                0 => false,
+                1 => true,
+                _ => {
                     return Err(RuntimeCacheError::InvalidArtifact(
-                        "condition class has no members",
+                        "invalid condition class negation marker",
+                    ))
+                }
+            };
+            let member_count = reader.count(MAX_LINE_BYTES, "condition class member count")?;
+            if member_count == 0 {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "condition class has no members",
+                ));
+            }
+            reader.require_minimum_items(member_count, 4, "condition class members")?;
+            let mut members = BTreeSet::new();
+            for _ in 0..member_count {
+                let character = reader.character()?;
+                if !members.insert(character) {
+                    return Err(RuntimeCacheError::InvalidArtifact(
+                        "condition class has duplicate members",
                     ));
                 }
-                reader.require_minimum_items(member_count, 4, "condition class members")?;
-                let mut members = BTreeSet::new();
-                for _ in 0..member_count {
-                    let character = reader.character()?;
-                    if !members.insert(character) {
-                        return Err(RuntimeCacheError::InvalidArtifact(
-                            "condition class has duplicate members",
-                        ));
-                    }
-                }
-                ConditionAtom::Class { members, negated }
             }
-            _ => {
-                return Err(RuntimeCacheError::InvalidArtifact(
-                    "invalid condition atom kind",
-                ))
-            }
-        };
-        atoms.push(atom);
+            Ok(ConditionAtom::Class { members, negated })
+        }
+        _ => Err(RuntimeCacheError::InvalidArtifact(
+            "invalid condition atom kind",
+        )),
     }
-    Ok(Condition { atoms })
 }
 
 fn ensure_artifact_size(length: usize, error: DictionaryError) -> Result<(), RuntimeCacheError> {
@@ -1191,6 +1240,28 @@ mod tests {
         assert!(loaded.contains("fin-"));
         assert!(loaded.contains("worqd"));
         assert!(!loaded.contains("Teil"));
+    }
+
+    #[test]
+    fn round_trip_preserves_bounded_condition_lookbehinds() {
+        let aff = "SFX A N 1\nSFX A 0 x (?<!i)[z]word\n";
+        let dic = "2\nzword/A\nizword/A\n";
+        let original = import(
+            "condition.aff",
+            aff,
+            "condition.dic",
+            dic,
+            ImportMode::Strict,
+        )
+        .expect("condition fixture imports")
+        .dictionary()
+        .clone();
+        let sources = SourceDigests::from_source_bytes(aff.as_bytes(), dic.as_bytes());
+        let cache = compile_runtime_cache(&original, sources).expect("cache compiles");
+        let loaded = load_runtime_cache(&cache, sources).expect("cache loads");
+
+        assert!(loaded.contains("zwordx"));
+        assert!(!loaded.contains("izwordx"));
     }
 
     #[test]

@@ -1048,18 +1048,20 @@ struct CompoundRule {
 #[derive(Clone, Debug)]
 struct Condition {
     atoms: Vec<ConditionAtom>,
+    not_preceded_by: Option<ConditionAtom>,
+    anchored_at_start: bool,
 }
 
 impl Condition {
     fn empty() -> Self {
-        Self { atoms: Vec::new() }
+        Self {
+            atoms: Vec::new(),
+            not_preceded_by: None,
+            anchored_at_start: false,
+        }
     }
 
     fn matches(&self, stem: &str, kind: AffixKind) -> bool {
-        if self.atoms.is_empty() {
-            return true;
-        }
-
         let characters = stem.chars().collect::<Vec<_>>();
         if characters.len() < self.atoms.len() {
             return false;
@@ -1068,11 +1070,15 @@ impl Condition {
             AffixKind::Prefix => 0,
             AffixKind::Suffix => characters.len() - self.atoms.len(),
         };
+        let start = if self.anchored_at_start { 0 } else { start };
 
         self.atoms
             .iter()
             .zip(&characters[start..])
             .all(|(atom, character)| atom.matches(*character))
+            && self.not_preceded_by.as_ref().map_or(true, |atom| {
+                start == 0 || !atom.matches(characters[start - 1])
+            })
     }
 }
 
@@ -2581,6 +2587,63 @@ fn parse_condition(field: &str) -> Result<Condition, String> {
         return Ok(Condition::empty());
     }
 
+    let (not_preceded_by, field) = parse_negative_lookbehind(field)?;
+    let (anchored_at_start, field) = parse_start_anchor(field)?;
+    let atoms = parse_condition_atoms(field)?;
+    Ok(Condition {
+        atoms,
+        not_preceded_by,
+        anchored_at_start,
+    })
+}
+
+fn parse_start_anchor(field: &str) -> Result<(bool, &str), String> {
+    let Some(rest) = field.strip_prefix("(^") else {
+        return Ok((false, field));
+    };
+    let Some((anchored, trailing)) = rest.split_once(')') else {
+        return Err("condition has an unterminated start anchor".to_owned());
+    };
+    if anchored.is_empty() {
+        return Err("condition start anchor must contain a literal pattern".to_owned());
+    }
+    if !trailing.is_empty() {
+        return Err("condition start anchor must end the pattern".to_owned());
+    }
+    Ok((true, anchored))
+}
+
+fn parse_negative_lookbehind(field: &str) -> Result<(Option<ConditionAtom>, &str), String> {
+    if let Some(rest) = field.strip_prefix("(?<!") {
+        let Some((lookbehind, rest)) = rest.split_once(')') else {
+            return Err("condition has an unterminated negative lookbehind".to_owned());
+        };
+        return Ok((Some(parse_condition_atom(lookbehind)?), rest));
+    }
+    if let Some(rest) = field.strip_prefix("(^|") {
+        let Some((alternative, rest)) = rest.split_once(')') else {
+            return Err("condition has an unterminated start-or-class alternative".to_owned());
+        };
+        let ConditionAtom::Class { members, negated } = parse_condition_atom(alternative)? else {
+            return Err("condition start alternative must contain a bracket class".to_owned());
+        };
+        if !negated {
+            return Err(
+                "condition start alternative must contain a negated bracket class".to_owned(),
+            );
+        }
+        return Ok((
+            Some(ConditionAtom::Class {
+                members,
+                negated: false,
+            }),
+            rest,
+        ));
+    }
+    Ok((None, field))
+}
+
+fn parse_condition_atoms(field: &str) -> Result<Vec<ConditionAtom>, String> {
     let characters = field.chars().collect::<Vec<_>>();
     if characters.len() > MAX_CONDITION_ATOMS {
         return Err("condition exceeds the configured 256-atom importer limit".to_owned());
@@ -2588,37 +2651,25 @@ fn parse_condition(field: &str) -> Result<Condition, String> {
     let mut atoms = Vec::new();
     let mut index = 0;
     while index < characters.len() {
-        let Some(&current) = characters.get(index) else {
-            break;
-        };
-        match current {
+        match characters[index] {
             '.' => {
                 atoms.push(ConditionAtom::Any);
                 index += 1;
             }
             '[' => {
-                let Some(end) = characters[index + 1..]
+                let Some(end_offset) = characters[index + 1..]
                     .iter()
                     .position(|character| *character == ']')
                 else {
                     return Err("condition has an unterminated bracket class".to_owned());
                 };
-                let end = index + 1 + end;
-                let (negated, member_start) = if characters.get(index + 1) == Some(&'^') {
-                    (true, index + 2)
-                } else {
-                    (false, index + 1)
-                };
-                if member_start == end {
-                    return Err("condition has an empty bracket class".to_owned());
-                }
-                atoms.push(ConditionAtom::Class {
-                    members: characters[member_start..end].iter().copied().collect(),
-                    negated,
-                });
+                let end = index + 1 + end_offset;
+                atoms.push(parse_condition_atom(
+                    &characters[index..=end].iter().collect::<String>(),
+                )?);
                 index = end + 1;
             }
-            ']' | '*' | '?' | '\\' => {
+            ']' | '(' | ')' | '|' | '*' | '?' | '\\' => {
                 return Err("condition uses syntax outside the supported subset".to_owned())
             }
             literal => {
@@ -2627,8 +2678,36 @@ fn parse_condition(field: &str) -> Result<Condition, String> {
             }
         }
     }
+    Ok(atoms)
+}
 
-    Ok(Condition { atoms })
+fn parse_condition_atom(field: &str) -> Result<ConditionAtom, String> {
+    if field == "." {
+        return Ok(ConditionAtom::Any);
+    }
+    let characters = field.chars().collect::<Vec<_>>();
+    if characters.len() == 1 {
+        return Ok(ConditionAtom::Literal(characters[0]));
+    }
+    if characters.first() != Some(&'[') || characters.last() != Some(&']') {
+        return Err("condition lookbehind must contain one literal or bracket class".to_owned());
+    }
+    let (negated, member_start) = if characters.get(1) == Some(&'^') {
+        (true, 2)
+    } else {
+        (false, 1)
+    };
+    let member_end = characters.len() - 1;
+    if member_start == member_end {
+        return Err("condition has an empty bracket class".to_owned());
+    }
+    Ok(ConditionAtom::Class {
+        members: characters[member_start..member_end]
+            .iter()
+            .copied()
+            .collect(),
+        negated,
+    })
 }
 
 fn empty_marker(value: &str) -> Box<str> {
@@ -3028,6 +3107,25 @@ mod tests {
         assert!(result.dictionary().contains("roots"));
         assert!(result.dictionary().contains("plain"));
         assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn applies_bounded_negative_lookbehind_affix_conditions() {
+        let result = import(
+            "conditions.aff",
+            "SFX A N 1\nSFX A 0 x (^|[^o])stem\nSFX B N 1\nSFX B 0 x (?<!i)[z]word\nSFX C N 1\nSFX C 0 x (^whole)\n",
+            "conditions.dic",
+            "6\nstem/A\nastem/A\nostem/A\nzword/B\nizword/B\nwhole/C\n",
+            ImportMode::Strict,
+        )
+        .expect("bounded negative lookbehinds import cleanly");
+
+        assert!(result.dictionary().contains("stemx"));
+        assert!(result.dictionary().contains("astemx"));
+        assert!(!result.dictionary().contains("ostemx"));
+        assert!(result.dictionary().contains("zwordx"));
+        assert!(!result.dictionary().contains("izwordx"));
+        assert!(result.dictionary().contains("wholex"));
     }
 
     #[test]
