@@ -44,7 +44,7 @@ into an accidental quality promise.
 | --- | --- | --- | --- | --- |
 | `en_US` | Latin | UTF-8 | Strict probe | The 2026-08-11 digest-verified exact pair strict-imports after bounded `COMPOUNDRULE` quantifier support. `TRY` and `NOSUGGEST` remain suggestion-only warnings. Recognition probes and an opt-in fixture remain required before a broader support claim. |
 | `de_DE` | Latin | ISO-8859-1 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports and builds the runtime cache. It accepts `Straße`, `Häuser`, and `Häusern`, and rejects `Ferrolex`. `TRY`, `MAP`, and `NOSUGGEST` remain suggestion-only warnings; this is not full upstream recognition parity. |
-| `es_ES` | Latin | UTF-8 | Blocked | Its multi-scalar `PFX` flag declarations are outside the current flag model. `MAP` and `TRY` are suggestion-only warnings, but do not remove that recognition gate. |
+| `es_ES` | Latin | UTF-8 | Strict probe | The 2026-08-11 digest-verified exact pair strict-imports with a variation-selector UTF-8 flag. `MAP` and `TRY` remain suggestion-only warnings. Recognition probes and an opt-in fixture remain required before a broader support claim. |
 | `fr_FR` | Latin | UTF-8 | Blocked | `FULLSTRIP`, `ICONV`, `OCONV`, and `WORDCHARS` strict-import. Its anchored, multi-scalar `BREAK` patterns remain recognition-affecting errors; `TRY`, `MAP`, `KEY`, and `NOSUGGEST` are suggestion-only warnings. |
 | `it_IT` | Latin | UTF-8 | Blocked | `HOME`, `LANG`, `NAME`, and `VERSION` are not part of the importer subset. |
 | `pt_BR` | Latin | UTF-8 with leading BOM in `.aff` | Blocked | The byte importer normalizes the leading BOM; `BREAK`, `ONLYMAXDIFF`, and `WARN` remain outside the subset. |

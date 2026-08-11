@@ -2449,31 +2449,31 @@ fn parse_compound_rule_patterns(pattern: &str, flag_mode: FlagMode) -> Option<Ve
             .filter(|flags| (2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len()))
             .map(|flags| vec![flags]);
     }
-    let characters = pattern.chars().collect::<Vec<_>>();
+    let tokens = unicode_flag_tokens(pattern)?;
     let mut parts = Vec::new();
     let mut index = 0;
-    while index < characters.len() {
-        let character = characters[index];
-        if matches!(character, '*' | '+' | '?') {
+    while index < tokens.len() {
+        let token = tokens[index];
+        if matches!(token, "*" | "+" | "?") {
             return None;
         }
         index += 1;
-        let (minimum, maximum) = match characters.get(index) {
-            Some('*') => {
+        let (minimum, maximum) = match tokens.get(index) {
+            Some(&"*") => {
                 index += 1;
                 (0, MAX_COMPOUND_RULE_COMPONENTS)
             }
-            Some('+') => {
+            Some(&"+") => {
                 index += 1;
                 (1, MAX_COMPOUND_RULE_COMPONENTS)
             }
-            Some('?') => {
+            Some(&"?") => {
                 index += 1;
                 (0, 1)
             }
             _ => (1, 1),
         };
-        parts.push((Flag(Box::from(character.to_string())), minimum, maximum));
+        parts.push((Flag(Box::from(token)), minimum, maximum));
     }
     let mut patterns = vec![Vec::new()];
     for (flag, minimum, maximum) in parts {
@@ -3103,14 +3103,51 @@ fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
             })
             .collect();
     }
+    if flag_mode == FlagMode::Unicode {
+        return unicode_flag_tokens(value).map(|tokens| {
+            tokens
+                .into_iter()
+                .map(|token| Flag(Box::from(token)))
+                .collect()
+        });
+    }
     let characters = value.chars().collect::<Vec<_>>();
-    let width = flag_mode.width();
-    (!characters.is_empty() && characters.len() % width == 0).then(|| {
+    (!characters.is_empty() && characters.len() % 2 == 0).then(|| {
         characters
-            .chunks_exact(width)
+            .chunks_exact(2)
             .map(|chunk| Flag(Box::<str>::from(chunk.iter().collect::<String>())))
             .collect()
     })
+}
+
+fn unicode_flag_tokens(value: &str) -> Option<Vec<&str>> {
+    let characters = value.char_indices().collect::<Vec<_>>();
+    (!characters.is_empty()).then_some(())?;
+
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index < characters.len() {
+        let (start, character) = characters[index];
+        if is_variation_selector(character) {
+            return None;
+        }
+        index += 1;
+        if characters
+            .get(index)
+            .is_some_and(|(_, character)| is_variation_selector(*character))
+        {
+            index += 1;
+        }
+        let end = characters
+            .get(index)
+            .map_or(value.len(), |(offset, _)| *offset);
+        tokens.push(&value[start..end]);
+    }
+    Some(tokens)
+}
+
+const fn is_variation_selector(character: char) -> bool {
+    matches!(character, '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
 }
 
 fn decode_flag(value: &str, flag_mode: FlagMode) -> Option<Flag> {
@@ -3128,13 +3165,6 @@ impl FlagMode {
         }
     }
 
-    const fn width(self) -> usize {
-        match self {
-            Self::Long => 2,
-            Self::Unicode | Self::Numeric => 1,
-        }
-    }
-
     fn flag_count(self, value: &str) -> Option<usize> {
         if self == Self::Numeric {
             return (!value.is_empty()
@@ -3143,8 +3173,11 @@ impl FlagMode {
                     .all(|flag| flag.parse::<u32>().is_ok_and(|flag| flag > 0)))
             .then(|| value.split(',').count());
         }
+        if self == Self::Unicode {
+            return unicode_flag_tokens(value).map(|tokens| tokens.len());
+        }
         let count = value.chars().count();
-        (count % self.width() == 0).then_some(count / self.width())
+        (count % 2 == 0).then_some(count / 2)
     }
 }
 
@@ -3318,6 +3351,37 @@ mod tests {
         assert!(result.dictionary().contains("roots"));
         assert!(result.dictionary().contains("plain"));
         assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn imports_variation_selector_utf8_flags() {
+        let result = import(
+            "variation-selector-flags.aff",
+            "FLAG UTF-8\nAF 1\nAF ☎️A\nPFX ☎️ N 1\nPFX ☎️ 0 tele .\nSFX A N 1\nSFX A 0 s .\n",
+            "variation-selector-flags.dic",
+            "1\nphone/1\n",
+            ImportMode::Strict,
+        )
+        .expect("variation-selector UTF-8 flags import cleanly");
+
+        assert!(result.dictionary().contains("telephone"));
+        assert!(result.dictionary().contains("phones"));
+    }
+
+    #[test]
+    fn rejects_a_standalone_utf8_variation_selector_flag() {
+        let error = import(
+            "invalid-variation-selector-flags.aff",
+            "FLAG UTF-8\nPFX \u{fe0f} N 1\nPFX \u{fe0f} 0 tele .\n",
+            "invalid-variation-selector-flags.dic",
+            "1\nphone/\u{fe0f}\n",
+            ImportMode::Strict,
+        )
+        .expect_err("a variation selector must modify a base flag scalar");
+
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.directive() == "PFX" && diagnostic.severity() == Severity::Error
+        }));
     }
 
     #[test]

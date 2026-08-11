@@ -81,9 +81,11 @@ morphology-alias table. Its references are validated, but their morphology text
 is discarded because the current runtime does not expose morphology metadata.
 Malformed `AF` is an error because it can change recognition; malformed `AM`
 is a warning because it cannot. `FLAG UTF-8`/`UTF8` uses one Unicode scalar per
-flag, `FLAG long` uses two scalars, and `FLAG num` uses positive comma-separated
-decimal values. The selected mode applies consistently to `AF`, dictionary
-entries, affix continuation flags, compound flags, and the runtime cache.
+flag and accepts a following Unicode variation selector as part of that flag;
+a standalone selector is invalid. `FLAG long` uses two scalars, and `FLAG num`
+uses positive comma-separated decimal values. The selected mode applies
+consistently to `AF`, dictionary entries, affix continuation flags, compound
+flags, and the runtime cache.
 
 `ICONV` is a counted input-conversion table. ferrolex applies its literal
 rules in source order to every lookup input before dictionary recognition; a

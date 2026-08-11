@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 18;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 19;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1385,6 +1385,27 @@ mod tests {
 
         assert!(loaded.contains("zwordx"));
         assert!(!loaded.contains("izwordx"));
+    }
+
+    #[test]
+    fn round_trip_preserves_variation_selector_utf8_flags() {
+        let aff = "FLAG UTF-8\nPFX ☎️ N 1\nPFX ☎️ 0 tele .\n";
+        let dic = "1\nphone/☎️\n";
+        let original = import(
+            "variation-selector.aff",
+            aff,
+            "variation-selector.dic",
+            dic,
+            ImportMode::Strict,
+        )
+        .expect("variation-selector fixture imports")
+        .dictionary()
+        .clone();
+        let sources = SourceDigests::from_source_bytes(aff.as_bytes(), dic.as_bytes());
+        let cache = compile_runtime_cache(&original, sources).expect("cache compiles");
+        let loaded = load_runtime_cache(&cache, sources).expect("cache loads");
+
+        assert!(loaded.contains("telephone"));
     }
 
     #[test]
