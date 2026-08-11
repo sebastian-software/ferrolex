@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 17;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 18;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -260,6 +260,8 @@ pub fn compile_runtime_cache(
         write_u32(&mut output, u32::from(*character));
     }
     write_input_conversions(&mut output, &dictionary.input_conversions)?;
+    write_input_conversions(&mut output, &dictionary.output_conversions)?;
+    output.push(u8::from(dictionary.full_strip));
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -428,6 +430,8 @@ pub fn load_runtime_cache(
         }
     }
     let input_conversions = read_input_conversions(&mut reader)?;
+    let output_conversions = read_input_conversions(&mut reader)?;
+    let full_strip = read_boolean(&mut reader, "invalid fullstrip marker")?;
     let compound = CompoundConfig {
         flag,
         begin,
@@ -460,6 +464,8 @@ pub fn load_runtime_cache(
         replacement_rules,
         ignored_characters,
         input_conversions,
+        output_conversions,
+        full_strip,
     );
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)
@@ -616,12 +622,19 @@ fn validate_dictionary(
     if dictionary.input_conversions.len() > MAX_INPUT_CONVERSIONS {
         return Err(error.error("input conversion count exceeds importer limit"));
     }
-    for conversion in &dictionary.input_conversions {
+    if dictionary.output_conversions.len() > MAX_INPUT_CONVERSIONS {
+        return Err(error.error("output conversion count exceeds importer limit"));
+    }
+    for conversion in dictionary
+        .input_conversions
+        .iter()
+        .chain(&dictionary.output_conversions)
+    {
         if conversion.from.is_empty()
             || conversion.from.len() > MAX_LINE_BYTES
             || conversion.to.len() > MAX_LINE_BYTES
         {
-            return Err(error.error("input conversion has invalid string text"));
+            return Err(error.error("conversion has invalid string text"));
         }
     }
     for rule in &dictionary.replacement_rules {
@@ -1275,9 +1288,9 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP ^teh$ the\nIGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nFULLSTRIP\nWORDCHARS -.ß\nREP 1\nREP ^teh$ the\nIGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nOCONV 2\nOCONV ae æ\nOCONV r_ 0\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\nSFX G N 1\nSFX G word s .\n";
     const DIC: &str =
-        "11\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
+        "11\nword/ABG\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())
@@ -1331,6 +1344,8 @@ mod tests {
             ['-', '.', 'ß']
         );
         assert_eq!(loaded.replacement_rules(), original.replacement_rules());
+        assert_eq!(loaded.normalize_output("aer"), "æ");
+        assert!(loaded.contains("s"));
         assert!(loaded.contains("ær"));
         assert!(loaded.contains("fin-"));
         assert!(loaded.contains("worqd"));

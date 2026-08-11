@@ -242,6 +242,8 @@ pub struct HunspellDictionary {
     replacement_rules: Vec<ReplacementRule>,
     ignored_characters: BTreeSet<char>,
     input_conversions: Vec<InputConversion>,
+    output_conversions: Vec<InputConversion>,
+    full_strip: bool,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -284,6 +286,8 @@ impl HunspellDictionary {
         replacement_rules: Vec<ReplacementRule>,
         ignored_characters: BTreeSet<char>,
         input_conversions: Vec<InputConversion>,
+        output_conversions: Vec<InputConversion>,
+        full_strip: bool,
     ) -> Self {
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
@@ -310,6 +314,8 @@ impl HunspellDictionary {
             replacement_rules,
             ignored_characters,
             input_conversions,
+            output_conversions,
+            full_strip,
         }
     }
 
@@ -341,20 +347,17 @@ impl HunspellDictionary {
         &self.replacement_rules
     }
 
+    /// Applies declared `OCONV` rules to a suggestion spelling.
+    #[must_use]
+    pub fn normalize_output(&self, word: &str) -> String {
+        apply_conversions(word, &self.output_conversions)
+    }
+
     fn normalize_input<'input>(&self, word: &'input str) -> Cow<'input, str> {
         if self.input_conversions.is_empty() && self.ignored_characters.is_empty() {
             return Cow::Borrowed(word);
         }
-        let mut normalized = word.to_owned();
-        for conversion in &self.input_conversions {
-            if conversion.at_word_end {
-                if let Some(prefix) = normalized.strip_suffix(conversion.from.as_ref()) {
-                    normalized = format!("{prefix}{}", conversion.to);
-                }
-            } else {
-                normalized = normalized.replace(conversion.from.as_ref(), conversion.to.as_ref());
-            }
-        }
+        let mut normalized = apply_conversions(word, &self.input_conversions);
         if !self.ignored_characters.is_empty() {
             normalized.retain(|character| !self.ignored_characters.contains(&character));
         }
@@ -364,23 +367,25 @@ impl HunspellDictionary {
     fn matches_single_affix_word(&self, word: &str) -> bool {
         self.prefixes.iter().chain(&self.suffixes).any(|rule| {
             rule.could_generate(word)
-                && rule.reverse_apply(word).is_some_and(|stem| {
-                    self.stems.get(stem.as_str()).is_some_and(|flags| {
-                        if self.is_forbidden(flags) || !flags.contains(&rule.flag) {
-                            return false;
-                        }
-                        let lexeme = Lexeme {
-                            stem: Box::from(stem),
-                            flags: flags.clone(),
-                        };
-                        let state = FormState::new(&lexeme).apply(
-                            rule,
-                            word.to_owned(),
-                            &self.special_flags,
-                        );
-                        self.is_accepted_state(&state)
+                && rule
+                    .reverse_apply(word, self.full_strip)
+                    .is_some_and(|stem| {
+                        self.stems.get(stem.as_str()).is_some_and(|flags| {
+                            if self.is_forbidden(flags) || !flags.contains(&rule.flag) {
+                                return false;
+                            }
+                            let lexeme = Lexeme {
+                                stem: Box::from(stem),
+                                flags: flags.clone(),
+                            };
+                            let state = FormState::new(&lexeme).apply(
+                                rule,
+                                word.to_owned(),
+                                &self.special_flags,
+                            );
+                            self.is_accepted_state(&state)
+                        })
                     })
-                })
         })
     }
 
@@ -484,7 +489,7 @@ impl HunspellDictionary {
                 if !state.can_apply(rule) {
                     continue;
                 }
-                if let Some(form) = rule.apply(&state.form) {
+                if let Some(form) = rule.apply(&state.form, self.full_strip) {
                     if *derivations == MAX_DERIVATIONS_PER_LEXEME {
                         return false;
                     }
@@ -722,18 +727,19 @@ impl HunspellDictionary {
             .chain(&self.suffixes)
             .filter(|rule| self.compound_rule_is_allowed(rule, position))
             .any(|rule| {
-                rule.reverse_apply(word).is_some_and(|stem| {
-                    self.stems.get(stem.as_str()).is_some_and(|flags| {
-                        !self.is_forbidden(flags)
-                            && flags.contains(&rule.flag)
-                            && (flags.contains(position_flag)
-                                || self
-                                    .compound
-                                    .flag
-                                    .as_ref()
-                                    .is_some_and(|flag| flags.contains(flag)))
+                rule.reverse_apply(word, self.full_strip)
+                    .is_some_and(|stem| {
+                        self.stems.get(stem.as_str()).is_some_and(|flags| {
+                            !self.is_forbidden(flags)
+                                && flags.contains(&rule.flag)
+                                && (flags.contains(position_flag)
+                                    || self
+                                        .compound
+                                        .flag
+                                        .as_ref()
+                                        .is_some_and(|flag| flags.contains(flag)))
+                        })
                     })
-                })
             })
     }
 
@@ -892,28 +898,36 @@ impl AffixRule {
         }
     }
 
-    fn apply(&self, stem: &str) -> Option<String> {
+    fn apply(&self, stem: &str, full_strip: bool) -> Option<String> {
         if !self.condition.matches(stem, self.kind) {
             return None;
         }
 
         match self.kind {
-            AffixKind::Prefix => stem.strip_prefix(self.strip.as_ref()).map(|remaining| {
-                let mut form = String::with_capacity(self.add.len() + remaining.len());
-                form.push_str(&self.add);
-                form.push_str(remaining);
-                form
-            }),
-            AffixKind::Suffix => stem.strip_suffix(self.strip.as_ref()).map(|remaining| {
-                let mut form = String::with_capacity(remaining.len() + self.add.len());
-                form.push_str(remaining);
-                form.push_str(&self.add);
-                form
-            }),
+            AffixKind::Prefix => stem
+                .strip_prefix(self.strip.as_ref())
+                .and_then(|remaining| {
+                    (full_strip || !remaining.is_empty()).then(|| {
+                        let mut form = String::with_capacity(self.add.len() + remaining.len());
+                        form.push_str(&self.add);
+                        form.push_str(remaining);
+                        form
+                    })
+                }),
+            AffixKind::Suffix => stem
+                .strip_suffix(self.strip.as_ref())
+                .and_then(|remaining| {
+                    (full_strip || !remaining.is_empty()).then(|| {
+                        let mut form = String::with_capacity(remaining.len() + self.add.len());
+                        form.push_str(remaining);
+                        form.push_str(&self.add);
+                        form
+                    })
+                }),
         }
     }
 
-    fn reverse_apply(&self, form: &str) -> Option<String> {
+    fn reverse_apply(&self, form: &str, full_strip: bool) -> Option<String> {
         let stem = match self.kind {
             AffixKind::Prefix => {
                 let remaining = form.strip_prefix(self.add.as_ref())?;
@@ -930,7 +944,7 @@ impl AffixRule {
                 stem
             }
         };
-        (self.apply(&stem).as_deref() == Some(form)).then_some(stem)
+        (self.apply(&stem, full_strip).as_deref() == Some(form)).then_some(stem)
     }
 }
 
@@ -1307,6 +1321,8 @@ fn import_decoded(
         parsed_aff.replacement_rules,
         parsed_aff.ignored_characters,
         parsed_aff.input_conversions,
+        parsed_aff.output_conversions,
+        parsed_aff.full_strip,
     );
 
     if mode == ImportMode::Strict
@@ -1467,6 +1483,8 @@ struct ParsedAff {
     morphology_aliases: Vec<Option<Box<str>>>,
     ignored_characters: BTreeSet<char>,
     input_conversions: Vec<InputConversion>,
+    output_conversions: Vec<InputConversion>,
+    full_strip: bool,
     declared_sections: BTreeSet<CountedSection>,
 }
 
@@ -1476,6 +1494,7 @@ enum CountedSection {
     FlagAliases,
     MorphologyAliases,
     InputConversions,
+    OutputConversions,
 }
 
 #[allow(
@@ -1550,6 +1569,14 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 directive,
                 &fields,
                 &mut parsed.special_flags.check_sharps,
+                &mut parsed.diagnostics,
+            ),
+            "FULLSTRIP" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.full_strip,
                 &mut parsed.diagnostics,
             ),
             "ONLYINCOMPOUND" => parse_special_flag(
@@ -1628,6 +1655,9 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
             "AM" => parse_morphology_aliases(source, &mut lines, line_number, &fields, &mut parsed),
             "ICONV" => {
                 parse_input_conversions(source, &mut lines, line_number, &fields, &mut parsed);
+            }
+            "OCONV" => {
+                parse_output_conversions(source, &mut lines, line_number, &fields, &mut parsed);
             }
             "IGNORE" => parse_ignored_characters(
                 source,
@@ -1901,6 +1931,113 @@ fn parse_input_conversions(
             at_word_end,
         });
     }
+}
+
+fn parse_output_conversions(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = parse_alias_count(fields) else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "OCONV",
+            Severity::Error,
+            "OCONV header requires exactly one non-negative rule count",
+        ));
+        return;
+    };
+    if count > MAX_INPUT_CONVERSIONS {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "OCONV",
+            Severity::Error,
+            "OCONV rule count exceeds the configured limit of 4096",
+        ));
+        return;
+    }
+    if parsed
+        .declared_sections
+        .contains(&CountedSection::OutputConversions)
+    {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "OCONV",
+            Severity::Error,
+            "OCONV may only be declared once",
+        ));
+        return;
+    }
+    parsed
+        .declared_sections
+        .insert(CountedSection::OutputConversions);
+
+    for _ in 0..count {
+        let Some((index, line)) = next_alias_line(lines) else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "OCONV",
+                Severity::Error,
+                "OCONV header ended before all declared rules were supplied",
+            ));
+            return;
+        };
+        let rule_fields = aff_fields(line);
+        let Some((from, to)) = matches!(rule_fields.as_slice(), ["OCONV", _, _])
+            .then(|| (rule_fields[1], rule_fields[2]))
+        else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "OCONV",
+                Severity::Error,
+                "OCONV rules require exactly two non-empty literal strings",
+            ));
+            continue;
+        };
+        let at_word_end = from.ends_with('_');
+        let from = if at_word_end {
+            &from[..from.len() - '_'.len_utf8()]
+        } else {
+            from
+        };
+        let to = if to == "0" { "" } else { to };
+        if from.is_empty() || from.len() > MAX_LINE_BYTES || to.len() > MAX_LINE_BYTES {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "OCONV",
+                Severity::Error,
+                "OCONV rules require a bounded non-empty source string",
+            ));
+            continue;
+        }
+        parsed.output_conversions.push(InputConversion {
+            from: Box::from(from),
+            to: Box::from(to),
+            at_word_end,
+        });
+    }
+}
+
+fn apply_conversions(word: &str, conversions: &[InputConversion]) -> String {
+    let mut converted = word.to_owned();
+    for conversion in conversions {
+        if conversion.at_word_end {
+            if let Some(prefix) = converted.strip_suffix(conversion.from.as_ref()) {
+                converted = format!("{prefix}{}", conversion.to);
+            }
+        } else {
+            converted = converted.replace(conversion.from.as_ref(), conversion.to.as_ref());
+        }
+    }
+    converted
 }
 
 fn parse_ignored_characters(
@@ -3237,6 +3374,68 @@ mod tests {
         assert!(dictionary.contains("wo\u{301}rds"));
         assert!(dictionary.contains("worqds"));
         assert!(!dictionary.contains("fins"));
+    }
+
+    #[test]
+    fn normalizes_oconv_only_for_suggestion_output() {
+        let result = import(
+            "output-normalization.aff",
+            "OCONV 3\nOCONV ae æ\nOCONV r_ 0\nOCONV x_ y\n",
+            "output-normalization.dic",
+            "1\naerx\n",
+            ImportMode::Strict,
+        )
+        .expect("output conversion directives import cleanly");
+        let dictionary = result.dictionary();
+
+        assert!(dictionary.contains("aerx"));
+        assert!(!dictionary.contains("æy"));
+        assert_eq!(dictionary.normalize_output("aer"), "æ");
+        assert_eq!(dictionary.normalize_output("aerx"), "æry");
+    }
+
+    #[test]
+    fn malformed_oconv_is_a_strict_error() {
+        let error = import(
+            "malformed-output-normalization.aff",
+            "OCONV 1\nOCONV source\n",
+            "malformed-output-normalization.dic",
+            "1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect_err("malformed OCONV must not be silently ignored");
+
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.directive() == "OCONV" && diagnostic.severity() == Severity::Error
+        }));
+    }
+
+    #[test]
+    fn fullstrip_allows_an_affix_to_strip_the_entire_stem() {
+        let result = import(
+            "fullstrip.aff",
+            "FULLSTRIP\nSFX A N 1\nSFX A word s .\n",
+            "fullstrip.dic",
+            "1\nword/A\n",
+            ImportMode::Strict,
+        )
+        .expect("FULLSTRIP imports cleanly");
+
+        assert!(result.dictionary().contains("s"));
+    }
+
+    #[test]
+    fn full_stem_strips_require_fullstrip() {
+        let result = import(
+            "without-fullstrip.aff",
+            "SFX A N 1\nSFX A word s .\n",
+            "without-fullstrip.dic",
+            "1\nword/A\n",
+            ImportMode::Strict,
+        )
+        .expect("affix imports cleanly without FULLSTRIP");
+
+        assert!(!result.dictionary().contains("s"));
     }
 
     #[test]

@@ -65,7 +65,11 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
 }
 
 fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
-    let (source, replacements): (Box<dyn CandidateSource>, Vec<ReplacementRule>) = match (
+    let (source, replacements, output_dictionary): (
+        Box<dyn CandidateSource>,
+        Vec<ReplacementRule>,
+        Option<HunspellDictionary>,
+    ) = match (
         command.dictionary_path.as_ref(),
         command.compiled_path.as_ref(),
         command.hunspell_affix_path.as_ref(),
@@ -78,6 +82,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
             (
                 Box::new(WordList::from_text(Normalization::Exact, &text)),
                 Vec::new(),
+                None,
             )
         }
         (None, Some(path), None) => (
@@ -90,11 +95,12 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
                 })?,
             ),
             Vec::new(),
+            None,
         ),
         (None, None, Some(path)) => {
             let dictionary = load_installed_hunspell_dictionary(path)?;
             let replacements = dictionary.replacement_rules().to_vec();
-            (Box::new(dictionary), replacements)
+            (Box::new(dictionary.clone()), replacements, Some(dictionary))
         }
         _ => unreachable!("suggest command parsing requires exactly one source"),
     };
@@ -117,7 +123,10 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",
-            suggestion.word(),
+            output_dictionary.as_ref().map_or_else(
+                || suggestion.word().to_owned(),
+                |dictionary| dictionary.normalize_output(suggestion.word()),
+            ),
             suggestion.distance()
         );
     }

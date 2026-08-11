@@ -53,7 +53,7 @@ is an error for that entry, not a panic.
 ## Initial AFF subset
 
 The current compatibility level recognizes `SET`, `FLAG`, `AF`, `AM`, `ICONV`,
-`IGNORE`, `PFX`, `SFX`,
+`OCONV`, `IGNORE`, `PFX`, `SFX`, `FULLSTRIP`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
 `ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded literal `COMPOUNDRULE` patterns, and bounded
@@ -92,6 +92,9 @@ strip/add text. Both directives can change recognition, so malformed input is
 an error. An ignored character inside an affix condition remains an explicit
 error rather than receiving guessed condition semantics. The importer limits
 `ICONV` to 4,096 rules. An `ICONV` target of `0` represents the empty string.
+`OCONV` uses the same bounded, ordered conversion syntax but only changes the
+spelling rendered for Hunspell-backed suggestions; it never changes lookup
+recognition. `FULLSTRIP` permits an affix strip to consume the complete stem.
 
 `AF`, aliases, complex prefix modes, capitalization fallbacks, compound
 compound quantifiers and suggestion directives beyond the
