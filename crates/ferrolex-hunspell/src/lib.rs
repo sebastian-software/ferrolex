@@ -3145,24 +3145,14 @@ fn parse_compound_minimum(
             "COMPOUNDMIN requires exactly one positive scalar length",
         ));
     } else if let Ok(minimum_length) = fields[1].parse::<usize>() {
-        if minimum_length == 0 {
-            diagnostics.push(diagnostic(
-                source,
-                line,
-                "COMPOUNDMIN",
-                Severity::Error,
-                "COMPOUNDMIN must be greater than zero",
-            ));
-        } else {
-            compound.minimum_length = minimum_length;
-        }
+        compound.minimum_length = minimum_length.max(1);
     } else {
         diagnostics.push(diagnostic(
             source,
             line,
             "COMPOUNDMIN",
             Severity::Error,
-            "COMPOUNDMIN requires a positive integer",
+            "COMPOUNDMIN requires a non-negative integer",
         ));
     }
 }
@@ -5015,6 +5005,20 @@ mod tests {
         let query = "ab".repeat(MAX_COMPOUND_SCALARS);
 
         assert!(!imported.dictionary().contains(&query));
+    }
+
+    #[test]
+    fn compound_minimum_zero_uses_hunspells_one_scalar_floor() {
+        let imported = import(
+            "minimum.aff",
+            "COMPOUNDFLAG C\nCOMPOUNDMIN 0\n",
+            "minimum.dic",
+            "2\na/C\nb/C\n",
+            ImportMode::Strict,
+        )
+        .expect("COMPOUNDMIN 0 is clamped to one");
+
+        assert!(imported.dictionary().contains("ab"));
     }
 
     #[test]
