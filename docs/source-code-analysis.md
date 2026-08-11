@@ -39,6 +39,21 @@ methods use the same deterministic UTF-8 word-list syntax as base lists, so a
 caller can atomically persist an overlay without imposing filesystem policy on
 the core crate.
 
+## Technical vocabulary
+
+Use a reviewed plain UTF-8 word list for technology names, APIs, and product
+terms. Pass it as an additional base dictionary; ferrolex combines dictionaries
+without giving the analyzer a separate vocabulary format:
+
+```sh
+ferrolex analyze --dictionary language.txt --dictionary technical.txt src/
+```
+
+Keep the technical list separate from a project's mutable user overlay. Record
+its source revision and license before importing third-party data. ferrolex does
+not read `cspell.json` or cspell dictionary formats; an approved source must be
+converted to the normal word-list contract during a reviewed import step.
+
 ## Persistent project policy
 
 `ferrolex analyze --config .ferrolex/config` reads a deliberately small,
