@@ -37,6 +37,8 @@ const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 const MAX_DERIVED_CANDIDATES_PER_LOOKUP: usize = 8_192;
 const MAX_COMPOUND_SCALARS: usize = 256;
 const MAX_COMPOUND_RULES: usize = 1_024;
+const MAX_COMPOUND_PATTERNS: usize = 1_024;
+const MAX_COMPOUND_PATTERN_REPLACEMENT_VARIANTS: usize = 32;
 const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
 const MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE: usize = 1_024;
 const MAX_COMPOUND_RULE_EXPANSIONS: usize = 16_384;
@@ -565,6 +567,8 @@ impl HunspellDictionary {
 
     fn is_accepted_compound_state(&self, state: &FormState) -> bool {
         !self.is_forbidden(&state.flags)
+            && !self.is_compound_forbidden(&state.origin_flags)
+            && !self.is_compound_forbidden(&state.flags)
             && !self.requires_affix(&state.flags)
             && state.has_complete_circumfix()
     }
@@ -572,6 +576,13 @@ impl HunspellDictionary {
     fn is_forbidden(&self, flags: &BTreeSet<Flag>) -> bool {
         self.special_flags
             .forbidden_word
+            .as_ref()
+            .is_some_and(|flag| flags.contains(flag))
+    }
+
+    fn is_compound_forbidden(&self, flags: &BTreeSet<Flag>) -> bool {
+        self.compound
+            .forbid
             .as_ref()
             .is_some_and(|flag| flags.contains(flag))
     }
@@ -604,6 +615,11 @@ impl HunspellDictionary {
         {
             return false;
         }
+        if self.compound.check_replacement
+            && self.matches_noncompound_replacement(word, allow_keep_case)
+        {
+            return false;
+        }
         // Retain at most the bounded number of split positions. Building an
         // index for an arbitrarily long untrusted query would defeat the
         // compound-evaluation limit before it can reject the query.
@@ -617,19 +633,48 @@ impl HunspellDictionary {
         }
         boundaries.push(word.len());
 
+        if self.matches_simple_compound_with_triples(word, &boundaries, allow_keep_case, false) {
+            return true;
+        }
+        self.compound.check_triple
+            && self.compound.simplified_triple
+            && self.matches_simplified_triple_compound(word, allow_keep_case)
+            || self.matches_compound_pattern_replacements(word, allow_keep_case)
+    }
+
+    fn matches_simple_compound_with_triples(
+        &self,
+        word: &str,
+        boundaries: &[usize],
+        allow_keep_case: bool,
+        allow_boundary_triples: bool,
+    ) -> bool {
         self.compound.flag.as_ref().is_some_and(|flag| {
-            self.matches_compound_pattern(word, &boundaries, None, Some(flag), allow_keep_case)
+            self.matches_compound_pattern(
+                word,
+                boundaries,
+                None,
+                Some(flag),
+                allow_keep_case,
+                allow_boundary_triples,
+            )
         }) || self.compound.rules.iter().any(|rule| {
             rule.patterns.iter().any(|pattern| {
                 self.matches_compound_pattern(
                     word,
-                    &boundaries,
+                    boundaries,
                     Some(pattern),
                     None,
                     allow_keep_case,
+                    allow_boundary_triples,
                 )
             })
-        }) || self.matches_positioned_compound(word, &boundaries, allow_keep_case)
+        }) || self.matches_positioned_compound(
+            word,
+            boundaries,
+            allow_keep_case,
+            allow_boundary_triples,
+        )
     }
 
     fn matches_compound_pattern(
@@ -639,9 +684,16 @@ impl HunspellDictionary {
         pattern: Option<&[Flag]>,
         generic_flag: Option<&Flag>,
         allow_keep_case: bool,
+        allow_boundary_triples: bool,
     ) -> bool {
         if let Some(pattern) = pattern {
-            return self.matches_fixed_compound_pattern(word, boundaries, pattern, allow_keep_case);
+            return self.matches_fixed_compound_pattern(
+                word,
+                boundaries,
+                pattern,
+                allow_keep_case,
+                allow_boundary_triples,
+            );
         }
         let Some(flag) = generic_flag else {
             return false;
@@ -656,9 +708,16 @@ impl HunspellDictionary {
                 &reachable,
                 flag,
                 allow_keep_case,
+                allow_boundary_triples,
             );
-            if component_count >= 2 && next.last() == Some(&true) {
+            if component_count >= 2
+                && next.last() == Some(&true)
+                && self.compound_component_count_is_allowed(word, component_count)
+            {
                 return true;
+            }
+            if self.compound_component_count_cannot_continue(component_count) {
+                return false;
             }
             reachable = next;
         }
@@ -671,6 +730,7 @@ impl HunspellDictionary {
         boundaries: &[usize],
         pattern: &[Flag],
         allow_keep_case: bool,
+        allow_boundary_triples: bool,
     ) -> bool {
         if pattern.len() < 2 {
             return false;
@@ -684,6 +744,7 @@ impl HunspellDictionary {
                 &reachable,
                 flag,
                 allow_keep_case,
+                allow_boundary_triples,
             );
             if next.iter().all(|reachable| !reachable) {
                 return false;
@@ -691,6 +752,7 @@ impl HunspellDictionary {
             reachable = next;
         }
         reachable.last() == Some(&true)
+            && self.compound_component_count_is_allowed(word, pattern.len())
     }
 
     fn extend_compound_components(
@@ -700,6 +762,7 @@ impl HunspellDictionary {
         reachable: &[bool],
         flag: &Flag,
         allow_keep_case: bool,
+        allow_boundary_triples: bool,
     ) -> Vec<bool> {
         let mut next = vec![false; boundaries.len()];
         for start in 0..boundaries.len().saturating_sub(1) {
@@ -709,7 +772,17 @@ impl HunspellDictionary {
             let first_end = start.saturating_add(self.compound.minimum_length);
             for end in first_end..boundaries.len() {
                 let candidate = &word[boundaries[start]..boundaries[end]];
-                if self.matches_compound_component(candidate, flag, allow_keep_case) {
+                if self.compound_boundary_is_allowed(
+                    word,
+                    boundaries[start],
+                    boundaries[end],
+                    allow_boundary_triples,
+                ) && self.matches_compound_component(
+                    candidate,
+                    flag,
+                    end + 1 == boundaries.len(),
+                    allow_keep_case,
+                ) {
                     next[end] = true;
                 }
             }
@@ -721,10 +794,12 @@ impl HunspellDictionary {
         &self,
         word: &str,
         required_flag: &Flag,
+        is_final_component: bool,
         allow_keep_case: bool,
     ) -> bool {
         self.lexemes_for_stem(word).any(|lexeme| {
             !self.is_forbidden(&lexeme.flags)
+                && (is_final_component || !self.is_compound_forbidden(&lexeme.flags))
                 && lexeme.flags.contains(required_flag)
                 && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
         })
@@ -735,6 +810,7 @@ impl HunspellDictionary {
         word: &str,
         boundaries: &[usize],
         allow_keep_case: bool,
+        allow_boundary_triples: bool,
     ) -> bool {
         let (Some(begin), Some(end)) = (&self.compound.begin, &self.compound.end) else {
             return false;
@@ -748,8 +824,9 @@ impl HunspellDictionary {
             begin,
             CompoundPosition::Begin,
             allow_keep_case,
+            allow_boundary_triples,
         );
-        for _ in 2..boundaries.len() {
+        for component_count in 2..boundaries.len() {
             let terminal = self.extend_positioned_components(
                 word,
                 boundaries,
@@ -757,9 +834,15 @@ impl HunspellDictionary {
                 end,
                 CompoundPosition::End,
                 allow_keep_case,
+                allow_boundary_triples,
             );
-            if terminal.last() == Some(&true) {
+            if terminal.last() == Some(&true)
+                && self.compound_component_count_is_allowed(word, component_count)
+            {
                 return true;
+            }
+            if self.compound_component_count_cannot_continue(component_count) {
+                return false;
             }
             let Some(middle) = self.compound.middle.as_ref() else {
                 return false;
@@ -771,11 +854,16 @@ impl HunspellDictionary {
                 middle,
                 CompoundPosition::Middle,
                 allow_keep_case,
+                allow_boundary_triples,
             );
         }
         false
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "compound position, casing, and triple policy describe one bounded transition"
+    )]
     fn extend_positioned_components(
         &self,
         word: &str,
@@ -784,6 +872,7 @@ impl HunspellDictionary {
         position_flag: &Flag,
         position: CompoundPosition,
         allow_keep_case: bool,
+        allow_boundary_triples: bool,
     ) -> Vec<bool> {
         let mut next = vec![false; boundaries.len()];
         for start in 0..boundaries.len().saturating_sub(1) {
@@ -793,7 +882,12 @@ impl HunspellDictionary {
             let first_end = start.saturating_add(self.compound.minimum_length);
             for end in first_end..boundaries.len() {
                 let candidate = &word[boundaries[start]..boundaries[end]];
-                if self.matches_positioned_component(
+                if self.compound_boundary_is_allowed(
+                    word,
+                    boundaries[start],
+                    boundaries[end],
+                    allow_boundary_triples,
+                ) && self.matches_positioned_component(
                     candidate,
                     position_flag,
                     position,
@@ -815,6 +909,7 @@ impl HunspellDictionary {
     ) -> bool {
         self.lexemes_for_stem(word).any(|lexeme| {
             !self.is_forbidden(&lexeme.flags)
+                && (position == CompoundPosition::End || !self.is_compound_forbidden(&lexeme.flags))
                 && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
                 && (lexeme.flags.contains(position_flag)
                     || self
@@ -862,6 +957,171 @@ impl HunspellDictionary {
                         })
                     })
             })
+    }
+
+    fn compound_component_count_is_allowed(&self, word: &str, component_count: usize) -> bool {
+        let Some(maximum_words) = self.compound.maximum_words else {
+            return true;
+        };
+        if component_count <= maximum_words {
+            return true;
+        }
+        self.compound.syllable_limit.as_ref().is_some_and(|limit| {
+            word.chars()
+                .filter(|character| limit.vowels.contains(character))
+                .take(limit.maximum.saturating_add(1))
+                .count()
+                <= limit.maximum
+        })
+    }
+
+    fn compound_component_count_cannot_continue(&self, component_count: usize) -> bool {
+        self.compound.maximum_words.is_some_and(|maximum_words| {
+            component_count >= maximum_words && self.compound.syllable_limit.is_none()
+        })
+    }
+
+    fn compound_boundary_is_allowed(
+        &self,
+        word: &str,
+        start: usize,
+        end: usize,
+        allow_boundary_triples: bool,
+    ) -> bool {
+        let component = &word[start..end];
+        if self.compound.check_case
+            && start != 0
+            && component.chars().next().is_some_and(char::is_uppercase)
+        {
+            return false;
+        }
+        if self.compound.check_duplicate
+            && start >= component.len()
+            && word[..start].ends_with(component)
+        {
+            return false;
+        }
+        if self.compound.check_triple
+            && !allow_boundary_triples
+            && has_triple_at_compound_boundary(word, start)
+        {
+            return false;
+        }
+        if end == word.len()
+            && self.compound.force_uppercase.as_ref().is_some_and(|flag| {
+                self.lexemes_for_stem(component)
+                    .any(|lexeme| lexeme.flags.contains(flag))
+            })
+            && !word.chars().next().is_some_and(char::is_uppercase)
+        {
+            return false;
+        }
+        !self.compound_pattern_forbids(word, start, component)
+    }
+
+    fn matches_simplified_triple_compound(&self, word: &str, allow_keep_case: bool) -> bool {
+        for (boundary, character) in word.char_indices().skip(1) {
+            let Some(previous) = word[..boundary].chars().last() else {
+                continue;
+            };
+            if character != previous {
+                continue;
+            }
+            let mut expanded = String::with_capacity(word.len() + previous.len_utf8());
+            expanded.push_str(&word[..boundary]);
+            expanded.push(previous);
+            expanded.push_str(&word[boundary..]);
+            let Some(boundaries) = compound_boundaries(&expanded) else {
+                continue;
+            };
+            if self.matches_simple_compound_with_triples(
+                &expanded,
+                &boundaries,
+                allow_keep_case,
+                true,
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn matches_compound_pattern_replacements(&self, word: &str, allow_keep_case: bool) -> bool {
+        self.compound.patterns.iter().any(|pattern| {
+            let Some(replacement) = pattern.replacement.as_deref() else {
+                return false;
+            };
+            word.match_indices(replacement)
+                .take(MAX_COMPOUND_PATTERN_REPLACEMENT_VARIANTS)
+                .any(|(start, _)| {
+                    let end = start + replacement.len();
+                    let mut expanded = String::with_capacity(
+                        word.len()
+                            .saturating_add(pattern.ending.len())
+                            .saturating_add(pattern.beginning.len())
+                            .saturating_sub(replacement.len()),
+                    );
+                    expanded.push_str(&word[..start]);
+                    expanded.push_str(&pattern.ending);
+                    expanded.push_str(&pattern.beginning);
+                    expanded.push_str(&word[end..]);
+                    compound_boundaries(&expanded).is_some_and(|boundaries| {
+                        self.matches_simple_compound_with_triples(
+                            &expanded,
+                            &boundaries,
+                            allow_keep_case,
+                            false,
+                        )
+                    })
+                })
+        })
+    }
+
+    fn compound_pattern_forbids(&self, word: &str, start: usize, right: &str) -> bool {
+        self.compound.patterns.iter().any(|pattern| {
+            pattern.replacement.is_none()
+                && pattern.ending.as_ref() != "0"
+                && word[..start].ends_with(pattern.ending.as_ref())
+                && right.starts_with(pattern.beginning.as_ref())
+                && pattern.ending_flag.as_ref().map_or(true, |flag| {
+                    self.lexemes_for_stem(&word[..start])
+                        .any(|lexeme| lexeme.flags.contains(flag))
+                })
+                && pattern.beginning_flag.as_ref().map_or(true, |flag| {
+                    self.lexemes_for_stem(right)
+                        .any(|lexeme| lexeme.flags.contains(flag))
+                })
+        })
+    }
+
+    fn matches_noncompound_replacement(&self, word: &str, allow_keep_case: bool) -> bool {
+        self.replacement_rules.iter().any(|rule| {
+            word.match_indices(rule.from()).any(|(start, _)| {
+                let end = start + rule.from().len();
+                if (rule.at_word_start() && start != 0) || (rule.at_word_end() && end != word.len())
+                {
+                    return false;
+                }
+                let mut corrected = String::with_capacity(
+                    word.len()
+                        .saturating_add(rule.to().len())
+                        .saturating_sub(rule.from().len()),
+                );
+                corrected.push_str(&word[..start]);
+                corrected.push_str(rule.to());
+                corrected.push_str(&word[end..]);
+                self.matches_noncompound_word(&corrected, allow_keep_case)
+            })
+        })
+    }
+
+    fn matches_noncompound_word(&self, word: &str, allow_keep_case: bool) -> bool {
+        self.lexemes_for_stem(word).any(|lexeme| {
+            !self.is_forbidden(&lexeme.flags)
+                && !self.requires_affix(&lexeme.flags)
+                && !self.is_only_in_compound(&lexeme.flags)
+                && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
+        }) || self.matches_single_affix_word(word, allow_keep_case)
     }
 
     fn matches_break_word(&self, word: &str, allow_keep_case: bool) -> bool {
@@ -1098,7 +1358,7 @@ enum AffixKind {
     Suffix,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum CompoundPosition {
     Begin,
     Middle,
@@ -1274,13 +1534,27 @@ struct SpecialFlags {
 }
 
 #[derive(Clone, Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each imported Hunspell marker is an independent recognition safeguard"
+)]
 struct CompoundConfig {
     flag: Option<Flag>,
     begin: Option<Flag>,
     middle: Option<Flag>,
     end: Option<Flag>,
     permit: Option<Flag>,
+    forbid: Option<Flag>,
+    force_uppercase: Option<Flag>,
     minimum_length: usize,
+    maximum_words: Option<usize>,
+    check_duplicate: bool,
+    check_replacement: bool,
+    check_case: bool,
+    check_triple: bool,
+    simplified_triple: bool,
+    patterns: Vec<CompoundPattern>,
+    syllable_limit: Option<CompoundSyllableLimit>,
     rules: Vec<CompoundRule>,
 }
 
@@ -1292,10 +1566,35 @@ impl Default for CompoundConfig {
             middle: None,
             end: None,
             permit: None,
+            forbid: None,
+            force_uppercase: None,
             minimum_length: 3,
+            maximum_words: None,
+            check_duplicate: false,
+            check_replacement: false,
+            check_case: false,
+            check_triple: false,
+            simplified_triple: false,
+            patterns: Vec::new(),
+            syllable_limit: None,
             rules: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct CompoundPattern {
+    ending: Box<str>,
+    ending_flag: Option<Flag>,
+    beginning: Box<str>,
+    beginning_flag: Option<Flag>,
+    replacement: Option<Box<str>>,
+}
+
+#[derive(Clone, Debug)]
+struct CompoundSyllableLimit {
+    maximum: usize,
+    vowels: BTreeSet<char>,
 }
 
 #[derive(Clone, Debug)]
@@ -1754,6 +2053,33 @@ fn byte_line_number(bytes: &[u8], byte_index: usize) -> usize {
     line_number
 }
 
+fn has_triple_at_compound_boundary(word: &str, boundary: usize) -> bool {
+    let left = word[..boundary].chars().rev().take(2).collect::<Vec<_>>();
+    let right = word[boundary..].chars().take(2).collect::<Vec<_>>();
+    let duplicate_before_boundary = matches!(
+        (left.as_slice(), right.as_slice()),
+        ([last, previous], [next, ..]) if last == previous && last == next
+    );
+    let duplicate_after_boundary = matches!(
+        (left.as_slice(), right.as_slice()),
+        ([last, ..], [next, following]) if last == next && last == following
+    );
+    duplicate_before_boundary || duplicate_after_boundary
+}
+
+fn compound_boundaries(word: &str) -> Option<Vec<usize>> {
+    let mut boundaries = word
+        .char_indices()
+        .take(MAX_COMPOUND_SCALARS.saturating_add(1))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if boundaries.len() > MAX_COMPOUND_SCALARS {
+        return None;
+    }
+    boundaries.push(word.len());
+    Some(boundaries)
+}
+
 #[derive(Default)]
 struct ParsedAff {
     flag_mode: FlagMode,
@@ -1786,6 +2112,7 @@ enum CountedSection {
     InputConversions,
     OutputConversions,
     BreakPatterns,
+    CompoundPatterns,
 }
 
 #[allow(
@@ -1928,6 +2255,24 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.compound.permit,
                 &mut parsed.diagnostics,
             ),
+            "COMPOUNDFORBIDFLAG" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                parsed.flag_mode,
+                &mut parsed.compound.forbid,
+                &mut parsed.diagnostics,
+            ),
+            "FORCEUCASE" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                parsed.flag_mode,
+                &mut parsed.compound.force_uppercase,
+                &mut parsed.diagnostics,
+            ),
             "COMPOUNDMIN" => parse_compound_minimum(
                 source,
                 line_number,
@@ -1935,6 +2280,64 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.compound,
                 &mut parsed.diagnostics,
             ),
+            "COMPOUNDWORDMAX" => parse_compound_word_maximum(
+                source,
+                line_number,
+                &fields,
+                parsed.flag_mode,
+                &mut parsed.compound,
+                &mut parsed.diagnostics,
+            ),
+            "COMPOUNDSYLLABLE" => parse_compound_syllable_limit(
+                source,
+                line_number,
+                &fields,
+                &mut parsed.compound,
+                &mut parsed.diagnostics,
+            ),
+            "CHECKCOMPOUNDDUP" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.check_duplicate,
+                &mut parsed.diagnostics,
+            ),
+            "CHECKCOMPOUNDREP" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.check_replacement,
+                &mut parsed.diagnostics,
+            ),
+            "CHECKCOMPOUNDCASE" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.check_case,
+                &mut parsed.diagnostics,
+            ),
+            "CHECKCOMPOUNDTRIPLE" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.check_triple,
+                &mut parsed.diagnostics,
+            ),
+            "SIMPLIFIEDTRIPLE" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.compound.simplified_triple,
+                &mut parsed.diagnostics,
+            ),
+            "CHECKCOMPOUNDPATTERN" => {
+                parse_compound_patterns(source, &mut lines, line_number, &fields, &mut parsed);
+            }
             "COMPOUNDRULE" => {
                 parse_compound_rules(source, &mut lines, line_number, &fields, &mut parsed);
             }
@@ -2722,6 +3125,205 @@ fn parse_compound_minimum(
             "COMPOUNDMIN requires a positive integer",
         ));
     }
+}
+
+fn parse_compound_word_maximum(
+    source: &str,
+    line: usize,
+    fields: &[&str],
+    flag_mode: FlagMode,
+    compound: &mut CompoundConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(maximum) = fields
+        .get(1)
+        .filter(|_| {
+            fields.len() == 2 || (fields.len() == 3 && decode_flag(fields[2], flag_mode).is_some())
+        })
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDWORDMAX",
+            Severity::Error,
+            "COMPOUNDWORDMAX requires a positive component count and an optional legacy flag",
+        ));
+        return;
+    };
+    if maximum == 0 || maximum > MAX_COMPOUND_SCALARS {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDWORDMAX",
+            Severity::Error,
+            "COMPOUNDWORDMAX must be between 1 and 256",
+        ));
+    } else if compound.maximum_words.is_some() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDWORDMAX",
+            Severity::Error,
+            "COMPOUNDWORDMAX may only be declared once",
+        ));
+    } else {
+        compound.maximum_words = Some(maximum);
+    }
+}
+
+fn parse_compound_syllable_limit(
+    source: &str,
+    line: usize,
+    fields: &[&str],
+    compound: &mut CompoundConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(maximum) = fields
+        .get(1)
+        .filter(|_| fields.len() == 3)
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDSYLLABLE",
+            Severity::Error,
+            "COMPOUNDSYLLABLE requires a non-negative limit and a non-empty vowel set",
+        ));
+        return;
+    };
+    if fields[2].is_empty() || compound.syllable_limit.is_some() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "COMPOUNDSYLLABLE",
+            Severity::Error,
+            "COMPOUNDSYLLABLE may only be declared once with a non-empty vowel set",
+        ));
+        return;
+    }
+    compound.syllable_limit = Some(CompoundSyllableLimit {
+        maximum,
+        vowels: fields[2].chars().collect(),
+    });
+}
+
+fn parse_compound_patterns(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = fields
+        .get(1)
+        .filter(|_| fields.len() == 2)
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "CHECKCOMPOUNDPATTERN",
+            Severity::Error,
+            "CHECKCOMPOUNDPATTERN requires exactly one positive rule count",
+        ));
+        return;
+    };
+    if count == 0 || count > MAX_COMPOUND_PATTERNS {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "CHECKCOMPOUNDPATTERN",
+            Severity::Error,
+            "CHECKCOMPOUNDPATTERN count must be between 1 and 1024",
+        ));
+        return;
+    }
+    if !parsed
+        .declared_sections
+        .insert(CountedSection::CompoundPatterns)
+    {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "CHECKCOMPOUNDPATTERN",
+            Severity::Error,
+            "CHECKCOMPOUNDPATTERN may only be declared once",
+        ));
+        return;
+    }
+    for _ in 0..count {
+        let Some((index, line)) = lines.next() else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "CHECKCOMPOUNDPATTERN",
+                Severity::Error,
+                "CHECKCOMPOUNDPATTERN header ended before all declared rules were supplied",
+            ));
+            return;
+        };
+        let fields = aff_fields(line);
+        let pattern = match fields.as_slice() {
+            ["CHECKCOMPOUNDPATTERN", ending, beginning] => {
+                parse_compound_pattern(ending, beginning, None, parsed.flag_mode)
+            }
+            ["CHECKCOMPOUNDPATTERN", ending, beginning, replacement] => {
+                parse_compound_pattern(ending, beginning, Some(replacement), parsed.flag_mode)
+            }
+            _ => None,
+        };
+        let Some(pattern) = pattern else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "CHECKCOMPOUNDPATTERN",
+                Severity::Error,
+                "compound patterns require endchars[/flag], beginchars[/flag], and an optional replacement",
+            ));
+            continue;
+        };
+        parsed.compound.patterns.push(pattern);
+    }
+}
+
+fn parse_compound_pattern(
+    ending: &str,
+    beginning: &str,
+    replacement: Option<&str>,
+    flag_mode: FlagMode,
+) -> Option<CompoundPattern> {
+    let (ending, ending_flag) = parse_compound_pattern_part(ending, flag_mode)?;
+    let (beginning, beginning_flag) = parse_compound_pattern_part(beginning, flag_mode)?;
+    if ending.is_empty()
+        && beginning.is_empty()
+        && ending_flag.is_none()
+        && beginning_flag.is_none()
+    {
+        return None;
+    }
+    let replacement = replacement
+        .filter(|replacement| !replacement.is_empty())
+        .map(Box::<str>::from);
+    Some(CompoundPattern {
+        ending,
+        ending_flag,
+        beginning,
+        beginning_flag,
+        replacement,
+    })
+}
+
+fn parse_compound_pattern_part(
+    value: &str,
+    flag_mode: FlagMode,
+) -> Option<(Box<str>, Option<Flag>)> {
+    let (text, flag) = match value.split_once('/') {
+        Some((text, flag)) => (text, Some(decode_flag(flag, flag_mode)?)),
+        None => (value, None),
+    };
+    (!text.contains('/')).then(|| (text.into(), flag))
 }
 
 fn parse_compound_rules(
@@ -3673,9 +4275,9 @@ mod tests {
     use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
 
     use super::{
-        import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
-        ImportMode, Severity, MAX_AFF_BYTES, MAX_COMPOUND_SCALARS,
-        MAX_DERIVED_CANDIDATES_PER_LOOKUP, MAX_DIC_BYTES,
+        compile_runtime_cache, import, import_bytes, import_bytes_with_encodings,
+        load_runtime_cache, ByteEncoding, ByteImportEncodings, ImportMode, Severity, SourceDigests,
+        MAX_AFF_BYTES, MAX_COMPOUND_SCALARS, MAX_DERIVED_CANDIDATES_PER_LOOKUP, MAX_DIC_BYTES,
     };
 
     const AFFIXES: &str =
@@ -4336,6 +4938,103 @@ mod tests {
         let query = "ab".repeat(MAX_COMPOUND_SCALARS);
 
         assert!(!imported.dictionary().contains(&query));
+    }
+
+    #[test]
+    fn compound_safeguards_reject_forbidden_boundaries_and_allow_bounded_syllables() {
+        let affixes = "COMPOUNDFLAG C\nCOMPOUNDMIN 1\nCOMPOUNDFORBIDFLAG F\nCOMPOUNDWORDMAX 2 C\nCOMPOUNDSYLLABLE 1 a\nCHECKCOMPOUNDDUP\nCHECKCOMPOUNDCASE\nCHECKCOMPOUNDTRIPLE\nCHECKCOMPOUNDREP\nFORCEUCASE U\nCHECKCOMPOUNDPATTERN 1\nCHECKCOMPOUNDPATTERN foo/A bar/B\nREP 1\nREP quxbar known\n";
+        let entries = "13\nfoo/CA\nbar/CB\nBar/CB\nox/C\nbad/CF\nmain/C\nMain/C\nstreet/CU\na/C\nb/C\nc/C\nknown\nqux/C\n";
+        let imported = import(
+            "safeguards.aff",
+            affixes,
+            "safeguards.dic",
+            entries,
+            ImportMode::Strict,
+        )
+        .expect("compound safeguards import in strict mode");
+        let dictionary = imported.dictionary();
+
+        assert!(
+            !dictionary.contains("foobar"),
+            "the flagged pattern blocks foo|bar"
+        );
+        assert!(
+            !dictionary.contains("badfoo"),
+            "forbid flag removes bad from compounds"
+        );
+        assert!(
+            dictionary.contains("foobad"),
+            "the Hunspell forbid flag permits a direct final component"
+        );
+        assert!(
+            !dictionary.contains("foofoo"),
+            "adjacent duplicate components are rejected"
+        );
+        assert!(
+            !dictionary.contains("fooox"),
+            "a boundary triple is rejected"
+        );
+        assert!(
+            !dictionary.contains("fooBar"),
+            "uppercase at a boundary is rejected"
+        );
+        assert!(
+            !dictionary.contains("mainstreet"),
+            "FORCEUCASE requires capitalization"
+        );
+        assert!(dictionary.contains("Mainstreet"));
+        assert!(
+            dictionary.contains("abc"),
+            "one-syllable compounds may exceed word max"
+        );
+        assert!(
+            !dictionary.contains("quxbar"),
+            "REP correction to a plain word blocks compounding"
+        );
+
+        let sources = SourceDigests::from_source_bytes(affixes.as_bytes(), entries.as_bytes());
+        let cache = compile_runtime_cache(dictionary, sources).expect("safeguards cache compiles");
+        let loaded = load_runtime_cache(&cache, sources).expect("safeguards cache loads");
+        assert!(!loaded.contains("foofoo"));
+        assert!(loaded.contains("Mainstreet"));
+    }
+
+    #[test]
+    fn compound_boundary_reductions_are_bounded_and_explicit() {
+        let simplified = import(
+            "simplified-triple.aff",
+            "COMPOUNDFLAG C\nCOMPOUNDMIN 1\nCHECKCOMPOUNDTRIPLE\nSIMPLIFIEDTRIPLE\n",
+            "simplified-triple.dic",
+            "2\nSchiff/C\nfahrt/C\n",
+            ImportMode::Strict,
+        )
+        .expect("simplified triple directives import");
+        assert!(!simplified.dictionary().contains("Schifffahrt"));
+        assert!(simplified.dictionary().contains("Schiffahrt"));
+
+        let pattern = import(
+            "compound-pattern.aff",
+            "COMPOUNDFLAG C\nCOMPOUNDMIN 1\nCHECKCOMPOUNDPATTERN 1\nCHECKCOMPOUNDPATTERN ff f ff\n",
+            "compound-pattern.dic",
+            "2\nSchiff/C\nfahrt/C\n",
+            ImportMode::Strict,
+        )
+        .expect("compound replacement pattern imports");
+        assert!(pattern.dictionary().contains("Schiffahrt"));
+    }
+
+    #[test]
+    fn compound_patterns_allow_flag_only_boundaries_in_long_flag_dictionaries() {
+        let imported = import(
+            "long-pattern.aff",
+            "FLAG long\nCOMPOUNDFLAG Cc\nCOMPOUNDMIN 1\nCHECKCOMPOUNDPATTERN 1\nCHECKCOMPOUNDPATTERN /Aa /Bb\n",
+            "long-pattern.dic",
+            "2\nleft/CcAa\nright/CcBb\n",
+            ImportMode::Strict,
+        )
+        .expect("flag-only compound pattern imports");
+
+        assert!(!imported.dictionary().contains("leftright"));
     }
 
     #[test]

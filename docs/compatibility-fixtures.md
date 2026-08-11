@@ -28,9 +28,9 @@ mode for arbitrary dictionaries.
 roundtrip. Strict import remains intentionally disabled until these observed
 source constructs have their project-owned semantics:
 
-- compound safeguards and restrictions (`COMPOUNDFORBIDFLAG`,
-  `COMPOUNDWORDMAX`, `COMPOUNDSYLLABLE`, `COMPOUNDFIRST`, `COMPOUNDLAST`,
-  `COMPOUNDROOT`, and `CHECKCOMPOUND*`) are tracked by [#23](https://github.com/sebastian-software/ferrolex/issues/23) and the directive-completeness epic [#6](https://github.com/sebastian-software/ferrolex/issues/6);
+- Hungarian-specific compound positions and restrictions
+  (`COMPOUNDFIRST`, `COMPOUNDLAST`, `COMPOUNDROOT`, `ONLYROOT`, and
+  `HU_KOTOHANGZO`) remain in the directive-completeness epic [#6](https://github.com/sebastian-software/ferrolex/issues/6);
 - multi-scalar `BREAK` patterns are tracked by [#24](https://github.com/sebastian-software/ferrolex/issues/24);
 - header metadata (`HOME`, `NAME`, `VERSION`) is tracked by [#26](https://github.com/sebastian-software/ferrolex/issues/26), and `AM` plus affix morphology fields by [#29](https://github.com/sebastian-software/ferrolex/issues/29);
 - Hungarian-specific recognition directives (`HU_KOTOHANGZO`, `ONLYROOT`,

@@ -15,12 +15,13 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    AffixKind, AffixRule, CaseLanguage, CompoundConfig, CompoundRule, Condition, ConditionAtom,
-    Flag, FlagMode, HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES,
-    MAX_BREAK_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
-    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_CONDITION_ATOMS,
-    MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES,
-    MAX_REPLACEMENT_RULES,
+    AffixKind, AffixRule, CaseLanguage, CompoundConfig, CompoundPattern, CompoundRule,
+    CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode, HunspellDictionary,
+    InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
+    MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
+    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS,
+    MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS,
+    MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
 };
 use ferrolex_suggest::ReplacementRule;
 
@@ -36,7 +37,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 21;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 22;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,11 +212,23 @@ pub fn compile_runtime_cache(
     write_optional_flag(&mut output, dictionary.compound.middle.as_ref())?;
     write_optional_flag(&mut output, dictionary.compound.end.as_ref())?;
     write_optional_flag(&mut output, dictionary.compound.permit.as_ref())?;
+    write_optional_flag(&mut output, dictionary.compound.forbid.as_ref())?;
+    write_optional_flag(&mut output, dictionary.compound.force_uppercase.as_ref())?;
     write_u64(
         &mut output,
         u64::try_from(dictionary.compound.minimum_length)
             .map_err(|_| RuntimeCacheError::InvalidDictionary("compound minimum is too large"))?,
     );
+    write_optional_usize(
+        &mut output,
+        dictionary.compound.maximum_words,
+        "compound maximum",
+    )?;
+    output.push(u8::from(dictionary.compound.check_duplicate));
+    output.push(u8::from(dictionary.compound.check_replacement));
+    output.push(u8::from(dictionary.compound.check_case));
+    output.push(u8::from(dictionary.compound.check_triple));
+    output.push(u8::from(dictionary.compound.simplified_triple));
     ensure_artifact_size(
         output.len().saturating_add(CHECKSUM_BYTES),
         DictionaryError::Compile,
@@ -238,6 +251,8 @@ pub fn compile_runtime_cache(
             }
         }
     }
+    write_compound_patterns(&mut output, &dictionary.compound.patterns)?;
+    write_compound_syllable_limit(&mut output, dictionary.compound.syllable_limit.as_ref())?;
     write_count(
         &mut output,
         dictionary.break_characters.len(),
@@ -367,8 +382,16 @@ pub fn load_runtime_cache(
     let middle = read_optional_flag(&mut reader, flag_mode)?;
     let end = read_optional_flag(&mut reader, flag_mode)?;
     let permit = read_optional_flag(&mut reader, flag_mode)?;
+    let forbid = read_optional_flag(&mut reader, flag_mode)?;
+    let force_uppercase = read_optional_flag(&mut reader, flag_mode)?;
     let minimum_length = usize::try_from(reader.u64()?)
         .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
+    let maximum_words = read_optional_usize(&mut reader, "compound maximum is too large")?;
+    let check_duplicate = read_boolean(&mut reader, "invalid compound duplicate marker")?;
+    let check_replacement = read_boolean(&mut reader, "invalid compound replacement marker")?;
+    let check_case = read_boolean(&mut reader, "invalid compound case marker")?;
+    let check_triple = read_boolean(&mut reader, "invalid compound triple marker")?;
+    let simplified_triple = read_boolean(&mut reader, "invalid simplified compound triple marker")?;
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
     let mut rules = Vec::with_capacity(rule_count);
     let mut compound_expansion_count = 0;
@@ -407,6 +430,8 @@ pub fn load_runtime_cache(
         }
         rules.push(CompoundRule { patterns });
     }
+    let patterns = read_compound_patterns(&mut reader, flag_mode)?;
+    let syllable_limit = read_compound_syllable_limit(&mut reader)?;
     let break_count = reader.count(MAX_BREAK_PATTERNS, "break character count")?;
     reader.require_minimum_items(break_count, 4, "break characters")?;
     let mut break_characters = BTreeSet::new();
@@ -454,7 +479,17 @@ pub fn load_runtime_cache(
         middle,
         end,
         permit,
+        forbid,
+        force_uppercase,
         minimum_length,
+        maximum_words,
+        check_duplicate,
+        check_replacement,
+        check_case,
+        check_triple,
+        simplified_triple,
+        patterns,
+        syllable_limit,
         rules,
     };
     if !reader.is_empty() {
@@ -602,11 +637,49 @@ fn validate_dictionary(
         dictionary.flag_mode,
         error,
     )?;
+    validate_optional_flag(
+        dictionary.compound.forbid.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
+        dictionary.compound.force_uppercase.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
     if dictionary.compound.minimum_length == 0 {
         return Err(error.error("compound minimum must be greater than zero"));
     }
     if dictionary.compound.rules.len() > MAX_COMPOUND_RULES {
         return Err(error.error("compound rule count exceeds importer limit"));
+    }
+    if dictionary
+        .compound
+        .maximum_words
+        .is_some_and(|maximum| maximum == 0 || maximum > MAX_COMPOUND_SCALARS)
+    {
+        return Err(error.error("compound maximum is outside the importer limit"));
+    }
+    if dictionary.compound.patterns.len() > MAX_COMPOUND_PATTERNS {
+        return Err(error.error("compound pattern count exceeds importer limit"));
+    }
+    for pattern in &dictionary.compound.patterns {
+        validate_optional_flag(pattern.ending_flag.as_ref(), dictionary.flag_mode, error)?;
+        validate_optional_flag(pattern.beginning_flag.as_ref(), dictionary.flag_mode, error)?;
+        if pattern.ending.len() > MAX_LINE_BYTES
+            || pattern.beginning.len() > MAX_LINE_BYTES
+            || pattern
+                .replacement
+                .as_ref()
+                .is_some_and(|text| text.len() > MAX_LINE_BYTES)
+        {
+            return Err(error.error("compound pattern text exceeds importer line limit"));
+        }
+    }
+    if let Some(limit) = &dictionary.compound.syllable_limit {
+        if limit.vowels.is_empty() || limit.vowels.len() > MAX_LINE_BYTES {
+            return Err(error.error("compound syllable vowel set is invalid"));
+        }
     }
     let mut compound_expansion_count = 0;
     for rule in &dictionary.compound.rules {
@@ -908,6 +981,62 @@ fn write_count(
     Ok(())
 }
 
+fn write_optional_usize(
+    output: &mut Vec<u8>,
+    value: Option<usize>,
+    name: &'static str,
+) -> Result<(), RuntimeCacheError> {
+    let value = value.map_or(0, |value| u64::try_from(value).unwrap_or(u64::MAX));
+    if value == u64::MAX {
+        return Err(RuntimeCacheError::InvalidDictionary(name));
+    }
+    write_u64(output, value);
+    Ok(())
+}
+
+fn write_compound_patterns(
+    output: &mut Vec<u8>,
+    patterns: &[CompoundPattern],
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, patterns.len(), "compound pattern count")?;
+    for pattern in patterns {
+        write_string(output, &pattern.ending, "compound pattern ending")?;
+        write_optional_flag(output, pattern.ending_flag.as_ref())?;
+        write_string(output, &pattern.beginning, "compound pattern beginning")?;
+        write_optional_flag(output, pattern.beginning_flag.as_ref())?;
+        match &pattern.replacement {
+            None => output.push(0),
+            Some(replacement) => {
+                output.push(1);
+                write_string(output, replacement, "compound pattern replacement")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_compound_syllable_limit(
+    output: &mut Vec<u8>,
+    limit: Option<&CompoundSyllableLimit>,
+) -> Result<(), RuntimeCacheError> {
+    match limit {
+        None => output.push(0),
+        Some(limit) => {
+            output.push(1);
+            write_u64(
+                output,
+                u64::try_from(limit.maximum)
+                    .map_err(|_| RuntimeCacheError::InvalidDictionary("compound syllable limit"))?,
+            );
+            write_count(output, limit.vowels.len(), "compound syllable vowel count")?;
+            for vowel in &limit.vowels {
+                write_u32(output, u32::from(*vowel));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn write_u16(output: &mut Vec<u8>, value: u16) {
     output.extend_from_slice(&value.to_le_bytes());
 }
@@ -984,6 +1113,90 @@ fn read_boolean(reader: &mut Reader<'_>, name: &'static str) -> Result<bool, Run
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(RuntimeCacheError::InvalidArtifact(name)),
+    }
+}
+
+fn read_optional_usize(
+    reader: &mut Reader<'_>,
+    name: &'static str,
+) -> Result<Option<usize>, RuntimeCacheError> {
+    let value =
+        usize::try_from(reader.u64()?).map_err(|_| RuntimeCacheError::InvalidArtifact(name))?;
+    Ok((value != 0).then_some(value))
+}
+
+fn read_compound_patterns(
+    reader: &mut Reader<'_>,
+    flag_mode: FlagMode,
+) -> Result<Vec<CompoundPattern>, RuntimeCacheError> {
+    let count = reader.count(MAX_COMPOUND_PATTERNS, "compound pattern count")?;
+    reader.require_minimum_items(count, 14, "compound patterns")?;
+    let mut patterns = Vec::with_capacity(count);
+    for _ in 0..count {
+        let ending = reader.string(MAX_LINE_BYTES, "compound pattern ending")?;
+        let ending_flag = read_optional_flag(reader, flag_mode)?;
+        let beginning = reader.string(MAX_LINE_BYTES, "compound pattern beginning")?;
+        let beginning_flag = read_optional_flag(reader, flag_mode)?;
+        let replacement = match reader.byte()? {
+            0 => None,
+            1 => Some(Box::<str>::from(
+                reader.string(MAX_LINE_BYTES, "compound pattern replacement")?,
+            )),
+            _ => {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "invalid compound pattern replacement marker",
+                ))
+            }
+        };
+        if ending.is_empty()
+            && beginning.is_empty()
+            && ending_flag.is_none()
+            && beginning_flag.is_none()
+        {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "compound pattern is empty",
+            ));
+        }
+        patterns.push(CompoundPattern {
+            ending: Box::<str>::from(ending),
+            ending_flag,
+            beginning: Box::<str>::from(beginning),
+            beginning_flag,
+            replacement,
+        });
+    }
+    Ok(patterns)
+}
+
+fn read_compound_syllable_limit(
+    reader: &mut Reader<'_>,
+) -> Result<Option<CompoundSyllableLimit>, RuntimeCacheError> {
+    match reader.byte()? {
+        0 => Ok(None),
+        1 => {
+            let maximum = usize::try_from(reader.u64()?).map_err(|_| {
+                RuntimeCacheError::InvalidArtifact("compound syllable limit is too large")
+            })?;
+            let count = reader.count(MAX_LINE_BYTES, "compound syllable vowel count")?;
+            if count == 0 {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "compound syllable vowel set is empty",
+                ));
+            }
+            let mut vowels = BTreeSet::new();
+            for _ in 0..count {
+                let vowel = reader.character()?;
+                if !vowels.insert(vowel) {
+                    return Err(RuntimeCacheError::InvalidArtifact(
+                        "duplicate compound syllable vowel",
+                    ));
+                }
+            }
+            Ok(Some(CompoundSyllableLimit { maximum, vowels }))
+        }
+        _ => Err(RuntimeCacheError::InvalidArtifact(
+            "invalid compound syllable marker",
+        )),
     }
 }
 

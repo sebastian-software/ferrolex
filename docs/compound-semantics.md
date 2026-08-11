@@ -34,3 +34,35 @@ per rule and 16,384 per dictionary, with an import diagnostic on overflow.
 Runtime matching therefore keeps its existing bounded segmentation model.
 Runtime caches encode the expanded rule subset and reject caches produced by
 earlier semantics versions.
+
+## Compound safeguards
+
+The compound matcher applies safeguards to the same candidate segmentation; it
+does not first accept a compound and then try to repair it. `COMPOUNDFORBIDFLAG`
+removes a flagged direct stem from beginning and middle compound positions, and
+removes a flagged derived form from every compound position, even when it is
+otherwise eligible through `COMPOUNDFLAG` or `COMPOUNDPERMITFLAG`.
+
+`COMPOUNDWORDMAX` caps the number of components. When `COMPOUNDSYLLABLE` is
+also declared, a compound above that cap is permitted only when its Unicode
+scalar vowel count does not exceed the declared maximum. The vowel set is read
+literally from the AFF declaration. Both settings are bounded by the existing
+256-scalar compound-query limit.
+
+`CHECKCOMPOUNDDUP` rejects adjacent equal components. `CHECKCOMPOUNDCASE`
+rejects an uppercase first scalar after a component boundary, and
+`CHECKCOMPOUNDTRIPLE` rejects a triple equal scalar that crosses one.
+`SIMPLIFIEDTRIPLE` additionally permits the two-scalar spelling obtained by
+removing one scalar from that boundary triple. `FORCEUCASE` requires an
+uppercase first scalar of the whole compound when its final component has the
+configured flag.
+
+`CHECKCOMPOUNDREP` rejects a compound when a declared `REP` typo replacement
+turns it into an otherwise accepted stored word or one-affix form. A
+`CHECKCOMPOUNDPATTERN` rule rejects a component boundary whose left component
+ends and right component begins with the declared strings; optional flag
+conditions apply to those selected components. A replacement form is evaluated
+as a single bounded virtual spelling of that boundary, never by recursive
+compound recognition. At most 32 matching replacement locations are examined
+per declared pattern. These guards retain the 256-scalar input bound and use
+only a finite set of split positions and declared pattern/replacement variants.
