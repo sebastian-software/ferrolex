@@ -33,7 +33,8 @@ directive is a warning.
 The public importer treats files as untrusted input. Its initial fixed limits
 are 32 MiB for `.aff`, 64 MiB for `.dic`, 32 KiB per line, 100,000 parsed
 affix rules, 1,000,000 parsed dictionary entries, 4,096 flags per entry, and 256
-condition atoms. The byte-oriented entry points reject an oversized source
+condition atoms. Morphology is additionally limited to 1,000,000 distinct
+strings and 256 fields on an entry or affix rule. The byte-oriented entry points reject an oversized source
 before scanning its `SET` declaration or decoding it. Exceeding any limit
 reports an error and discards the affected input or entry; later configuration
 can make these limits explicit per caller.
@@ -49,8 +50,9 @@ stem[/flags][ <morphology fields>]
 ```
 
 The importer retains the UTF-8 stem and the decoded flag set. Morphology fields
-are diagnostic metadata in the initial implementation. A malformed flag section
-is an error for that entry, not a panic.
+are retained internally as compact, deduplicated metadata. They do not yet have
+a public query API and do not affect recognition. A malformed flag section is
+an error for that entry, not a panic.
 
 ## Initial AFF subset
 
@@ -72,15 +74,17 @@ SFX flag strip add condition
 `0` represents an empty strip, add, or condition as appropriate. An add field
 can name continuation flags after `/`; those flags remain active on the
 generated form under the [affix semantics](affix-semantics.md). Extra affix
-morphology fields are reported and ignored. Conditions are anchored prefix or
+morphology fields are retained as internal metadata. Conditions are anchored prefix or
 suffix tests, according to the rule kind. See [compound semantics](compound-semantics.md)
 for the deliberately bounded compound subset.
 
 `AF` is a counted flag-alias table. A dictionary entry with a numeric flag
 section, such as `word/2`, resolves to the second `AF` row before recognition;
 malformed aliases never cause a later row to shift position. `AM` is a counted
-morphology-alias table. Its references are validated, but their morphology text
-is discarded because the current runtime does not expose morphology metadata.
+morphology-alias table. Its references resolve to the same internal,
+deduplicated morphology fields as direct `.dic` metadata; trailing direct fields
+remain attached to the entry as well. The current runtime does not expose a
+public morphology API.
 Malformed `AF` is an error because it can change recognition; malformed `AM`
 is a warning because it cannot. `FLAG UTF-8`/`UTF8` uses one Unicode scalar per
 flag and accepts a following Unicode variation selector as part of that flag;

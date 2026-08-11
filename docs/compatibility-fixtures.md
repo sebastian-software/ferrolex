@@ -32,7 +32,7 @@ source constructs have their project-owned semantics:
   (`COMPOUNDFIRST`, `COMPOUNDLAST`, `COMPOUNDROOT`, `ONLYROOT`, and
   `HU_KOTOHANGZO`) remain in the directive-completeness epic [#6](https://github.com/sebastian-software/ferrolex/issues/6);
 - multi-scalar `BREAK` patterns are tracked by [#24](https://github.com/sebastian-software/ferrolex/issues/24);
-- header metadata (`HOME`, `NAME`, `VERSION`) is tracked by [#26](https://github.com/sebastian-software/ferrolex/issues/26), and `AM` plus affix morphology fields by [#29](https://github.com/sebastian-software/ferrolex/issues/29);
+- header metadata (`HOME`, `NAME`, `VERSION`) is tracked by [#26](https://github.com/sebastian-software/ferrolex/issues/26);
 - Hungarian-specific recognition directives (`HU_KOTOHANGZO`, `ONLYROOT`,
   `SUBSTANDARD`, `GENERATE`, `LEMMA_PRESENT`, and `SYLLABLENUM`) remain in
   [#6](https://github.com/sebastian-software/ferrolex/issues/6) until their

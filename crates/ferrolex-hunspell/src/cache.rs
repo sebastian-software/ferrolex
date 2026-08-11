@@ -17,11 +17,12 @@ use sha2::{Digest as _, Sha256};
 use super::{
     AffixKind, AffixRule, BreakPattern, CaseLanguage, CompoundConfig, CompoundPattern,
     CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode,
-    HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
-    MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
-    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS,
-    MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS,
-    MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
+    HunspellDictionary, InputConversion, Lexeme, Morphology, MorphologyId, MorphologyTable,
+    SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS, MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES,
+    MAX_COMPOUND_RULE_COMPONENTS, MAX_COMPOUND_RULE_EXPANSIONS,
+    MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS, MAX_CONDITION_ATOMS,
+    MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES,
+    MAX_MORPHOLOGY_FIELDS_PER_RECORD, MAX_MORPHOLOGY_STRINGS, MAX_REPLACEMENT_RULES,
 };
 use ferrolex_suggest::ReplacementRule;
 
@@ -31,13 +32,13 @@ const HEADER_BYTES: usize = MAGIC.len() + 2 + 4 + (CHECKSUM_BYTES * 2);
 const MAX_RUNTIME_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 /// The on-disk layout version for a Hunspell runtime cache.
-pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 3;
+pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 4;
 
 /// The recognition semantics encoded by a Hunspell runtime cache.
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 25;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 26;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -207,9 +208,25 @@ pub fn compile_runtime_cache(
     write_flag_mode(&mut output, dictionary.flag_mode);
     output.push(u8::from(dictionary.case_fallback));
     write_case_language(&mut output, dictionary.case_language);
-    write_lexemes(&mut output, &dictionary.lexemes, dictionary.flag_mode)?;
-    write_rules(&mut output, &dictionary.prefixes, dictionary.flag_mode)?;
-    write_rules(&mut output, &dictionary.suffixes, dictionary.flag_mode)?;
+    write_morphology_table(&mut output, &dictionary.morphology)?;
+    write_lexemes(
+        &mut output,
+        &dictionary.lexemes,
+        dictionary.flag_mode,
+        &dictionary.morphology,
+    )?;
+    write_rules(
+        &mut output,
+        &dictionary.prefixes,
+        dictionary.flag_mode,
+        &dictionary.morphology,
+    )?;
+    write_rules(
+        &mut output,
+        &dictionary.suffixes,
+        dictionary.flag_mode,
+        &dictionary.morphology,
+    )?;
     write_special_flags(&mut output, &dictionary.special_flags, dictionary.flag_mode)?;
     write_optional_flag(
         &mut output,
@@ -402,10 +419,11 @@ pub fn load_runtime_cache(
     let flag_mode = read_flag_mode(&mut reader)?;
     let case_fallback = read_boolean(&mut reader, "invalid LANG fallback marker")?;
     let case_language = read_case_language(&mut reader)?;
+    let morphology = read_morphology_table(&mut reader)?;
 
-    let lexemes = read_lexemes(&mut reader, flag_mode)?;
-    let prefixes = read_rules(&mut reader, AffixKind::Prefix, flag_mode)?;
-    let suffixes = read_rules(&mut reader, AffixKind::Suffix, flag_mode)?;
+    let lexemes = read_lexemes(&mut reader, flag_mode, &morphology)?;
+    let prefixes = read_rules(&mut reader, AffixKind::Prefix, flag_mode, &morphology)?;
+    let suffixes = read_rules(&mut reader, AffixKind::Suffix, flag_mode, &morphology)?;
     let special_flags = read_special_flags(&mut reader, flag_mode)?;
     let flag = read_optional_flag(&mut reader, flag_mode)?;
     let begin = read_optional_flag(&mut reader, flag_mode)?;
@@ -521,6 +539,7 @@ pub fn load_runtime_cache(
         flag_mode,
         case_fallback,
         case_language,
+        morphology,
         lexemes,
         prefixes,
         suffixes,
@@ -562,6 +581,15 @@ fn validate_dictionary(
     dictionary: &HunspellDictionary,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
+    if dictionary.morphology.ids.len() > MAX_MORPHOLOGY_STRINGS
+        || dictionary
+            .morphology
+            .values_by_id()
+            .iter()
+            .any(|field| field.is_empty() || field.len() > MAX_LINE_BYTES)
+    {
+        return Err(error.error("morphology table exceeds importer limits"));
+    }
     if dictionary.lexemes.len() > MAX_DICTIONARY_ENTRIES {
         return Err(error.error("dictionary entry count exceeds importer limit"));
     }
@@ -575,6 +603,7 @@ fn validate_dictionary(
         }
         previous_stem = Some(lexeme.stem.as_ref());
         validate_flags(&lexeme.flags, dictionary.flag_mode, error)?;
+        validate_morphology(&lexeme.morphology, &dictionary.morphology, error)?;
     }
     for (stem, indices) in &dictionary.stem_indices {
         if indices.is_empty()
@@ -603,6 +632,7 @@ fn validate_dictionary(
             return Err(error.error("affix rule IDs are not a unique dense range"));
         }
         validate_rule(rule, dictionary.flag_mode, error)?;
+        validate_morphology(&rule.morphology, &dictionary.morphology, error)?;
     }
     if rule_ids.len() != rule_count {
         return Err(error.error("affix rule IDs are not a unique dense range"));
@@ -762,6 +792,19 @@ fn validate_dictionary(
     Ok(())
 }
 
+fn validate_morphology(
+    morphology: &Morphology,
+    table: &MorphologyTable,
+    error: DictionaryError,
+) -> Result<(), RuntimeCacheError> {
+    if morphology.len() > MAX_MORPHOLOGY_FIELDS_PER_RECORD
+        || morphology.iter().any(|id| !table.contains(*id))
+    {
+        return Err(error.error("morphology fields exceed importer limits"));
+    }
+    Ok(())
+}
+
 fn validate_rule(
     rule: &AffixRule,
     flag_mode: FlagMode,
@@ -836,11 +879,13 @@ fn write_lexemes(
     output: &mut Vec<u8>,
     lexemes: &[Lexeme],
     flag_mode: FlagMode,
+    morphology_table: &MorphologyTable,
 ) -> Result<(), RuntimeCacheError> {
     write_count(output, lexemes.len(), "dictionary entry count")?;
     for lexeme in lexemes {
         write_string(output, &lexeme.stem, "lexeme stem")?;
         write_flags(output, &lexeme.flags, flag_mode)?;
+        write_morphology(output, &lexeme.morphology, morphology_table)?;
     }
     Ok(())
 }
@@ -849,6 +894,7 @@ fn write_rules(
     output: &mut Vec<u8>,
     rules: &[AffixRule],
     flag_mode: FlagMode,
+    morphology_table: &MorphologyTable,
 ) -> Result<(), RuntimeCacheError> {
     write_count(output, rules.len(), "affix rule count")?;
     for rule in rules {
@@ -867,6 +913,7 @@ fn write_rules(
         write_condition(output, &rule.condition)?;
         output.push(u8::from(rule.cross_product));
         write_flags(output, &rule.continuation_flags, flag_mode)?;
+        write_morphology(output, &rule.morphology, morphology_table)?;
     }
     Ok(())
 }
@@ -907,6 +954,39 @@ fn write_flags(
     write_count(output, flags.len(), "flag count")?;
     for flag in flags {
         write_flag(output, flag, flag_mode)?;
+    }
+    Ok(())
+}
+
+fn write_morphology_table(
+    output: &mut Vec<u8>,
+    table: &MorphologyTable,
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, table.ids.len(), "morphology string count")?;
+    for value in table.values_by_id() {
+        if value.is_empty() {
+            return Err(RuntimeCacheError::InvalidDictionary(
+                "morphology table contains an empty field",
+            ));
+        }
+        write_string(output, value, "morphology field")?;
+    }
+    Ok(())
+}
+
+fn write_morphology(
+    output: &mut Vec<u8>,
+    morphology: &Morphology,
+    table: &MorphologyTable,
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, morphology.len(), "morphology field count")?;
+    for id in morphology {
+        if !table.contains(*id) {
+            return Err(RuntimeCacheError::InvalidDictionary(
+                "morphology field references an unknown table entry",
+            ));
+        }
+        write_u32(output, id.0);
     }
     Ok(())
 }
@@ -1137,9 +1217,54 @@ fn read_case_language(reader: &mut Reader<'_>) -> Result<CaseLanguage, RuntimeCa
     }
 }
 
+fn read_morphology_table(reader: &mut Reader<'_>) -> Result<MorphologyTable, RuntimeCacheError> {
+    let count = reader.count(MAX_MORPHOLOGY_STRINGS, "morphology string count")?;
+    reader.require_minimum_items(count, 4, "morphology strings")?;
+    let mut table = MorphologyTable::default();
+    for expected_id in 0..count {
+        let field = reader.string(MAX_LINE_BYTES, "morphology field")?;
+        if field.is_empty() {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "morphology field is empty",
+            ));
+        }
+        let Some(id) = table.intern(&field) else {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "morphology string count exceeds importer limit",
+            ));
+        };
+        if usize::try_from(id.0).ok() != Some(expected_id) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "duplicate morphology field",
+            ));
+        }
+    }
+    Ok(table)
+}
+
+fn read_morphology(
+    reader: &mut Reader<'_>,
+    table: &MorphologyTable,
+) -> Result<Morphology, RuntimeCacheError> {
+    let count = reader.count(MAX_MORPHOLOGY_FIELDS_PER_RECORD, "morphology field count")?;
+    reader.require_minimum_items(count, 4, "morphology fields")?;
+    let mut morphology = Vec::with_capacity(count);
+    for _ in 0..count {
+        let id = MorphologyId(reader.u32()?);
+        if !table.contains(id) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "morphology field references an unknown table entry",
+            ));
+        }
+        morphology.push(id);
+    }
+    Ok(morphology.into_boxed_slice())
+}
+
 fn read_lexemes(
     reader: &mut Reader<'_>,
     flag_mode: FlagMode,
+    morphology_table: &MorphologyTable,
 ) -> Result<Vec<Lexeme>, RuntimeCacheError> {
     let count = reader.count(MAX_DICTIONARY_ENTRIES, "dictionary entry count")?;
     reader.require_minimum_items(count, 8, "dictionary entries")?;
@@ -1152,6 +1277,7 @@ fn read_lexemes(
         lexemes.push(Lexeme {
             stem: Box::<str>::from(stem),
             flags: read_flags(reader, flag_mode)?,
+            morphology: read_morphology(reader, morphology_table)?,
         });
     }
     Ok(lexemes)
@@ -1337,6 +1463,7 @@ fn read_rules(
     reader: &mut Reader<'_>,
     expected_kind: AffixKind,
     flag_mode: FlagMode,
+    morphology_table: &MorphologyTable,
 ) -> Result<Vec<AffixRule>, RuntimeCacheError> {
     let count = reader.count(MAX_AFFIX_RULES, "affix rule count")?;
     reader.require_minimum_items(count, 26, "affix rules")?;
@@ -1380,6 +1507,7 @@ fn read_rules(
             condition,
             cross_product,
             continuation_flags: read_flags(reader, flag_mode)?,
+            morphology: read_morphology(reader, morphology_table)?,
         });
     }
     Ok(rules)
@@ -1868,7 +1996,7 @@ mod tests {
         );
 
         let mut excessive_entries = cache;
-        excessive_entries[81..85].copy_from_slice(&u32::MAX.to_le_bytes());
+        excessive_entries[85..89].copy_from_slice(&u32::MAX.to_le_bytes());
         rewrite_checksum(&mut excessive_entries);
         assert_eq!(
             load_runtime_cache(&excessive_entries, sources())

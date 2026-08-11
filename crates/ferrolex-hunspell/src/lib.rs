@@ -48,6 +48,8 @@ const MAX_BREAK_PATTERNS: usize = 256;
 const MAX_REPLACEMENT_RULES: usize = 4_096;
 const MAX_AFFIX_ALIASES: usize = 100_000;
 const MAX_INPUT_CONVERSIONS: usize = 4_096;
+const MAX_MORPHOLOGY_STRINGS: usize = 1_000_000;
+const MAX_MORPHOLOGY_FIELDS_PER_RECORD: usize = 256;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -245,6 +247,7 @@ pub struct HunspellDictionary {
     case_fallback: bool,
     case_language: CaseLanguage,
     stem_indices: BTreeMap<Box<str>, Vec<usize>>,
+    morphology: MorphologyTable,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
@@ -307,6 +310,7 @@ impl HunspellDictionary {
         flag_mode: FlagMode,
         case_fallback: bool,
         case_language: CaseLanguage,
+        morphology: MorphologyTable,
         lexemes: Vec<Lexeme>,
         prefixes: Vec<AffixRule>,
         suffixes: Vec<AffixRule>,
@@ -333,6 +337,7 @@ impl HunspellDictionary {
             case_fallback,
             case_language,
             stem_indices,
+            morphology,
             lexemes,
             prefixes,
             suffixes,
@@ -1249,6 +1254,45 @@ fn origin_flags_for(
 struct Lexeme {
     stem: Box<str>,
     flags: BTreeSet<Flag>,
+    morphology: Morphology,
+}
+
+type Morphology = Box<[MorphologyId]>;
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct MorphologyId(u32);
+
+/// Stores each morphology field only once while keeping stable compact IDs in
+/// dictionary entries and affix rules.
+#[derive(Clone, Debug, Default)]
+struct MorphologyTable {
+    ids: BTreeMap<Box<str>, MorphologyId>,
+}
+
+impl MorphologyTable {
+    fn intern(&mut self, field: &str) -> Option<MorphologyId> {
+        if let Some(id) = self.ids.get(field) {
+            return Some(*id);
+        }
+        if self.ids.len() >= MAX_MORPHOLOGY_STRINGS {
+            return None;
+        }
+        let id = MorphologyId(u32::try_from(self.ids.len()).expect("morphology ID is bounded"));
+        self.ids.insert(Box::from(field), id);
+        Some(id)
+    }
+
+    fn contains(&self, id: MorphologyId) -> bool {
+        usize::try_from(id.0).is_ok_and(|index| index < self.ids.len())
+    }
+
+    fn values_by_id(&self) -> Vec<&str> {
+        let mut values = vec![""; self.ids.len()];
+        for (value, id) in &self.ids {
+            values[usize::try_from(id.0).expect("morphology ID fits usize")] = value;
+        }
+        values
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1406,6 +1450,7 @@ struct AffixRule {
     condition: Condition,
     cross_product: bool,
     continuation_flags: BTreeSet<Flag>,
+    morphology: Morphology,
 }
 
 impl AffixRule {
@@ -1881,7 +1926,8 @@ fn import_decoded(
             dic_text,
             parsed_aff.flag_mode,
             &parsed_aff.flag_aliases,
-            parsed_aff.morphology_aliases.len(),
+            &parsed_aff.morphology_aliases,
+            &mut parsed_aff.morphology,
             &parsed_aff.ignored_characters,
             &mut diagnostics,
         )
@@ -1892,6 +1938,7 @@ fn import_decoded(
         parsed_aff.flag_mode,
         true,
         parsed_aff.case_language,
+        parsed_aff.morphology,
         lexemes,
         parsed_aff.prefixes,
         parsed_aff.suffixes,
@@ -2131,7 +2178,8 @@ struct ParsedAff {
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
     flag_aliases: Vec<Option<BTreeSet<Flag>>>,
-    morphology_aliases: Vec<Option<Box<str>>>,
+    morphology_aliases: Vec<Option<Morphology>>,
+    morphology: MorphologyTable,
     ignored_characters: BTreeSet<char>,
     input_conversions: Vec<InputConversion>,
     output_conversions: Vec<InputConversion>,
@@ -2590,11 +2638,15 @@ fn parse_morphology_aliases(
             ));
             return;
         };
-        let alias = line
-            .strip_prefix("AM")
-            .map(str::trim_start)
-            .filter(|alias| !alias.is_empty())
-            .map(Box::from);
+        let fields = aff_fields(line);
+        let alias = fields
+            .strip_prefix(&["AM"])
+            .filter(|fields| !fields.is_empty())
+            .and_then(|fields| {
+                intern_morphology_fields(fields, &mut parsed.morphology)
+                    .ok()
+                    .map(Vec::into_boxed_slice)
+            });
         if alias.is_none() {
             parsed.diagnostics.push(diagnostic(
                 source,
@@ -3742,18 +3794,9 @@ fn parse_affix_group(
             parsed.flag_mode,
             &parsed.flag_aliases,
             rule_line,
+            &mut parsed.morphology,
         ) {
             Ok(rule) => {
-                let rule_fields = aff_fields(rule_line);
-                if rule_fields.len() > 5 {
-                    parsed.diagnostics.push(diagnostic(
-                        source,
-                        rule_line_number,
-                        directive,
-                        Severity::Warning,
-                        "affix morphology fields are not implemented and are ignored",
-                    ));
-                }
                 match kind {
                     AffixKind::Prefix => parsed.prefixes.push(rule),
                     AffixKind::Suffix => parsed.suffixes.push(rule),
@@ -3780,6 +3823,10 @@ fn parse_affix_group(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the parsed affix header and its bounded metadata are validated together"
+)]
 fn parse_affix_rule(
     id: usize,
     expected_directive: &str,
@@ -3788,6 +3835,7 @@ fn parse_affix_rule(
     flag_mode: FlagMode,
     flag_aliases: &[Option<BTreeSet<Flag>>],
     line: &str,
+    morphology_table: &mut MorphologyTable,
 ) -> Result<AffixRule, String> {
     let fields = aff_fields(line);
     if fields.len() < 4 {
@@ -3818,6 +3866,10 @@ fn parse_affix_rule(
             .ok_or_else(|| "affix continuation flags are invalid".to_owned())?,
     };
     let condition = parse_condition(fields.get(4).copied().unwrap_or("."))?;
+    let morphology =
+        intern_morphology_fields(fields.get(5..).unwrap_or_default(), morphology_table)
+            .map_err(str::to_owned)?
+            .into_boxed_slice();
     Ok(AffixRule {
         id,
         kind: if expected_directive == "PFX" {
@@ -3831,6 +3883,7 @@ fn parse_affix_rule(
         condition,
         cross_product,
         continuation_flags,
+        morphology,
     })
 }
 
@@ -3966,13 +4019,18 @@ fn empty_marker(value: &str) -> Box<str> {
     Box::<str>::from(if value == "0" { "" } else { value })
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "dictionary entry fields and their source-aware diagnostics are parsed together"
+)]
 fn parse_dic(
     source: &str,
     text: &str,
     flag_mode: FlagMode,
     flag_aliases: &[Option<BTreeSet<Flag>>],
-    morphology_alias_count: usize,
+    morphology_aliases: &[Option<Morphology>],
+    morphology_table: &mut MorphologyTable,
     ignored_characters: &BTreeSet<char>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Lexeme> {
@@ -4072,16 +4130,18 @@ fn parse_dic(
                 }
             }
         };
-        validate_morphology_alias_reference(
+        let morphology = decode_entry_morphology(
             source,
             index + 1,
-            fields.get(1).copied(),
-            morphology_alias_count,
+            &fields[1..],
+            morphology_aliases,
+            morphology_table,
             diagnostics,
         );
         entries.push(Lexeme {
             stem,
             flags: entry_flags,
+            morphology,
         });
     }
 
@@ -4117,35 +4177,67 @@ fn is_flag_alias_reference(value: &str, aliases: &[Option<BTreeSet<Flag>>]) -> b
     !aliases.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn validate_morphology_alias_reference(
+fn decode_entry_morphology(
     source: &str,
     line: usize,
-    value: Option<&str>,
-    alias_count: usize,
+    fields: &[&str],
+    aliases: &[Option<Morphology>],
+    table: &mut MorphologyTable,
     diagnostics: &mut Vec<Diagnostic>,
-) {
-    if alias_count == 0 {
-        return;
-    }
-    let Some(value) = value else {
-        return;
+) -> Morphology {
+    let Some((first, remaining)) = fields.split_first() else {
+        return Box::default();
     };
-    let Some(alias) = value
-        .parse::<usize>()
-        .ok()
-        .and_then(|value| value.checked_sub(1))
-    else {
-        return;
+    let mut morphology = if !aliases.is_empty() && first.bytes().all(|byte| byte.is_ascii_digit()) {
+        let alias = first
+            .parse::<usize>()
+            .ok()
+            .and_then(|value| value.checked_sub(1));
+        if let Some(fields) = alias
+            .and_then(|index| aliases.get(index))
+            .and_then(Option::as_ref)
+        {
+            fields.to_vec()
+        } else {
+            diagnostics.push(diagnostic(
+                source,
+                line,
+                "AM",
+                Severity::Warning,
+                "dictionary entry references an undefined AM morphology alias",
+            ));
+            Vec::new()
+        }
+    } else {
+        intern_morphology_fields(std::slice::from_ref(first), table).unwrap_or_else(|message| {
+            diagnostics.push(diagnostic(source, line, "entry", Severity::Error, message));
+            Vec::new()
+        })
     };
-    if alias >= alias_count {
-        diagnostics.push(diagnostic(
-            source,
-            line,
-            "AM",
-            Severity::Warning,
-            "dictionary entry references an undefined AM morphology alias",
-        ));
+    match intern_morphology_fields(remaining, table) {
+        Ok(fields) => morphology.extend(fields),
+        Err(message) => {
+            diagnostics.push(diagnostic(source, line, "entry", Severity::Error, message));
+        }
     }
+    morphology.into_boxed_slice()
+}
+
+fn intern_morphology_fields(
+    fields: &[&str],
+    table: &mut MorphologyTable,
+) -> Result<Vec<MorphologyId>, &'static str> {
+    if fields.len() > MAX_MORPHOLOGY_FIELDS_PER_RECORD {
+        return Err("morphology fields exceed the 256-field importer limit");
+    }
+    fields
+        .iter()
+        .map(|field| {
+            table
+                .intern(field)
+                .ok_or("morphology string count exceeds the 1,000,000 importer limit")
+        })
+        .collect()
 }
 
 fn decode_flags(value: &str, flag_mode: FlagMode) -> Option<BTreeSet<Flag>> {
@@ -4382,12 +4474,12 @@ mod tests {
     }
 
     #[test]
-    fn resolves_af_aliases_and_validates_am_references() {
+    fn retains_af_and_am_alias_metadata_through_the_runtime_cache() {
         let result = import(
             "aliases.aff",
             "AF 2\nAF AB\nAF C\nAM 2\nAM st:root\nAM st:other\nSFX B Y 1\nSFX B 0 s .\nSFX C Y 1\nSFX C 0 ed .\n",
             "aliases.dic",
-            "2\nroot/1 1\nother/2 2\n",
+            "2\nroot/1 1 po:noun\nother/2 2\n",
             ImportMode::Strict,
         )
         .expect("valid aliases import cleanly");
@@ -4395,6 +4487,29 @@ mod tests {
         assert!(result.dictionary().contains("roots"));
         assert!(result.dictionary().contains("othered"));
         assert!(result.diagnostics().is_empty());
+        assert_eq!(
+            result.dictionary().morphology.values_by_id(),
+            vec!["st:root", "st:other", "po:noun"]
+        );
+
+        let cache = compile_runtime_cache(
+            result.dictionary(),
+            SourceDigests::from_source_bytes(b"aliases.aff", b"aliases.dic"),
+        )
+        .expect("metadata-bearing dictionary serializes");
+        let loaded = load_runtime_cache(
+            &cache,
+            SourceDigests::from_source_bytes(b"aliases.aff", b"aliases.dic"),
+        )
+        .expect("metadata-bearing cache deserializes");
+        assert_eq!(
+            loaded.morphology.values_by_id(),
+            result.dictionary().morphology.values_by_id()
+        );
+        assert_eq!(
+            loaded.lexemes[0].morphology,
+            result.dictionary().lexemes[0].morphology
+        );
     }
 
     #[test]
@@ -5552,7 +5667,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_continuation_flags_and_reports_only_morphology_fields() {
+    fn retains_affix_morphology_alongside_continuation_flags() {
         let result = import(
             "test.aff",
             "SFX A N 1\nSFX A 0 s/B . DS:plural\n",
@@ -5560,13 +5675,15 @@ mod tests {
             "1\nword/A\n",
             ImportMode::Strict,
         )
-        .expect("unsupported additive metadata is only a warning");
+        .expect("affix metadata is retained");
 
         assert!(result.dictionary().contains("words"));
-        assert!(result
-            .diagnostics()
-            .iter()
-            .any(|item| item.message().contains("morphology fields")));
+        assert!(result.diagnostics().is_empty());
+        assert_eq!(
+            result.dictionary().morphology.values_by_id(),
+            vec!["DS:plural"]
+        );
+        assert_eq!(result.dictionary().suffixes[0].morphology.len(), 1);
     }
 
     #[test]

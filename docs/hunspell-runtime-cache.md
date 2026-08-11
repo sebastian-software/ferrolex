@@ -13,7 +13,7 @@ inputs.
 
 ## Validity contract
 
-Format version 1 uses the `FLXHSP\0\0` marker, little-endian fields, a payload
+The current format uses the `FLXHSP\0\0` marker, little-endian fields, a payload
 SHA-256 checksum, and SHA-256 fingerprints of both unmodified source files. It
 also records a Hunspell recognition-semantics version. Loading rejects an
 artifact when its format, semantics, source fingerprints, checksum, bounds, or
@@ -25,6 +25,21 @@ conditions; circumfix, forbidden-word, keep-case, and need-affix flags; and
 compound configuration. The derived stem index is rebuilt during load. No
 affix forms are pre-expanded, so the artifact does not turn a bounded lazy
 derivation into an unbounded cache build.
+
+It also preserves dictionary-entry and affix morphology as a private interned
+string table with compact references. Morphology has no public runtime API and
+does not change recognition, but retaining it makes the imported representation
+lossless for later analysis features without multiplying repeated tags in
+memory.
+
+### Measured footprint
+
+The pinned de_DE fixture has 258,219 dictionary entries and no morphology
+fields. On the 64-bit CI/runtime target, retaining the empty compact slice costs
+16 bytes per entry (about 3.94 MiB) and the cache's empty-field count costs four
+bytes per entry (about 0.99 MiB). There are no morphology-string allocations for
+that fixture. A populated field is stored once in the intern table and each use
+adds only its four-byte ID to the cache.
 
 `install` writes the cache only after a strict import succeeds. A failed strict
 import leaves the verified source cache available for diagnostics but does not
