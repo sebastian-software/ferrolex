@@ -43,6 +43,34 @@ pub struct SourceDigests {
     dic: [u8; CHECKSUM_BYTES],
 }
 
+/// Immutable identity and compatibility data stored in a runtime cache.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeCacheMetadata {
+    format_version: u16,
+    semantics_version: u32,
+    sources: SourceDigests,
+}
+
+impl RuntimeCacheMetadata {
+    /// Artifact layout version.
+    #[must_use]
+    pub const fn format_version(self) -> u16 {
+        self.format_version
+    }
+
+    /// Recognition-semantics version.
+    #[must_use]
+    pub const fn semantics_version(self) -> u32 {
+        self.semantics_version
+    }
+
+    /// Exact source-byte digests used to compile the artifact.
+    #[must_use]
+    pub const fn sources(self) -> SourceDigests {
+        self.sources
+    }
+}
+
 impl SourceDigests {
     /// Creates provenance from precomputed SHA-256 digests.
     #[must_use]
@@ -231,6 +259,40 @@ pub fn compile_runtime_cache(
     write_input_conversions(&mut output, &dictionary.input_conversions)?;
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
+}
+
+/// Reads self-describing metadata from a checksummed runtime cache.
+///
+/// This only establishes that the artifact header and checksum are intact; use
+/// [`load_runtime_cache`] to validate every serialized recognition field.
+///
+/// # Errors
+///
+/// Returns an error for an oversized, truncated, malformed, or checksum-invalid
+/// artifact.
+pub fn inspect_runtime_cache(bytes: &[u8]) -> Result<RuntimeCacheMetadata, RuntimeCacheError> {
+    if bytes.len() > MAX_RUNTIME_CACHE_BYTES {
+        return Err(RuntimeCacheError::ArtifactTooLarge);
+    }
+    if bytes.len() < HEADER_BYTES + CHECKSUM_BYTES {
+        return Err(RuntimeCacheError::InvalidArtifact("artifact is truncated"));
+    }
+    let checksum_at = bytes.len() - CHECKSUM_BYTES;
+    if Sha256::digest(&bytes[..checksum_at]).as_slice() != &bytes[checksum_at..] {
+        return Err(RuntimeCacheError::ChecksumMismatch);
+    }
+    let mut reader = Reader::new(&bytes[..checksum_at]);
+    if reader.take_array::<8>()? != MAGIC {
+        return Err(RuntimeCacheError::InvalidMagic);
+    }
+    Ok(RuntimeCacheMetadata {
+        format_version: reader.u16()?,
+        semantics_version: reader.u32()?,
+        sources: SourceDigests::new(
+            reader.take_array::<CHECKSUM_BYTES>()?,
+            reader.take_array::<CHECKSUM_BYTES>()?,
+        ),
+    })
 }
 
 /// Loads a fully validated Hunspell runtime cache for exact source provenance.
@@ -1190,8 +1252,9 @@ mod tests {
     use sha2::Digest as _;
 
     use super::{
-        compile_runtime_cache, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
-        HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+        compile_runtime_cache, inspect_runtime_cache, load_runtime_cache, CacheSource,
+        RuntimeCacheError, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
+        HUNSPELL_CACHE_SEMANTICS_VERSION,
     };
     use crate::{import, ImportMode};
 
@@ -1255,6 +1318,19 @@ mod tests {
         assert!(loaded.contains("fin-"));
         assert!(loaded.contains("worqd"));
         assert!(!loaded.contains("Teil"));
+    }
+
+    #[test]
+    fn inspection_exposes_artifact_provenance_without_loading_a_dictionary() {
+        let cache = compile_runtime_cache(&dictionary(), sources()).expect("cache compiles");
+        let metadata = inspect_runtime_cache(&cache).expect("metadata is readable");
+
+        assert_eq!(metadata.format_version(), HUNSPELL_CACHE_FORMAT_VERSION);
+        assert_eq!(
+            metadata.semantics_version(),
+            HUNSPELL_CACHE_SEMANTICS_VERSION
+        );
+        assert_eq!(metadata.sources(), sources());
     }
 
     #[test]

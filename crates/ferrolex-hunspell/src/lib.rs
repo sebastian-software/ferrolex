@@ -17,8 +17,9 @@ use ferrolex_core::Dictionary;
 use ferrolex_suggest::{CandidateSource, ReplacementRule};
 
 pub use cache::{
-    compile_runtime_cache, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
-    HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+    compile_runtime_cache, inspect_runtime_cache, load_runtime_cache, CacheSource,
+    RuntimeCacheError, RuntimeCacheMetadata, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
+    HUNSPELL_CACHE_SEMANTICS_VERSION,
 };
 
 const MAX_AFF_BYTES: usize = 32 * 1024 * 1024;
