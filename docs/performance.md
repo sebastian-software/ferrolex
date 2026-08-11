@@ -21,6 +21,11 @@ compare runs across machines or toolchains as if they were a single baseline.
 Neither command performs filesystem I/O, process startup measurement, memory
 measurement, nor a comparison with another spelling engine.
 
+The compiled format is deliberately mmap-ready, not mmap-backed today. Its
+loader reads a bounded byte slice and validates offsets without creating raw
+pointers. `cargo bench -p ferrolex-compiler --no-run` is the CI compilation
+gate for that benchmark; measurements remain an explicit local decision.
+
 ## Plain word-list lookup
 
 `cargo bench -p ferrolex-core` measures present and absent exact lookups over

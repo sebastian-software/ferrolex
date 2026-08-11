@@ -12,9 +12,10 @@ The corpus tests cover these boundaries:
   and dictionary entries without stems. Both parsing and representative lookup
   run inside the no-panic assertion.
 - Hunspell runtime caches: format and semantics versions, source-provenance
-  mismatches, checksums, counts, truncations, trailing payload bytes, and a
-  deterministic mutation corpus. A cache is constructed only after its full
-  structure is validated and never yields a partial dictionary.
+  mismatches, checksums, counts, truncations, trailing payload bytes, readable
+  header metadata, and a deterministic mutation corpus. A cache is constructed
+  only after its full structure is validated and never yields a partial
+  dictionary.
 - Compiled dictionaries: every truncation and single-byte mutation of a valid
   artifact, followed by a fixed seeded byte corpus. Each accepted artifact is
   then fully validated and queried.
@@ -27,6 +28,10 @@ coverage-guided fuzzing. They protect the current parser, loader, compound,
 and suggestion limits on every ordinary CI run. A future dedicated
 `cargo-fuzz` campaign can reuse these cases as seed inputs without changing
 the public crates or their MSRV.
+
+The regular CI license job checks that both root license texts are present and
+non-empty. Third-party dictionary sources are not bundled; their manifest and
+fixture entries keep license evidence separately from engine code.
 
 Run the focused suite with:
 
