@@ -58,6 +58,9 @@ suffix is also applied, and conversely. `NEEDAFFIX` rejects its bare stem but
 allows a valid derived form. `FORBIDDENWORD` rejects the complete lexeme and
 all forms derived from it, taking precedence over every positive rule.
 
-Recognition is exact UTF-8 matching. `KEEPCASE` is imported as an explicit
-marker, but has no additional transformation in this level: neither marked nor
-unmarked words receive implicit lower-, upper-, or title-case fallbacks.
+Recognition first checks exact UTF-8 matching. When an affix file declares
+`LANG`, initial-capital and all-uppercase input additionally receives the
+Hunspell capitalization fallback: lower- and initial-case candidates are
+checked without admitting `KEEPCASE` lexemes or forms derived from them.
+Turkish, Azeri, and Crimean Tatar apply their dotted/dotless-I casing; other
+language tags use Unicode default casing. Mixed-case input remains exact.

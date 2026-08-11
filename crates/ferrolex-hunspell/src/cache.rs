@@ -15,10 +15,11 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag, FlagMode,
-    HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
-    MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES,
-    MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
+    AffixKind, AffixRule, CaseLanguage, CompoundConfig, CompoundRule, Condition, ConditionAtom,
+    Flag, FlagMode, HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES,
+    MAX_BREAK_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS,
+    MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES,
+    MAX_REPLACEMENT_RULES,
 };
 use ferrolex_suggest::ReplacementRule;
 
@@ -34,7 +35,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 19;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 20;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -198,6 +199,8 @@ pub fn compile_runtime_cache(
     output.extend_from_slice(&sources.aff);
     output.extend_from_slice(&sources.dic);
     write_flag_mode(&mut output, dictionary.flag_mode);
+    output.push(u8::from(dictionary.case_fallback));
+    write_case_language(&mut output, dictionary.case_language);
     write_lexemes(&mut output, &dictionary.lexemes)?;
     write_rules(&mut output, &dictionary.prefixes)?;
     write_rules(&mut output, &dictionary.suffixes)?;
@@ -351,6 +354,8 @@ pub fn load_runtime_cache(
         return Err(RuntimeCacheError::SourceDigestMismatch(CacheSource::Dic));
     }
     let flag_mode = read_flag_mode(&mut reader)?;
+    let case_fallback = read_boolean(&mut reader, "invalid LANG fallback marker")?;
+    let case_language = read_case_language(&mut reader)?;
 
     let lexemes = read_lexemes(&mut reader, flag_mode)?;
     let prefixes = read_rules(&mut reader, AffixKind::Prefix, flag_mode)?;
@@ -453,6 +458,8 @@ pub fn load_runtime_cache(
         .collect();
     let dictionary = HunspellDictionary::from_parts(
         flag_mode,
+        case_fallback,
+        case_language,
         stems,
         lexemes,
         prefixes,
@@ -789,6 +796,13 @@ fn write_flag_mode(output: &mut Vec<u8>, flag_mode: FlagMode) {
     });
 }
 
+fn write_case_language(output: &mut Vec<u8>, case_language: CaseLanguage) {
+    output.push(match case_language {
+        CaseLanguage::Default => 0,
+        CaseLanguage::Turkic => 1,
+    });
+}
+
 fn write_condition(output: &mut Vec<u8>, condition: &Condition) -> Result<(), RuntimeCacheError> {
     output.push(u8::from(condition.anchored_at_start));
     match &condition.not_preceded_by {
@@ -899,6 +913,14 @@ fn read_flag_mode(reader: &mut Reader<'_>) -> Result<FlagMode, RuntimeCacheError
         1 => Ok(FlagMode::Long),
         2 => Ok(FlagMode::Numeric),
         _ => Err(RuntimeCacheError::InvalidArtifact("invalid FLAG mode")),
+    }
+}
+
+fn read_case_language(reader: &mut Reader<'_>) -> Result<CaseLanguage, RuntimeCacheError> {
+    match reader.byte()? {
+        0 => Ok(CaseLanguage::Default),
+        1 => Ok(CaseLanguage::Turkic),
+        _ => Err(RuntimeCacheError::InvalidArtifact("invalid LANG case mode")),
     }
 }
 
@@ -1409,6 +1431,23 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_preserves_lang_case_semantics() {
+        let aff = "LANG tr_TR\nKEEPCASE K\n";
+        let dic = "3\ni\nışık\nAnkara/K\n";
+        let original = import("lang.aff", aff, "lang.dic", dic, ImportMode::Strict)
+            .expect("LANG fixture imports")
+            .dictionary()
+            .clone();
+        let sources = SourceDigests::from_source_bytes(aff.as_bytes(), dic.as_bytes());
+        let cache = compile_runtime_cache(&original, sources).expect("cache compiles");
+        let loaded = load_runtime_cache(&cache, sources).expect("cache loads");
+
+        assert!(loaded.contains("İ"));
+        assert!(loaded.contains("IŞIK"));
+        assert!(!loaded.contains("ANKARA"));
+    }
+
+    #[test]
     fn compilation_is_deterministic_and_embeds_source_provenance() {
         let dictionary = dictionary();
         let first = compile_runtime_cache(&dictionary, sources()).expect("first cache compiles");
@@ -1482,7 +1521,7 @@ mod tests {
         );
 
         let mut excessive_entries = cache;
-        excessive_entries[79..83].copy_from_slice(&u32::MAX.to_le_bytes());
+        excessive_entries[81..85].copy_from_slice(&u32::MAX.to_le_bytes());
         rewrite_checksum(&mut excessive_entries);
         assert_eq!(
             load_runtime_cache(&excessive_entries, sources())

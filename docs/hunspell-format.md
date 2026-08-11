@@ -52,7 +52,7 @@ is an error for that entry, not a panic.
 
 ## Initial AFF subset
 
-The current compatibility level recognizes `SET`, `FLAG`, `AF`, `AM`, `ICONV`,
+The current compatibility level recognizes `SET`, `FLAG`, `LANG`, `AF`, `AM`, `ICONV`,
 `OCONV`, `IGNORE`, `PFX`, `SFX`, `FULLSTRIP`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
@@ -112,6 +112,13 @@ multi-scalar break patterns are strict errors rather than approximated.
 With `CHECKSHARPS`, a `KEEPCASE` stem containing `ß` additionally recognizes
 its all-uppercase spelling with `SS`. No other case fallback is implied, and
 an uppercase-sharp-S spelling is not accepted as that variant.
+
+`LANG` enables Hunspell-style capitalization fallback for initial-capital and
+all-uppercase lookup input. These fallbacks try lower- and initial-case forms,
+but never a `KEEPCASE` lexeme. Turkish (`tr`), Azeri (`az`), and Crimean Tatar
+(`crh`) use their dotted/dotless-I casing; every other language tag uses
+Unicode's default casing. Other language-specific Hunspell behavior is outside
+this compatibility level.
 
 `WORDCHARS` is retained as immutable tokenization metadata and is available
 from `HunspellDictionary::word_characters`. It does not alter

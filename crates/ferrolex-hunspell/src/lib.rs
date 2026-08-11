@@ -225,6 +225,8 @@ impl ImportResult {
 #[derive(Clone, Debug, Default)]
 pub struct HunspellDictionary {
     flag_mode: FlagMode,
+    case_fallback: bool,
+    case_language: CaseLanguage,
     stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
@@ -249,24 +251,29 @@ pub struct HunspellDictionary {
 impl Dictionary for HunspellDictionary {
     fn contains(&self, word: &str) -> bool {
         let word = self.normalize_input(word);
-        self.contains_normalized(word.as_ref())
+        self.contains_normalized(word.as_ref(), true)
+            || self
+                .case_folded_candidates(word.as_ref())
+                .into_iter()
+                .any(|candidate| self.contains_normalized(&candidate, false))
     }
 }
 
 impl HunspellDictionary {
-    fn contains_normalized(&self, word: &str) -> bool {
+    fn contains_normalized(&self, word: &str, allow_keep_case: bool) -> bool {
         self.stems.get(word).is_some_and(|flags| {
             !self.is_forbidden(flags)
                 && !self.requires_affix(flags)
                 && !self.is_only_in_compound(flags)
-        }) || self.matches_single_affix_word(word)
+                && (allow_keep_case || !self.is_keep_case(flags))
+        }) || self.matches_single_affix_word(word, allow_keep_case)
             || self
                 .derived_candidate_indices(word)
                 .into_iter()
-                .any(|index| self.matches_derived_word(&self.lexemes[index], word))
-            || self.matches_simple_compound(word)
-            || self.matches_break_word(word)
-            || self.sharp_uppercase_forms.contains(word)
+                .any(|index| self.matches_derived_word(&self.lexemes[index], word, allow_keep_case))
+            || self.matches_simple_compound(word, allow_keep_case)
+            || self.matches_break_word(word, allow_keep_case)
+            || (allow_keep_case && self.sharp_uppercase_forms.contains(word))
     }
 
     #[allow(
@@ -275,6 +282,8 @@ impl HunspellDictionary {
     )]
     fn from_parts(
         flag_mode: FlagMode,
+        case_fallback: bool,
+        case_language: CaseLanguage,
         stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
         lexemes: Vec<Lexeme>,
         prefixes: Vec<AffixRule>,
@@ -297,6 +306,8 @@ impl HunspellDictionary {
         let sharp_uppercase_forms = sharp_uppercase_forms(&stems, &special_flags);
         Self {
             flag_mode,
+            case_fallback,
+            case_language,
             stems,
             lexemes,
             prefixes,
@@ -364,14 +375,35 @@ impl HunspellDictionary {
         Cow::Owned(normalized)
     }
 
-    fn matches_single_affix_word(&self, word: &str) -> bool {
+    fn case_folded_candidates(&self, word: &str) -> Vec<String> {
+        if !self.case_fallback {
+            return Vec::new();
+        }
+        let lower = lowercase_for_language(word, self.case_language);
+        let candidates = match case_pattern(word, self.case_language) {
+            Some(CasePattern::Initial) => vec![lower],
+            Some(CasePattern::Upper) => {
+                vec![lower, initial_case_for_language(word, self.case_language)]
+            }
+            None => Vec::new(),
+        };
+        candidates
+            .into_iter()
+            .filter(|candidate| candidate != word)
+            .collect()
+    }
+
+    fn matches_single_affix_word(&self, word: &str, allow_keep_case: bool) -> bool {
         self.prefixes.iter().chain(&self.suffixes).any(|rule| {
             rule.could_generate(word)
                 && rule
                     .reverse_apply(word, self.full_strip)
                     .is_some_and(|stem| {
                         self.stems.get(stem.as_str()).is_some_and(|flags| {
-                            if self.is_forbidden(flags) || !flags.contains(&rule.flag) {
+                            if self.is_forbidden(flags)
+                                || !flags.contains(&rule.flag)
+                                || (!allow_keep_case && self.is_keep_case(flags))
+                            {
                                 return false;
                             }
                             let lexeme = Lexeme {
@@ -422,8 +454,10 @@ impl HunspellDictionary {
         }
     }
 
-    fn matches_derived_word(&self, lexeme: &Lexeme, word: &str) -> bool {
-        if self.is_forbidden(&lexeme.flags) {
+    fn matches_derived_word(&self, lexeme: &Lexeme, word: &str, allow_keep_case: bool) -> bool {
+        if self.is_forbidden(&lexeme.flags)
+            || (!allow_keep_case && self.is_keep_case(&lexeme.flags))
+        {
             return false;
         }
         let mut states = vec![FormState::new(lexeme)];
@@ -529,7 +563,14 @@ impl HunspellDictionary {
             .is_some_and(|flag| flags.contains(flag))
     }
 
-    fn matches_simple_compound(&self, word: &str) -> bool {
+    fn is_keep_case(&self, flags: &BTreeSet<Flag>) -> bool {
+        self.special_flags
+            .keep_case
+            .as_ref()
+            .is_some_and(|flag| flags.contains(flag))
+    }
+
+    fn matches_simple_compound(&self, word: &str, allow_keep_case: bool) -> bool {
         if self.compound.flag.is_none()
             && self.compound.rules.is_empty()
             && (self.compound.begin.is_none() || self.compound.end.is_none())
@@ -549,16 +590,19 @@ impl HunspellDictionary {
         }
         boundaries.push(word.len());
 
-        self.compound
-            .flag
-            .as_ref()
-            .is_some_and(|flag| self.matches_compound_pattern(word, &boundaries, None, Some(flag)))
-            || self.compound.rules.iter().any(|rule| {
-                rule.patterns.iter().any(|pattern| {
-                    self.matches_compound_pattern(word, &boundaries, Some(pattern), None)
-                })
+        self.compound.flag.as_ref().is_some_and(|flag| {
+            self.matches_compound_pattern(word, &boundaries, None, Some(flag), allow_keep_case)
+        }) || self.compound.rules.iter().any(|rule| {
+            rule.patterns.iter().any(|pattern| {
+                self.matches_compound_pattern(
+                    word,
+                    &boundaries,
+                    Some(pattern),
+                    None,
+                    allow_keep_case,
+                )
             })
-            || self.matches_positioned_compound(word, &boundaries)
+        }) || self.matches_positioned_compound(word, &boundaries, allow_keep_case)
     }
 
     fn matches_compound_pattern(
@@ -567,9 +611,10 @@ impl HunspellDictionary {
         boundaries: &[usize],
         pattern: Option<&[Flag]>,
         generic_flag: Option<&Flag>,
+        allow_keep_case: bool,
     ) -> bool {
         if let Some(pattern) = pattern {
-            return self.matches_fixed_compound_pattern(word, boundaries, pattern);
+            return self.matches_fixed_compound_pattern(word, boundaries, pattern, allow_keep_case);
         }
         let Some(flag) = generic_flag else {
             return false;
@@ -578,7 +623,13 @@ impl HunspellDictionary {
         let mut reachable = vec![false; boundaries.len()];
         reachable[0] = true;
         for component_count in 1..boundaries.len() {
-            let next = self.extend_compound_components(word, boundaries, &reachable, flag);
+            let next = self.extend_compound_components(
+                word,
+                boundaries,
+                &reachable,
+                flag,
+                allow_keep_case,
+            );
             if component_count >= 2 && next.last() == Some(&true) {
                 return true;
             }
@@ -592,6 +643,7 @@ impl HunspellDictionary {
         word: &str,
         boundaries: &[usize],
         pattern: &[Flag],
+        allow_keep_case: bool,
     ) -> bool {
         if pattern.len() < 2 {
             return false;
@@ -599,7 +651,13 @@ impl HunspellDictionary {
         let mut reachable = vec![false; boundaries.len()];
         reachable[0] = true;
         for flag in pattern {
-            let next = self.extend_compound_components(word, boundaries, &reachable, flag);
+            let next = self.extend_compound_components(
+                word,
+                boundaries,
+                &reachable,
+                flag,
+                allow_keep_case,
+            );
             if next.iter().all(|reachable| !reachable) {
                 return false;
             }
@@ -614,6 +672,7 @@ impl HunspellDictionary {
         boundaries: &[usize],
         reachable: &[bool],
         flag: &Flag,
+        allow_keep_case: bool,
     ) -> Vec<bool> {
         let mut next = vec![false; boundaries.len()];
         for start in 0..boundaries.len().saturating_sub(1) {
@@ -623,7 +682,7 @@ impl HunspellDictionary {
             let first_end = start.saturating_add(self.compound.minimum_length);
             for end in first_end..boundaries.len() {
                 let candidate = &word[boundaries[start]..boundaries[end]];
-                if self.matches_compound_component(candidate, flag) {
+                if self.matches_compound_component(candidate, flag, allow_keep_case) {
                     next[end] = true;
                 }
             }
@@ -631,13 +690,25 @@ impl HunspellDictionary {
         next
     }
 
-    fn matches_compound_component(&self, word: &str, required_flag: &Flag) -> bool {
-        self.stems
-            .get(word)
-            .is_some_and(|flags| !self.is_forbidden(flags) && flags.contains(required_flag))
+    fn matches_compound_component(
+        &self,
+        word: &str,
+        required_flag: &Flag,
+        allow_keep_case: bool,
+    ) -> bool {
+        self.stems.get(word).is_some_and(|flags| {
+            !self.is_forbidden(flags)
+                && flags.contains(required_flag)
+                && (allow_keep_case || !self.is_keep_case(flags))
+        })
     }
 
-    fn matches_positioned_compound(&self, word: &str, boundaries: &[usize]) -> bool {
+    fn matches_positioned_compound(
+        &self,
+        word: &str,
+        boundaries: &[usize],
+        allow_keep_case: bool,
+    ) -> bool {
         let (Some(begin), Some(end)) = (&self.compound.begin, &self.compound.end) else {
             return false;
         };
@@ -649,6 +720,7 @@ impl HunspellDictionary {
             &reachable,
             begin,
             CompoundPosition::Begin,
+            allow_keep_case,
         );
         for _ in 2..boundaries.len() {
             let terminal = self.extend_positioned_components(
@@ -657,6 +729,7 @@ impl HunspellDictionary {
                 &reachable,
                 end,
                 CompoundPosition::End,
+                allow_keep_case,
             );
             if terminal.last() == Some(&true) {
                 return true;
@@ -670,6 +743,7 @@ impl HunspellDictionary {
                 &reachable,
                 middle,
                 CompoundPosition::Middle,
+                allow_keep_case,
             );
         }
         false
@@ -682,6 +756,7 @@ impl HunspellDictionary {
         reachable: &[bool],
         position_flag: &Flag,
         position: CompoundPosition,
+        allow_keep_case: bool,
     ) -> Vec<bool> {
         let mut next = vec![false; boundaries.len()];
         for start in 0..boundaries.len().saturating_sub(1) {
@@ -691,7 +766,12 @@ impl HunspellDictionary {
             let first_end = start.saturating_add(self.compound.minimum_length);
             for end in first_end..boundaries.len() {
                 let candidate = &word[boundaries[start]..boundaries[end]];
-                if self.matches_positioned_component(candidate, position_flag, position) {
+                if self.matches_positioned_component(
+                    candidate,
+                    position_flag,
+                    position,
+                    allow_keep_case,
+                ) {
                     next[end] = true;
                 }
             }
@@ -704,16 +784,23 @@ impl HunspellDictionary {
         word: &str,
         position_flag: &Flag,
         position: CompoundPosition,
+        allow_keep_case: bool,
     ) -> bool {
         self.stems.get(word).is_some_and(|flags| {
             !self.is_forbidden(flags)
+                && (allow_keep_case || !self.is_keep_case(flags))
                 && (flags.contains(position_flag)
                     || self
                         .compound
                         .flag
                         .as_ref()
                         .is_some_and(|flag| flags.contains(flag)))
-        }) || self.matches_one_affix_compound_component(word, position_flag, position)
+        }) || self.matches_one_affix_compound_component(
+            word,
+            position_flag,
+            position,
+            allow_keep_case,
+        )
     }
 
     fn matches_one_affix_compound_component(
@@ -721,6 +808,7 @@ impl HunspellDictionary {
         word: &str,
         position_flag: &Flag,
         position: CompoundPosition,
+        allow_keep_case: bool,
     ) -> bool {
         self.prefixes
             .iter()
@@ -731,6 +819,7 @@ impl HunspellDictionary {
                     .is_some_and(|stem| {
                         self.stems.get(stem.as_str()).is_some_and(|flags| {
                             !self.is_forbidden(flags)
+                                && (allow_keep_case || !self.is_keep_case(flags))
                                 && flags.contains(&rule.flag)
                                 && (flags.contains(position_flag)
                                     || self
@@ -743,7 +832,7 @@ impl HunspellDictionary {
             })
     }
 
-    fn matches_break_word(&self, word: &str) -> bool {
+    fn matches_break_word(&self, word: &str, allow_keep_case: bool) -> bool {
         if self.break_characters.is_empty() || word.chars().count() > MAX_COMPOUND_SCALARS {
             return false;
         }
@@ -757,11 +846,11 @@ impl HunspellDictionary {
         let mut had_break = false;
         for part in parts {
             had_break = true;
-            if part.is_empty() || !self.contains_normalized(part) {
+            if part.is_empty() || !self.contains_normalized(part, allow_keep_case) {
                 return false;
             }
         }
-        had_break && self.contains_normalized(first)
+        had_break && self.contains_normalized(first, allow_keep_case)
     }
 }
 
@@ -856,6 +945,106 @@ enum FlagMode {
     Unicode,
     Long,
     Numeric,
+}
+
+/// Language-specific casing used by Hunspell's capitalization fallback.
+///
+/// Hunspell distinguishes Turkish, Azeri, and Crimean Tatar for dotted and
+/// dotless `I`; every other `LANG` value uses Unicode's default casing.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum CaseLanguage {
+    #[default]
+    Default,
+    Turkic,
+}
+
+impl CaseLanguage {
+    fn from_lang(value: &str) -> Self {
+        match value
+            .split(['_', '-'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "az" | "crh" | "tr" => Self::Turkic,
+            _ => Self::Default,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CasePattern {
+    Initial,
+    Upper,
+}
+
+fn case_pattern(word: &str, language: CaseLanguage) -> Option<CasePattern> {
+    let mut cased = word
+        .chars()
+        .filter(|character| is_cased(*character, language));
+    let first = cased.next()?;
+    if is_uppercase(first, language) && cased.all(|character| is_uppercase(character, language)) {
+        return Some(CasePattern::Upper);
+    }
+    if is_uppercase(first, language) && cased.all(|character| is_lowercase(character, language)) {
+        return Some(CasePattern::Initial);
+    }
+    None
+}
+
+fn is_cased(character: char, language: CaseLanguage) -> bool {
+    lowercase_character(character, language) != uppercase_character(character, language)
+}
+
+fn is_uppercase(character: char, language: CaseLanguage) -> bool {
+    character.to_string() != lowercase_character(character, language)
+}
+
+fn is_lowercase(character: char, language: CaseLanguage) -> bool {
+    character.to_string() != uppercase_character(character, language)
+}
+
+fn lowercase_for_language(word: &str, language: CaseLanguage) -> String {
+    let mut result = String::with_capacity(word.len());
+    for character in word.chars() {
+        result.push_str(&lowercase_character(character, language));
+    }
+    result
+}
+
+fn initial_case_for_language(word: &str, language: CaseLanguage) -> String {
+    let Some((index, first)) = word.char_indices().next() else {
+        return String::new();
+    };
+    let mut result = uppercase_character(first, language);
+    result.push_str(&lowercase_for_language(
+        &word[index + first.len_utf8()..],
+        language,
+    ));
+    result
+}
+
+fn lowercase_character(character: char, language: CaseLanguage) -> String {
+    if language == CaseLanguage::Turkic {
+        match character {
+            'I' => return "ı".to_owned(),
+            'İ' => return "i".to_owned(),
+            _ => {}
+        }
+    }
+    character.to_lowercase().collect()
+}
+
+fn uppercase_character(character: char, language: CaseLanguage) -> String {
+    if language == CaseLanguage::Turkic {
+        match character {
+            'i' => return "İ".to_owned(),
+            'ı' => return "I".to_owned(),
+            _ => {}
+        }
+    }
+    character.to_uppercase().collect()
 }
 
 #[derive(Clone, Debug)]
@@ -1310,6 +1499,8 @@ fn import_decoded(
         .collect();
     let dictionary = HunspellDictionary::from_parts(
         parsed_aff.flag_mode,
+        parsed_aff.has_language,
+        parsed_aff.case_language,
         stems,
         lexemes,
         parsed_aff.prefixes,
@@ -1470,6 +1661,8 @@ fn byte_line_number(bytes: &[u8], byte_index: usize) -> usize {
 struct ParsedAff {
     flag_mode: FlagMode,
     has_flag_mode: bool,
+    case_language: CaseLanguage,
+    has_language: bool,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
     diagnostics: Vec<Diagnostic>,
@@ -1527,6 +1720,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
         match directive {
             "SET" => parse_set(source, line_number, &fields, &mut parsed.diagnostics),
             "FLAG" => parse_flag_mode(source, line_number, &fields, &mut parsed),
+            "LANG" => parse_language(source, line_number, &fields, &mut parsed),
             "CIRCUMFIX" => parse_special_flag(
                 source,
                 line_number,
@@ -2277,6 +2471,29 @@ fn parse_flag_mode(source: &str, line: usize, fields: &[&str], parsed: &mut Pars
             Severity::Error,
             "FLAG must name UTF-8, UTF8, long, or num",
         ));
+    }
+}
+
+fn parse_language(source: &str, line: usize, fields: &[&str], parsed: &mut ParsedAff) {
+    if fields.len() != 2 || fields[1].is_empty() {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line,
+            "LANG",
+            Severity::Error,
+            "LANG requires exactly one language code",
+        ));
+    } else if parsed.has_language {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line,
+            "LANG",
+            Severity::Error,
+            "LANG may only be declared once",
+        ));
+    } else {
+        parsed.case_language = CaseLanguage::from_lang(fields[1]);
+        parsed.has_language = true;
     }
 }
 
@@ -4042,6 +4259,48 @@ mod tests {
         assert!(dictionary.contains("STRASSE"));
         assert!(!dictionary.contains("STRAẞE"));
         assert!(!dictionary.contains("MASSE"));
+    }
+
+    #[test]
+    fn lang_applies_hunspell_capitalization_fallbacks_and_turkic_i_casing() {
+        let imported = import(
+            "test.aff",
+            "LANG tr_TR\nKEEPCASE K\n",
+            "test.dic",
+            "3\ni\nışık\nAnkara/K\n",
+            ImportMode::Strict,
+        )
+        .expect("LANG imports");
+
+        let dictionary = imported.dictionary();
+        assert!(dictionary.contains("İ"));
+        assert!(dictionary.contains("IŞIK"));
+        assert!(dictionary.contains("Ankara"));
+        assert!(!dictionary.contains("ANKARA"));
+    }
+
+    #[test]
+    fn lang_uses_default_unicode_casing_outside_turkic_languages() {
+        let imported = import(
+            "test.aff",
+            "LANG pt_PT\n",
+            "test.dic",
+            "2\nword\nışık\n",
+            ImportMode::Strict,
+        )
+        .expect("LANG imports");
+
+        let dictionary = imported.dictionary();
+        assert!(dictionary.contains("WORD"));
+        assert!(!dictionary.contains("IŞIK"));
+    }
+
+    #[test]
+    fn capitalization_fallback_requires_lang() {
+        let imported = import("test.aff", "", "test.dic", "1\nword\n", ImportMode::Strict)
+            .expect("dictionary imports");
+
+        assert!(!imported.dictionary().contains("WORD"));
     }
 
     #[test]
