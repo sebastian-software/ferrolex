@@ -1,6 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ferrolex_compiler::{compile_words, CompiledDictionary};
 use ferrolex_core::{Dictionary, Normalization, WordList};
+use fst::{Set, SetBuilder};
 
 /// A deterministic UTF-8 corpus used by every benchmark lane in this file.
 ///
@@ -23,15 +24,31 @@ fn plain_text(words: &[String]) -> String {
     text
 }
 
+/// Builds a minimal finite-state set from the same byte-sorted corpus.
+///
+/// This is an evaluation candidate only. It is intentionally kept in the
+/// benchmark so a production dependency is not adopted without a reproducible
+/// result at dictionary scale.
+fn finite_state_set(words: &[String]) -> Set<Vec<u8>> {
+    let mut sorted = words.iter().map(String::as_str).collect::<Vec<_>>();
+    sorted.sort_unstable();
+    let mut builder = SetBuilder::memory();
+    for word in sorted {
+        builder.insert(word).expect("generated words are ordered");
+    }
+    Set::new(builder.into_inner().expect("the set serializes")).expect("the generated set is valid")
+}
+
 fn lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("exact lookup parity");
 
-    for size in [1_000_usize, 10_000, 100_000] {
+    for size in [1_000_usize, 10_000, 100_000, 250_000] {
         let entries = words(size);
         let word_list = WordList::new(&entries).expect("generated entries are valid");
         let compiled =
             CompiledDictionary::load(compile_words(&entries).expect("generated entries compile"))
                 .expect("generated artifact loads");
+        let finite_state = finite_state_set(&entries);
         let present = entries[size / 2].clone();
         let absent = format!("missing{size:06}");
 
@@ -39,6 +56,11 @@ fn lookup(c: &mut Criterion) {
             assert_eq!(
                 word_list.contains(query),
                 compiled.contains(query),
+                "benchmark candidates must preserve exact lookup semantics"
+            );
+            assert_eq!(
+                word_list.contains(query),
+                finite_state.contains(query),
                 "benchmark candidates must preserve exact lookup semantics"
             );
         }
@@ -59,6 +81,13 @@ fn lookup(c: &mut Criterion) {
             },
         );
         group.bench_with_input(
+            BenchmarkId::new("fst/present", size),
+            &finite_state,
+            |bench, dictionary| {
+                bench.iter(|| dictionary.contains(black_box(&present)));
+            },
+        );
+        group.bench_with_input(
             BenchmarkId::new("word-list/absent", size),
             &word_list,
             |bench, dictionary| {
@@ -72,6 +101,13 @@ fn lookup(c: &mut Criterion) {
                 bench.iter(|| dictionary.contains(black_box(&absent)));
             },
         );
+        group.bench_with_input(
+            BenchmarkId::new("fst/absent", size),
+            &finite_state,
+            |bench, dictionary| {
+                bench.iter(|| dictionary.contains(black_box(&absent)));
+            },
+        );
     }
 
     group.finish();
@@ -80,7 +116,7 @@ fn lookup(c: &mut Criterion) {
 fn loading(c: &mut Criterion) {
     let mut group = c.benchmark_group("in-memory artifact loading");
 
-    for size in [1_000_usize, 10_000, 100_000] {
+    for size in [1_000_usize, 10_000, 100_000, 250_000] {
         let entries = words(size);
         let text = plain_text(&entries);
         let bytes = compile_words(&entries).expect("generated entries compile");
