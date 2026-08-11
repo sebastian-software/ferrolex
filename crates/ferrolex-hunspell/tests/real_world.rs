@@ -283,7 +283,10 @@ fn write_scorecard(
             .iter()
             .map(|word| format!("{word}ferrolexcompat")),
     );
-    let corpus = corpus.into_iter().collect::<Vec<_>>();
+    let corpus = corpus
+        .into_iter()
+        .filter(|word| is_hunspell_input(word))
+        .collect::<Vec<_>>();
     let oracle_decisions = hunspell_decisions(aff_path, &corpus);
     let agreements = corpus
         .iter()
@@ -368,11 +371,26 @@ fn parse_hunspell_output(output: &str, expected: usize) -> Vec<bool> {
     decisions
 }
 
+fn is_hunspell_input(word: &str) -> bool {
+    !matches!(
+        word.as_bytes().first(),
+        None | Some(b'#' | b'!' | b'@' | b'?' | b'^')
+    )
+}
+
 #[test]
 fn hunspell_oracle_output_ignores_separator_lines() {
     let output = "@(#) International Ispell Version\n*\n\n& misspelled 1 0: suggested\n\n";
 
     assert_eq!(parse_hunspell_output(output, 2), vec![true, false]);
+}
+
+#[test]
+fn hunspell_oracle_skips_protocol_control_words() {
+    for word in ["# comment", "!command", "@command", "?query", "^query", ""] {
+        assert!(!is_hunspell_input(word));
+    }
+    assert!(is_hunspell_input("ferrolex"));
 }
 
 fn read_verified_fixture(root: &Path, fixture: &Fixture) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {
