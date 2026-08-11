@@ -549,7 +549,9 @@ impl HunspellDictionary {
             .as_ref()
             .is_some_and(|flag| self.matches_compound_pattern(word, &boundaries, None, Some(flag)))
             || self.compound.rules.iter().any(|rule| {
-                self.matches_compound_pattern(word, &boundaries, Some(&rule.flags), None)
+                rule.patterns.iter().any(|pattern| {
+                    self.matches_compound_pattern(word, &boundaries, Some(pattern), None)
+                })
             })
             || self.matches_positioned_compound(word, &boundaries)
     }
@@ -1044,7 +1046,7 @@ impl Default for CompoundConfig {
 
 #[derive(Clone, Debug)]
 struct CompoundRule {
-    flags: Vec<Flag>,
+    patterns: Vec<Vec<Flag>>,
 }
 
 #[derive(Clone, Debug)]
@@ -2287,26 +2289,69 @@ fn parse_compound_rules(
         let line = line.trim();
         let rule_fields = aff_fields(line);
         let pattern = rule_fields.get(1).copied().unwrap_or_default();
-        let flags = decode_flag_sequence(pattern, parsed.flag_mode);
-        if rule_fields.len() != 2
-            || rule_fields[0] != "COMPOUNDRULE"
-            || pattern.chars().any(|flag| matches!(flag, '*' | '+' | '?'))
-            || flags.is_none()
-            || !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.as_ref().map_or(0, Vec::len))
-        {
+        let patterns = parse_compound_rule_patterns(pattern, parsed.flag_mode);
+        if rule_fields.len() != 2 || rule_fields[0] != "COMPOUNDRULE" || patterns.is_none() {
             parsed.diagnostics.push(diagnostic(
                 source,
                 index + 1,
                 "COMPOUNDRULE",
                 Severity::Error,
-                "only 2–16 literal component flags are supported",
+                "compound rules require bounded literal flags with optional postfix `*`, `+`, or `?`",
             ));
             continue;
         }
         parsed.compound.rules.push(CompoundRule {
-            flags: flags.expect("validated above"),
+            patterns: patterns.expect("validated above"),
         });
     }
+}
+
+fn parse_compound_rule_patterns(pattern: &str, flag_mode: FlagMode) -> Option<Vec<Vec<Flag>>> {
+    if flag_mode != FlagMode::Unicode {
+        return decode_flag_sequence(pattern, flag_mode)
+            .filter(|flags| (2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len()))
+            .map(|flags| vec![flags]);
+    }
+    let characters = pattern.chars().collect::<Vec<_>>();
+    let mut parts = Vec::new();
+    let mut index = 0;
+    while index < characters.len() {
+        let character = characters[index];
+        if matches!(character, '*' | '+' | '?') {
+            return None;
+        }
+        index += 1;
+        let (minimum, maximum) = match characters.get(index) {
+            Some('*') => {
+                index += 1;
+                (0, MAX_COMPOUND_RULE_COMPONENTS)
+            }
+            Some('+') => {
+                index += 1;
+                (1, MAX_COMPOUND_RULE_COMPONENTS)
+            }
+            Some('?') => {
+                index += 1;
+                (0, 1)
+            }
+            _ => (1, 1),
+        };
+        parts.push((Flag(Box::from(character.to_string())), minimum, maximum));
+    }
+    let mut patterns = vec![Vec::new()];
+    for (flag, minimum, maximum) in parts {
+        let mut expanded = Vec::new();
+        for prefix in patterns {
+            for count in minimum..=maximum.min(MAX_COMPOUND_RULE_COMPONENTS - prefix.len()) {
+                let mut next = prefix.clone();
+                next.extend(std::iter::repeat(flag.clone()).take(count));
+                expanded.push(next);
+            }
+        }
+        patterns = expanded;
+    }
+    patterns.retain(|flags| (2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len()));
+    (!patterns.is_empty()).then_some(patterns)
 }
 
 fn parse_break_patterns(
@@ -3771,20 +3816,17 @@ mod tests {
     }
 
     #[test]
-    fn compound_rule_quantifiers_remain_explicit_strict_errors() {
-        let error = import(
+    fn compound_rule_quantifiers_expand_with_a_bounded_component_limit() {
+        let result = import(
             "test.aff",
-            "COMPOUNDRULE 1\nCOMPOUNDRULE A*B\n",
+            "COMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE A*B\n",
             "test.dic",
             "2\na/A\nb/B\n",
             ImportMode::Strict,
         )
-        .expect_err("quantifier syntax is not silently approximated");
+        .expect("bounded quantifier syntax imports");
 
-        assert!(error
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.directive() == "COMPOUNDRULE"));
+        assert!(result.dictionary().contains("aab"));
     }
 
     #[test]

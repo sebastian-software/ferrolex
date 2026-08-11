@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 16;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 17;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -224,11 +224,14 @@ pub fn compile_runtime_cache(
     for rule in &dictionary.compound.rules {
         write_count(
             &mut output,
-            rule.flags.len(),
-            "compound rule component count",
+            rule.patterns.len(),
+            "compound rule expansion count",
         )?;
-        for flag in &rule.flags {
-            write_flag(&mut output, flag)?;
+        for pattern in &rule.patterns {
+            write_count(&mut output, pattern.len(), "compound rule component count")?;
+            for flag in pattern {
+                write_flag(&mut output, flag)?;
+            }
         }
     }
     write_count(
@@ -361,21 +364,30 @@ pub fn load_runtime_cache(
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
     let mut rules = Vec::with_capacity(rule_count);
     for _ in 0..rule_count {
-        let component_count = reader.count(
-            MAX_COMPOUND_RULE_COMPONENTS,
-            "compound rule component count",
-        )?;
-        if component_count < 2 {
+        let expansion_count = reader.count(MAX_COMPOUND_RULES, "compound rule expansion count")?;
+        if expansion_count == 0 {
             return Err(RuntimeCacheError::InvalidArtifact(
-                "compound rule has fewer than two components",
+                "compound rule has no expansions",
             ));
         }
-        reader.require_minimum_items(component_count, 5, "compound rule components")?;
-        let mut flags = Vec::with_capacity(component_count);
-        for _ in 0..component_count {
-            flags.push(reader.flag(flag_mode)?);
+        let mut patterns = Vec::with_capacity(expansion_count);
+        for _ in 0..expansion_count {
+            let component_count = reader.count(
+                MAX_COMPOUND_RULE_COMPONENTS,
+                "compound rule component count",
+            )?;
+            if component_count < 2 {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "compound rule has fewer than two components",
+                ));
+            }
+            let mut flags = Vec::with_capacity(component_count);
+            for _ in 0..component_count {
+                flags.push(reader.flag(flag_mode)?);
+            }
+            patterns.push(flags);
         }
-        rules.push(CompoundRule { flags });
+        rules.push(CompoundRule { patterns });
     }
     let break_count = reader.count(MAX_BREAK_PATTERNS, "break character count")?;
     reader.require_minimum_items(break_count, 4, "break characters")?;
@@ -577,11 +589,16 @@ fn validate_dictionary(
         return Err(error.error("compound rule count exceeds importer limit"));
     }
     for rule in &dictionary.compound.rules {
-        if !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&rule.flags.len()) {
-            return Err(error.error("compound rule has an invalid component count"));
+        if rule.patterns.is_empty() || rule.patterns.len() > MAX_COMPOUND_RULES {
+            return Err(error.error("compound rule has an invalid expansion count"));
         }
-        for flag in &rule.flags {
-            validate_flag(flag, dictionary.flag_mode, error)?;
+        for pattern in &rule.patterns {
+            if !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&pattern.len()) {
+                return Err(error.error("compound rule has an invalid component count"));
+            }
+            for flag in pattern {
+                validate_flag(flag, dictionary.flag_mode, error)?;
+            }
         }
     }
     if dictionary.break_characters.len() > MAX_BREAK_PATTERNS {
