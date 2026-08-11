@@ -102,3 +102,33 @@ Urdu is also absent, for a different reason: the pinned LibreOffice collection
 has no Urdu Hunspell pair. It must not be silently substituted with a different
 source; adding it requires its own provenance, license, encoding, and
 compatibility review.
+
+
+## Recognition scorecard
+
+The optional external Hunspell oracle produces a per-locale accept/reject
+scorecard. Reproduce it with:
+
+```sh
+scripts/fetch-compat-fixtures.sh /tmp/ferrolex-compat-fixtures
+FERROLEX_COMPAT_FIXTURES=/tmp/ferrolex-compat-fixtures \
+FERROLEX_COMPAT_ORACLE=hunspell \
+FERROLEX_COMPAT_SCORECARD=/tmp/recognition-scorecard.tsv \
+  cargo test -p ferrolex-hunspell --test real_world -- --nocapture
+```
+
+The CI baseline from [run 31487827770](https://github.com/sebastian-software/ferrolex/actions/runs/31487827770)
+is recorded in the `recognition-scorecard` artifact.
+
+| Locale | Status | Corpus | Agreement | Disagreement |
+| --- | --- | ---: | ---: | ---: |
+| `en_US` | measured | 137 | 137 | 0 |
+| `de_DE` | measured | 135 | 135 | 0 |
+| `fr_FR` | measured | 135 | 135 | 0 |
+| `nl_NL` | measured | 135 | 61 | 74 |
+| `hu_HU` | blocked (non-UTF-8 AFF) | 0 | 0 | 0 |
+| `ar` | measured | 133 | 133 | 0 |
+| `tr_TR` | measured | 132 | 132 | 0 |
+
+The `nl_NL` disagreement is a triage item, not a supported-parity claim.
+Every CI run uploads its current TSV; blocked sources remain visible.
