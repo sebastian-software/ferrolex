@@ -16,6 +16,25 @@ claims.
 The project is in its initial development phase. The current public API and
 CLI are intentionally small and may change before a stable release.
 
+### Reviewed dictionary compatibility
+
+This concise status is generated from the digest-pinned real-world fixture
+catalog. CI verifies it on every pull request, push, and weekly compatibility
+run. The [full locale matrix](docs/locale-compatibility.md) records boundaries
+and the oracle scorecard artifact contains the current differential evidence.
+
+<!-- compat-status:start -->
+| Locale | Import gate | Checked recognition probes |
+| --- | --- | --- |
+| `en_US` | strict fixture | color, Color, COLOR, colors, 21st |
+| `de_DE` | strict fixture | Haus, Häusern, Haus-Wand, Häuser, HÄUSER |
+| `fr_FR` | lenient fixture | bonjour, Bonjour, BONJOUR |
+| `nl_NL` | lenient fixture | huis, Huis, HUIS |
+| `hu_HU` | lenient fixture | szó, ház, házban, házszó |
+| `ar` | strict fixture | بيد, وبيد |
+| `tr_TR` | lenient fixture | a, A, A |
+<!-- compat-status:end -->
+
 ## Try it
 
 Create a UTF-8 plain-word-list file with one word per line, then check either

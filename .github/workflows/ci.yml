@@ -42,6 +42,7 @@ jobs:
           toolchain: 1.81
       - run: sudo apt-get update && sudo apt-get install --yes hunspell
       - run: scripts/fetch-compat-fixtures.sh "$RUNNER_TEMP/ferrolex-compat-fixtures"
+      - run: scripts/generate-readme-compat-status.sh --check
       - run: >-
           FERROLEX_COMPAT_FIXTURES="$RUNNER_TEMP/ferrolex-compat-fixtures"
           FERROLEX_COMPAT_ORACLE=hunspell
