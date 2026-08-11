@@ -20,19 +20,28 @@ CLI are intentionally small and may change before a stable release.
 
 This concise status is generated from the digest-pinned real-world fixture
 catalog. CI verifies it on every pull request, push, and weekly compatibility
-run. The [full locale matrix](docs/locale-compatibility.md) records boundaries
-and the oracle scorecard artifact contains the current differential evidence.
+run.
+
+- ✅ **Ready for the tested core**: the exact pinned dictionary imports without
+  recognition errors and its reviewed word forms work.
+- 🟡 **In progress**: reviewed common words work, but known dictionary features
+  still have gaps.
+- 🔴 **Blocked**: ferrolex cannot reliably import that exact dictionary yet.
+
+This is deliberately not a “100% Hunspell compatible” claim. The [full locale
+matrix](docs/locale-compatibility.md) records the boundaries, and the oracle
+scorecard artifact contains the current differential evidence.
 
 <!-- compat-status:start -->
-| Locale | Import gate | Checked recognition probes |
+| Dictionary locale | Status | What this means |
 | --- | --- | --- |
-| `en_US` | strict fixture | color, Color, COLOR, colors, 21st |
-| `de_DE` | strict fixture | Haus, Häusern, Haus-Wand, Häuser, HÄUSER |
-| `fr_FR` | lenient fixture | bonjour, Bonjour, BONJOUR |
-| `nl_NL` | lenient fixture | huis, Huis, HUIS |
-| `hu_HU` | lenient fixture | szó, ház, házban, házszó |
-| `ar` | strict fixture | بيد, وبيد |
-| `tr_TR` | lenient fixture | a, A, A |
+| `en_US` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
+| `de_DE` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
+| `fr_FR` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
+| `nl_NL` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
+| `hu_HU` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
+| `ar` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
+| `tr_TR` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
 <!-- compat-status:end -->
 
 ## Try it

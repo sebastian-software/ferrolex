@@ -11,16 +11,22 @@ end='<!-- compat-status:end -->'
 status_table=$(
   awk -F '\t' '
     BEGIN {
-      print "| Locale | Import gate | Checked recognition probes |"
+      print "| Dictionary locale | Status | What this means |"
       print "| --- | --- | --- |"
     }
     /^#/ { next }
     {
-      gate = $11 == "strict" ? "strict fixture" : $11 == "lenient" ? "lenient fixture" : "blocked"
-      probes = $12
-      gsub(/;[^=]+=/, ", ", probes)
-      sub(/^[^=]+=*/, "", probes)
-      print "| `" $2 "` | " gate " | " probes " |"
+      if ($11 == "strict") {
+        status = "✅ Ready for the tested core"
+        meaning = "The pinned dictionary imports strictly and its reviewed word forms work."
+      } else if ($11 == "lenient") {
+        status = "🟡 In progress"
+        meaning = "Common reviewed words work, but known dictionary features still need support."
+      } else {
+        status = "🔴 Blocked"
+        meaning = "This exact dictionary cannot yet be imported reliably."
+      }
+      print "| `" $2 "` | " status " | " meaning " |"
     }
   ' "$manifest"
 )
