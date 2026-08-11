@@ -17,7 +17,8 @@ use sha2::{Digest as _, Sha256};
 use super::{
     AffixKind, AffixRule, CaseLanguage, CompoundConfig, CompoundRule, Condition, ConditionAtom,
     Flag, FlagMode, HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES,
-    MAX_BREAK_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS,
+    MAX_BREAK_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
+    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_CONDITION_ATOMS,
     MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES,
     MAX_REPLACEMENT_RULES,
 };
@@ -35,7 +36,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 20;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 21;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -370,11 +371,21 @@ pub fn load_runtime_cache(
         .map_err(|_| RuntimeCacheError::InvalidArtifact("compound minimum is too large"))?;
     let rule_count = reader.count(MAX_COMPOUND_RULES, "compound rule count")?;
     let mut rules = Vec::with_capacity(rule_count);
+    let mut compound_expansion_count = 0;
     for _ in 0..rule_count {
-        let expansion_count = reader.count(MAX_COMPOUND_RULES, "compound rule expansion count")?;
+        let expansion_count = reader.count(
+            MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE,
+            "compound rule expansion count",
+        )?;
         if expansion_count == 0 {
             return Err(RuntimeCacheError::InvalidArtifact(
                 "compound rule has no expansions",
+            ));
+        }
+        compound_expansion_count += expansion_count;
+        if compound_expansion_count > MAX_COMPOUND_RULE_EXPANSIONS {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "compound rules exceed the expansion limit",
             ));
         }
         let mut patterns = Vec::with_capacity(expansion_count);
@@ -452,15 +463,10 @@ pub fn load_runtime_cache(
         ));
     }
 
-    let stems = lexemes
-        .iter()
-        .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
-        .collect();
     let dictionary = HunspellDictionary::from_parts(
         flag_mode,
         case_fallback,
         case_language,
-        stems,
         lexemes,
         prefixes,
         suffixes,
@@ -504,26 +510,27 @@ fn validate_dictionary(
     if dictionary.lexemes.len() > MAX_DICTIONARY_ENTRIES {
         return Err(error.error("dictionary entry count exceeds importer limit"));
     }
-    if dictionary.stems.len() != dictionary.lexemes.len() {
-        return Err(error.error("stem index does not match lexeme count"));
-    }
     let mut previous_stem = None;
     for lexeme in &dictionary.lexemes {
         if lexeme.stem.is_empty() || lexeme.stem.len() > MAX_LINE_BYTES {
             return Err(error.error("lexeme stem has an invalid byte length"));
         }
-        if previous_stem.is_some_and(|previous| previous >= lexeme.stem.as_ref()) {
-            return Err(error.error("lexemes are not in strictly sorted stem order"));
+        if previous_stem.is_some_and(|previous| previous > lexeme.stem.as_ref()) {
+            return Err(error.error("lexemes are not in sorted stem order"));
         }
         previous_stem = Some(lexeme.stem.as_ref());
         validate_flags(&lexeme.flags, dictionary.flag_mode, error)?;
     }
-    for ((stem, flags), lexeme) in dictionary.stems.iter().zip(&dictionary.lexemes) {
-        if lexeme.stem != *stem {
-            return Err(error.error("stem index contains a missing lexeme"));
-        }
-        if lexeme.flags != *flags {
-            return Err(error.error("stem index flags do not match lexeme flags"));
+    for (stem, indices) in &dictionary.stem_indices {
+        if indices.is_empty()
+            || indices
+                .iter()
+                .any(|index| match dictionary.lexemes.get(*index) {
+                    Some(lexeme) => lexeme.stem != *stem,
+                    None => true,
+                })
+        {
+            return Err(error.error("stem index does not match lexemes"));
         }
     }
 
@@ -601,9 +608,14 @@ fn validate_dictionary(
     if dictionary.compound.rules.len() > MAX_COMPOUND_RULES {
         return Err(error.error("compound rule count exceeds importer limit"));
     }
+    let mut compound_expansion_count = 0;
     for rule in &dictionary.compound.rules {
-        if rule.patterns.is_empty() || rule.patterns.len() > MAX_COMPOUND_RULES {
+        if rule.patterns.is_empty() || rule.patterns.len() > MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE {
             return Err(error.error("compound rule has an invalid expansion count"));
+        }
+        compound_expansion_count += rule.patterns.len();
+        if compound_expansion_count > MAX_COMPOUND_RULE_EXPANSIONS {
+            return Err(error.error("compound rules exceed the expansion limit"));
         }
         for pattern in &rule.patterns {
             if !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&pattern.len()) {
@@ -878,6 +890,7 @@ fn write_input_conversions(
     for conversion in conversions {
         write_string(output, &conversion.from, "input conversion source")?;
         write_string(output, &conversion.to, "input conversion target")?;
+        output.push(u8::from(conversion.at_word_start));
         output.push(u8::from(conversion.at_word_end));
     }
     Ok(())
@@ -978,11 +991,20 @@ fn read_input_conversions(
     reader: &mut Reader<'_>,
 ) -> Result<Vec<InputConversion>, RuntimeCacheError> {
     let count = reader.count(MAX_INPUT_CONVERSIONS, "input conversion count")?;
-    reader.require_minimum_items(count, 9, "input conversions")?;
+    reader.require_minimum_items(count, 10, "input conversions")?;
     let mut conversions = Vec::with_capacity(count);
     for _ in 0..count {
         let from = reader.string(MAX_LINE_BYTES, "input conversion source")?;
         let to = reader.string(MAX_LINE_BYTES, "input conversion target")?;
+        let at_word_start = match reader.byte()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "invalid input conversion start marker",
+                ))
+            }
+        };
         let at_word_end = match reader.byte()? {
             0 => false,
             1 => true,
@@ -1000,6 +1022,7 @@ fn read_input_conversions(
         conversions.push(InputConversion {
             from: Box::from(from),
             to: Box::from(to),
+            at_word_start,
             at_word_end,
         });
     }
@@ -1445,6 +1468,22 @@ mod tests {
         assert!(loaded.contains("İ"));
         assert!(loaded.contains("IŞIK"));
         assert!(!loaded.contains("ANKARA"));
+    }
+
+    #[test]
+    fn round_trip_preserves_independent_homonym_flags() {
+        let aff = "NEEDAFFIX N\n";
+        let dic = "2\nfoo/N\nfoo/S\n";
+        let original = import("homonyms.aff", aff, "homonyms.dic", dic, ImportMode::Strict)
+            .expect("homonym fixture imports")
+            .dictionary()
+            .clone();
+        let sources = SourceDigests::from_source_bytes(aff.as_bytes(), dic.as_bytes());
+        let cache = compile_runtime_cache(&original, sources).expect("cache compiles");
+        let loaded = load_runtime_cache(&cache, sources).expect("cache loads");
+
+        assert!(original.contains("foo"));
+        assert!(loaded.contains("foo"));
     }
 
     #[test]

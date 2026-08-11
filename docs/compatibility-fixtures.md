@@ -83,3 +83,23 @@ This is a compatibility scorecard, not a claim of bug-for-bug Hunspell parity.
 When a recognition directive becomes supported, update the project-owned
 format and semantic documentation, rerun this report, and add a focused
 independent fixture before changing the real-world baseline.
+
+## Differential recognition scorecard
+
+The CI compatibility job downloads the digest-pinned reference files into its
+temporary directory, installs the system `hunspell` command, and uploads
+`recognition-scorecard.tsv` as an artifact. The normal workspace test remains
+offline and does not require this oracle. To reproduce the artifact locally:
+
+```sh
+scripts/fetch-compat-fixtures.sh /tmp/ferrolex-compat-fixtures
+FERROLEX_COMPAT_FIXTURES=/tmp/ferrolex-compat-fixtures \
+FERROLEX_COMPAT_ORACLE=hunspell \
+FERROLEX_COMPAT_SCORECARD=/tmp/recognition-scorecard.tsv \
+  cargo test -p ferrolex-hunspell --test real_world -- --nocapture
+```
+
+The corpus combines stored stems with explicit manifest probes (including
+generated-form and casing cases) and deterministic negative mutations. The
+oracle is development-only black-box observation; ferrolex production code has
+no dependency on Hunspell or Nuspell.

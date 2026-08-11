@@ -8,12 +8,16 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
 use ferrolex_hunspell::{
-    compile_runtime_cache, import_bytes, load_runtime_cache, ImportMode, SourceDigests,
+    compile_runtime_cache, import_bytes, load_runtime_cache, HunspellDictionary, ImportMode,
+    SourceDigests,
 };
 
 const MANIFEST: &str = include_str!("real_world/manifest.tsv");
@@ -175,6 +179,7 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
         Err(reason) => {
             writeln!(report, "  format=blocked ({reason})")
                 .expect("writing to String does not fail");
+            write_blocked_scorecard(fixture, "aff-decoding");
             return;
         }
     };
@@ -183,12 +188,14 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
         Err(reason) => {
             writeln!(report, "  format=blocked ({reason})")
                 .expect("writing to String does not fail");
+            write_blocked_scorecard(fixture, "dic-decoding");
             return;
         }
     };
     let Some(mode) = fixture.import_expectation.mode() else {
         writeln!(report, "  format=blocked (manifested format boundary)")
             .expect("writing to String does not fail");
+        write_blocked_scorecard(fixture, "manifested-format-boundary");
         return;
     };
     let directives = directives_in(&aff_text);
@@ -242,6 +249,122 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
         join(&fixture.rejected)
     )
     .expect("writing to String does not fail");
+    write_scorecard(fixture, &dictionary, &aff_path, report);
+}
+
+fn write_blocked_scorecard(fixture: &Fixture, reason: &str) {
+    append_scorecard(&format!("{}\tblocked\t0\t0\t0\t{reason}\n", fixture.locale));
+}
+
+fn write_scorecard(
+    fixture: &Fixture,
+    dictionary: &HunspellDictionary,
+    aff_path: &Path,
+    report: &mut String,
+) {
+    let Ok(oracle) = env::var("FERROLEX_COMPAT_ORACLE") else {
+        return;
+    };
+    assert!(
+        oracle == "hunspell",
+        "unknown compatibility oracle `{oracle}`; expected `hunspell`"
+    );
+
+    let mut corpus = dictionary
+        .stems()
+        .take(128)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    corpus.extend(fixture.accepted.iter().cloned());
+    corpus.extend(fixture.rejected.iter().cloned());
+    corpus.extend(
+        fixture
+            .accepted
+            .iter()
+            .map(|word| format!("{word}ferrolexcompat")),
+    );
+    let corpus = corpus.into_iter().collect::<Vec<_>>();
+    let oracle_decisions = hunspell_decisions(aff_path, &corpus);
+    let agreements = corpus
+        .iter()
+        .zip(oracle_decisions)
+        .filter(|(word, accepted)| dictionary.contains(word) == *accepted)
+        .count();
+    let total = corpus.len();
+    let disagreements = total - agreements;
+    writeln!(
+        report,
+        "  scorecard=oracle:hunspell corpus:{total} agreements:{agreements} disagreements:{disagreements}"
+    )
+    .expect("writing to String does not fail");
+    append_scorecard(&format!(
+        "{}\tmeasured\t{total}\t{agreements}\t{disagreements}\thunspell\n",
+        fixture.locale
+    ));
+}
+
+fn append_scorecard(row: &str) {
+    let Ok(path) = env::var("FERROLEX_COMPAT_SCORECARD") else {
+        return;
+    };
+    let path = Path::new(&path);
+    let needs_header = fs::metadata(path).map_or(true, |metadata| metadata.len() == 0);
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap_or_else(|error| panic!("could not create scorecard {}: {error}", path.display()));
+    if needs_header {
+        file.write_all(b"locale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason\n")
+            .expect("scorecard header is writable");
+    }
+    file.write_all(row.as_bytes())
+        .expect("scorecard row is writable");
+}
+
+fn hunspell_decisions(aff_path: &Path, corpus: &[String]) -> Vec<bool> {
+    let stem = aff_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_else(|| panic!("invalid affix filename {}", aff_path.display()));
+    let dictionary = aff_path.with_file_name(stem);
+    let mut command = Command::new("hunspell")
+        .args(["-a", "-d"])
+        .arg(&dictionary)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("could not start hunspell oracle: {error}"));
+    command
+        .stdin
+        .as_mut()
+        .expect("hunspell stdin is piped")
+        .write_all(format!("{}\n", corpus.join("\n")).as_bytes())
+        .expect("hunspell oracle input is writable");
+    let output = command
+        .wait_with_output()
+        .expect("hunspell oracle process completes");
+    assert!(
+        output.status.success(),
+        "hunspell oracle failed for {}: {}",
+        aff_path.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_hunspell_output(&String::from_utf8_lossy(&output.stdout), corpus.len())
+}
+
+fn parse_hunspell_output(output: &str, expected: usize) -> Vec<bool> {
+    let decisions = output
+        .lines()
+        .skip(1)
+        .map(|line| matches!(line.as_bytes().first(), Some(b'*' | b'+' | b'-')))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        decisions.len(),
+        expected,
+        "hunspell emitted an unexpected number of decision lines: {output}"
+    );
+    decisions
 }
 
 fn read_verified_fixture(root: &Path, fixture: &Fixture) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {

@@ -37,7 +37,7 @@ pub struct Misspellings<'dictionary, 'text> {
     tokens: WordTokens<'text>,
 }
 
-impl<'dictionary, 'text> Iterator for Misspellings<'dictionary, 'text> {
+impl<'text> Iterator for Misspellings<'_, 'text> {
     type Item = Misspelling<'text>;
 
     fn next(&mut self) -> Option<Self::Item> {

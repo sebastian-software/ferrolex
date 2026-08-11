@@ -87,38 +87,39 @@ uses positive comma-separated decimal values. The selected mode applies
 consistently to `AF`, dictionary entries, affix continuation flags, compound
 flags, and the runtime cache.
 
-`ICONV` is a counted input-conversion table. ferrolex applies its literal
-rules in source order to every lookup input before dictionary recognition; a
-source ending in `_` is restricted to the end of the input word. `IGNORE`
+`ICONV` is a counted input-conversion table. ferrolex applies a single-pass
+longest-match selection of its literal rules to every lookup input before
+dictionary recognition; a leading or trailing `_` restricts a source to the
+start or end of the input word. `IGNORE`
 declares Unicode scalar values removed from input, dictionary stems, and affix
 strip/add text. Both directives can change recognition, so malformed input is
 an error. An ignored character inside an affix condition remains an explicit
 error rather than receiving guessed condition semantics. The importer limits
 `ICONV` to 4,096 rules. An `ICONV` target of `0` represents the empty string.
-`OCONV` uses the same bounded, ordered conversion syntax but only changes the
+`OCONV` uses the same bounded conversion syntax but only changes the
 spelling rendered for Hunspell-backed suggestions; it never changes lookup
 recognition. `FULLSTRIP` permits an affix strip to consume the complete stem.
 
-Complex prefix modes, capitalization fallbacks, compound syntax beyond the
-bounded documented subset, and suggestion directives beyond the documented
-subset have their own later feature gates. They must be diagnosed rather than
-silently interpreted as simple affixes.
+Complex prefix modes, compound syntax beyond the bounded documented subset, and
+suggestion directives beyond the documented subset have their own later feature
+gates. They must be diagnosed rather than silently interpreted as simple affixes.
 
 `BREAK` currently accepts a counted list of one literal Unicode-scalar
 characters. A recognized word containing one of those characters is accepted
-when every non-empty component is independently recognized. Anchored and
+when every non-empty component is independently recognized. When `BREAK` is
+absent, Hunspell's default hyphen behavior is used. Explicit anchored and
 multi-scalar break patterns are strict errors rather than approximated.
 
 With `CHECKSHARPS`, a `KEEPCASE` stem containing `ß` additionally recognizes
 its all-uppercase spelling with `SS`. No other case fallback is implied, and
 an uppercase-sharp-S spelling is not accepted as that variant.
 
-`LANG` enables Hunspell-style capitalization fallback for initial-capital and
-all-uppercase lookup input. These fallbacks try lower- and initial-case forms,
-but never a `KEEPCASE` lexeme. Turkish (`tr`), Azeri (`az`), and Crimean Tatar
-(`crh`) use their dotted/dotless-I casing; every other language tag uses
-Unicode's default casing. Other language-specific Hunspell behavior is outside
-this compatibility level.
+Hunspell-style capitalization fallback applies to initial-capital and
+all-uppercase lookup input even without `LANG`. These fallbacks try lower- and
+initial-case forms, but never a `KEEPCASE` lexeme. `LANG` selects Turkish
+(`tr`), Azeri (`az`), or Crimean Tatar (`crh`) dotted/dotless-I casing; every
+other dictionary uses Unicode default casing. Other language-specific Hunspell
+behavior is outside this compatibility level.
 
 `WORDCHARS` is retained as immutable tokenization metadata and is available
 from `HunspellDictionary::word_characters`. It does not alter

@@ -35,32 +35,35 @@ bounded character checks before lookup.
 
 ## Cross-product
 
-Rules whose headers opt into cross-product may be composed once as one prefix
-and one suffix when the lexeme carries both flags. The prefix operates on the
-stem first, then the suffix operates on the prefixed form. Rules without that
-opt-in are never combined merely because both independently match.
+Rules whose headers opt into cross-product may be composed as one prefix and up
+to two suffixes when the lexeme carries the required flags. The prefix operates
+on the stem first, then the suffixes operate on the prefixed form. Rules without
+that opt-in are never combined merely because both independently match.
 
 ## Advanced flags
 
 Continuation flags following an add field (`add/flags`) are the only same-kind
-capabilities retained by the derived form and can unlock another rule. A
-prefix-to-suffix (or inverse) transition additionally requires cross-product
-opt-in on both rules and uses the original lexeme capabilities. A derivation
-may apply a particular rule only once, is limited to eight transformations,
-and examines at most 4,096 derived states per lexeme. Budget exhaustion
-deterministically rejects the lookup. Dictionaries requiring deeper or more
-branching chains are outside the current compatibility level and must not be
-treated as equivalent.
+capabilities retained by the derived form and can unlock a second suffix rule.
+A prefix-to-suffix transition additionally requires cross-product opt-in on
+both rules and uses the original lexeme capabilities. A derivation may apply a
+particular rule only once, one prefix and two suffixes at most, is limited to
+eight transformations, and examines at most 4,096 derived states per lexeme.
+Lookup also stops reverse-affix candidate collection after 8,192 lexemes.
+Budget exhaustion deterministically rejects the lookup. Dictionaries requiring
+deeper or more branching chains are outside the current compatibility level and
+must not be treated as equivalent.
 
 `CIRCUMFIX` is represented by a flag in continuation fields. A form created
 through a circumfix-marked prefix is accepted only after a circumfix-marked
-suffix is also applied, and conversely. `NEEDAFFIX` rejects its bare stem but
-allows a valid derived form. `FORBIDDENWORD` rejects the complete lexeme and
-all forms derived from it, taking precedence over every positive rule.
+suffix is also applied, and conversely. `NEEDAFFIX` rejects a stem or derived
+form while it remains in that form's continuation flags. `ONLYINCOMPOUND` on a
+lexeme or continuation likewise rejects an ordinary derived form but permits it
+as an eligible compound component. `FORBIDDENWORD` rejects the complete lexeme
+and all forms derived from it, taking precedence over every positive rule.
 
-Recognition first checks exact UTF-8 matching. When an affix file declares
-`LANG`, initial-capital and all-uppercase input additionally receives the
-Hunspell capitalization fallback: lower- and initial-case candidates are
-checked without admitting `KEEPCASE` lexemes or forms derived from them.
-Turkish, Azeri, and Crimean Tatar apply their dotted/dotless-I casing; other
-language tags use Unicode default casing. Mixed-case input remains exact.
+Recognition first checks exact UTF-8 matching. Initial-capital and all-uppercase
+input additionally receives the Hunspell capitalization fallback even without a
+`LANG` directive: lower- and initial-case candidates are checked without
+admitting `KEEPCASE` lexemes or forms derived from them. Turkish, Azeri, and
+Crimean Tatar apply their dotted/dotless-I casing when selected by `LANG`; other
+dictionaries use Unicode default casing. Mixed-case input remains exact.

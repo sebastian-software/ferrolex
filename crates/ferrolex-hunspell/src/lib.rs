@@ -31,9 +31,15 @@ const MAX_FLAGS_PER_ENTRY: usize = 256;
 const MAX_CONDITION_ATOMS: usize = 256;
 const MAX_AFFIX_CHAIN: usize = 8;
 const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
+/// Bounds reverse-affix candidate work for one lookup. The limit is deliberately
+/// lower than the import entry limit so a suffix with an empty `add` cannot turn
+/// a miss into a scan of the whole dictionary.
+const MAX_DERIVED_CANDIDATES_PER_LOOKUP: usize = 8_192;
 const MAX_COMPOUND_SCALARS: usize = 256;
 const MAX_COMPOUND_RULES: usize = 1_024;
 const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
+const MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE: usize = 1_024;
+const MAX_COMPOUND_RULE_EXPANSIONS: usize = 16_384;
 const MAX_BREAK_PATTERNS: usize = 256;
 const MAX_REPLACEMENT_RULES: usize = 4_096;
 const MAX_AFFIX_ALIASES: usize = 100_000;
@@ -227,7 +233,7 @@ pub struct HunspellDictionary {
     flag_mode: FlagMode,
     case_fallback: bool,
     case_language: CaseLanguage,
-    stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
+    stem_indices: BTreeMap<Box<str>, Vec<usize>>,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
@@ -261,15 +267,16 @@ impl Dictionary for HunspellDictionary {
 
 impl HunspellDictionary {
     fn contains_normalized(&self, word: &str, allow_keep_case: bool) -> bool {
-        self.stems.get(word).is_some_and(|flags| {
-            !self.is_forbidden(flags)
-                && !self.requires_affix(flags)
-                && !self.is_only_in_compound(flags)
-                && (allow_keep_case || !self.is_keep_case(flags))
+        self.lexemes_for_stem(word).any(|lexeme| {
+            !self.is_forbidden(&lexeme.flags)
+                && !self.requires_affix(&lexeme.flags)
+                && !self.is_only_in_compound(&lexeme.flags)
+                && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
         }) || self.matches_single_affix_word(word, allow_keep_case)
             || self
                 .derived_candidate_indices(word)
                 .into_iter()
+                .flatten()
                 .any(|index| self.matches_derived_word(&self.lexemes[index], word, allow_keep_case))
             || self.matches_simple_compound(word, allow_keep_case)
             || self.matches_break_word(word, allow_keep_case)
@@ -284,7 +291,6 @@ impl HunspellDictionary {
         flag_mode: FlagMode,
         case_fallback: bool,
         case_language: CaseLanguage,
-        stems: BTreeMap<Box<str>, BTreeSet<Flag>>,
         lexemes: Vec<Lexeme>,
         prefixes: Vec<AffixRule>,
         suffixes: Vec<AffixRule>,
@@ -298,17 +304,18 @@ impl HunspellDictionary {
         output_conversions: Vec<InputConversion>,
         full_strip: bool,
     ) -> Self {
+        let stem_indices = stem_indices(&lexemes);
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
         let lexeme_indices_by_flag = lexeme_indices_by_flag(&lexemes);
         let prefix_parent_flags = parent_flags_by_continuation(&prefixes);
         let suffix_parent_flags = parent_flags_by_continuation(&suffixes);
-        let sharp_uppercase_forms = sharp_uppercase_forms(&stems, &special_flags);
+        let sharp_uppercase_forms = sharp_uppercase_forms(&lexemes, &special_flags);
         Self {
             flag_mode,
             case_fallback,
             case_language,
-            stems,
+            stem_indices,
             lexemes,
             prefixes,
             suffixes,
@@ -345,7 +352,7 @@ impl HunspellDictionary {
     /// such as suggestions can use the stable base vocabulary without turning
     /// a lookup dictionary into an unbounded expansion engine.
     pub fn stems(&self) -> impl Iterator<Item = &str> + '_ {
-        self.stems.keys().map(Box::as_ref)
+        self.stem_indices.keys().map(Box::as_ref)
     }
 
     /// Returns the imported `REP` rules in source order.
@@ -356,6 +363,14 @@ impl HunspellDictionary {
     #[must_use]
     pub fn replacement_rules(&self) -> &[ReplacementRule] {
         &self.replacement_rules
+    }
+
+    fn lexemes_for_stem(&self, stem: &str) -> impl Iterator<Item = &Lexeme> {
+        self.stem_indices
+            .get(stem)
+            .into_iter()
+            .flatten()
+            .map(|index| &self.lexemes[*index])
     }
 
     /// Applies declared `OCONV` rules to a suggestion spelling.
@@ -399,43 +414,35 @@ impl HunspellDictionary {
                 && rule
                     .reverse_apply(word, self.full_strip)
                     .is_some_and(|stem| {
-                        self.stems.get(stem.as_str()).is_some_and(|flags| {
-                            if self.is_forbidden(flags)
-                                || !flags.contains(&rule.flag)
-                                || (!allow_keep_case && self.is_keep_case(flags))
-                            {
-                                return false;
-                            }
-                            let lexeme = Lexeme {
-                                stem: Box::from(stem),
-                                flags: flags.clone(),
-                            };
-                            let state = FormState::new(&lexeme).apply(
-                                rule,
-                                word.to_owned(),
-                                &self.special_flags,
-                            );
-                            self.is_accepted_state(&state)
+                        self.lexemes_for_stem(&stem).any(|lexeme| {
+                            !self.is_forbidden(&lexeme.flags)
+                                && lexeme.flags.contains(&rule.flag)
+                                && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
+                                && self.is_accepted_state(&FormState::new(lexeme).apply(
+                                    rule,
+                                    word.to_owned(),
+                                    &self.special_flags,
+                                ))
                         })
                     })
         })
     }
 
-    fn derived_candidate_indices(&self, word: &str) -> BTreeSet<usize> {
+    fn derived_candidate_indices(&self, word: &str) -> Option<BTreeSet<usize>> {
         let mut candidates = BTreeSet::new();
         self.extend_derived_candidates(
             word,
             &self.prefixes,
             &self.prefix_parent_flags,
             &mut candidates,
-        );
+        )?;
         self.extend_derived_candidates(
             word,
             &self.suffixes,
             &self.suffix_parent_flags,
             &mut candidates,
-        );
-        candidates
+        )?;
+        Some(candidates)
     }
 
     fn extend_derived_candidates(
@@ -444,14 +451,20 @@ impl HunspellDictionary {
         rules: &[AffixRule],
         parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
         candidates: &mut BTreeSet<usize>,
-    ) {
+    ) -> Option<()> {
         for rule in rules.iter().filter(|rule| rule.could_generate(word)) {
             for flag in origin_flags_for(&rule.flag, parent_flags) {
                 if let Some(indices) = self.lexeme_indices_by_flag.get(&flag) {
-                    candidates.extend(indices);
+                    for index in indices {
+                        candidates.insert(*index);
+                        if candidates.len() > MAX_DERIVED_CANDIDATES_PER_LOOKUP {
+                            return None;
+                        }
+                    }
                 }
             }
         }
+        Some(())
     }
 
     fn matches_derived_word(&self, lexeme: &Lexeme, word: &str, allow_keep_case: bool) -> bool {
@@ -537,8 +550,15 @@ impl HunspellDictionary {
 
     fn is_accepted_state(&self, state: &FormState) -> bool {
         !self.is_forbidden(&state.flags)
-            && (!self.requires_affix(&state.origin_flags) || state.depth > 0)
+            && !self.requires_affix(&state.flags)
             && !self.is_only_in_compound(&state.origin_flags)
+            && !self.is_only_in_compound(&state.flags)
+            && state.has_complete_circumfix()
+    }
+
+    fn is_accepted_compound_state(&self, state: &FormState) -> bool {
+        !self.is_forbidden(&state.flags)
+            && !self.requires_affix(&state.flags)
             && state.has_complete_circumfix()
     }
 
@@ -696,10 +716,10 @@ impl HunspellDictionary {
         required_flag: &Flag,
         allow_keep_case: bool,
     ) -> bool {
-        self.stems.get(word).is_some_and(|flags| {
-            !self.is_forbidden(flags)
-                && flags.contains(required_flag)
-                && (allow_keep_case || !self.is_keep_case(flags))
+        self.lexemes_for_stem(word).any(|lexeme| {
+            !self.is_forbidden(&lexeme.flags)
+                && lexeme.flags.contains(required_flag)
+                && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
         })
     }
 
@@ -786,15 +806,15 @@ impl HunspellDictionary {
         position: CompoundPosition,
         allow_keep_case: bool,
     ) -> bool {
-        self.stems.get(word).is_some_and(|flags| {
-            !self.is_forbidden(flags)
-                && (allow_keep_case || !self.is_keep_case(flags))
-                && (flags.contains(position_flag)
+        self.lexemes_for_stem(word).any(|lexeme| {
+            !self.is_forbidden(&lexeme.flags)
+                && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
+                && (lexeme.flags.contains(position_flag)
                     || self
                         .compound
                         .flag
                         .as_ref()
-                        .is_some_and(|flag| flags.contains(flag)))
+                        .is_some_and(|flag| lexeme.flags.contains(flag)))
         }) || self.matches_one_affix_compound_component(
             word,
             position_flag,
@@ -817,16 +837,21 @@ impl HunspellDictionary {
             .any(|rule| {
                 rule.reverse_apply(word, self.full_strip)
                     .is_some_and(|stem| {
-                        self.stems.get(stem.as_str()).is_some_and(|flags| {
-                            !self.is_forbidden(flags)
-                                && (allow_keep_case || !self.is_keep_case(flags))
-                                && flags.contains(&rule.flag)
-                                && (flags.contains(position_flag)
+                        self.lexemes_for_stem(&stem).any(|lexeme| {
+                            !self.is_forbidden(&lexeme.flags)
+                                && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
+                                && lexeme.flags.contains(&rule.flag)
+                                && (lexeme.flags.contains(position_flag)
                                     || self
                                         .compound
                                         .flag
                                         .as_ref()
-                                        .is_some_and(|flag| flags.contains(flag)))
+                                        .is_some_and(|flag| lexeme.flags.contains(flag)))
+                                && self.is_accepted_compound_state(&FormState::new(lexeme).apply(
+                                    rule,
+                                    word.to_owned(),
+                                    &self.special_flags,
+                                ))
                         })
                     })
             })
@@ -864,21 +889,26 @@ impl CandidateSource for HunspellDictionary {
     }
 }
 
-fn sharp_uppercase_forms(
-    stems: &BTreeMap<Box<str>, BTreeSet<Flag>>,
-    special_flags: &SpecialFlags,
-) -> BTreeSet<Box<str>> {
+fn sharp_uppercase_forms(lexemes: &[Lexeme], special_flags: &SpecialFlags) -> BTreeSet<Box<str>> {
     if !special_flags.check_sharps {
         return BTreeSet::new();
     }
     let Some(keep_case) = special_flags.keep_case.as_ref() else {
         return BTreeSet::new();
     };
-    stems
+    lexemes
         .iter()
-        .filter(|(stem, flags)| flags.contains(keep_case) && stem.contains('ß'))
-        .map(|(stem, _)| Box::<str>::from(stem.to_uppercase()))
+        .filter(|lexeme| lexeme.flags.contains(keep_case) && lexeme.stem.contains('ß'))
+        .map(|lexeme| Box::<str>::from(lexeme.stem.to_uppercase()))
         .collect()
+}
+
+fn stem_indices(lexemes: &[Lexeme]) -> BTreeMap<Box<str>, Vec<usize>> {
+    let mut indices = BTreeMap::<Box<str>, Vec<usize>>::new();
+    for (index, lexeme) in lexemes.iter().enumerate() {
+        indices.entry(lexeme.stem.clone()).or_default().push(index);
+    }
+    indices
 }
 
 fn rule_indices_by_flag(rules: &[AffixRule]) -> BTreeMap<Flag, Vec<usize>> {
@@ -1051,6 +1081,7 @@ fn uppercase_character(character: char, language: CaseLanguage) -> String {
 struct InputConversion {
     from: Box<str>,
     to: Box<str>,
+    at_word_start: bool,
     at_word_end: bool,
 }
 
@@ -1143,6 +1174,8 @@ struct FormState {
     flags: BTreeSet<Flag>,
     origin_flags: BTreeSet<Flag>,
     depth: usize,
+    prefix_count: usize,
+    suffix_count: usize,
     last_kind: Option<AffixKind>,
     last_cross_product: bool,
     used_rules: BTreeSet<usize>,
@@ -1157,6 +1190,8 @@ impl FormState {
             flags: lexeme.flags.clone(),
             origin_flags: lexeme.flags.clone(),
             depth: 0,
+            prefix_count: 0,
+            suffix_count: 0,
             last_kind: None,
             last_cross_product: true,
             used_rules: BTreeSet::new(),
@@ -1167,6 +1202,13 @@ impl FormState {
 
     fn can_apply(&self, rule: &AffixRule) -> bool {
         !self.used_rules.contains(&rule.id)
+            && match rule.kind {
+                // Hunspell permits one prefix. A prefix is applied before any
+                // suffix so the resulting form remains unambiguous.
+                AffixKind::Prefix => self.prefix_count == 0 && self.suffix_count == 0,
+                // Continuation classes may supply one additional suffix.
+                AffixKind::Suffix => self.suffix_count < 2,
+            }
             && match self.last_kind {
                 None => self.flags.contains(&rule.flag),
                 Some(kind) if kind == rule.kind => self.flags.contains(&rule.flag),
@@ -1197,6 +1239,8 @@ impl FormState {
             flags: rule.continuation_flags.clone(),
             origin_flags: self.origin_flags.clone(),
             depth: self.depth + 1,
+            prefix_count: self.prefix_count + usize::from(rule.kind == AffixKind::Prefix),
+            suffix_count: self.suffix_count + usize::from(rule.kind == AffixKind::Suffix),
             last_kind: Some(rule.kind),
             last_cross_product: rule.cross_product,
             used_rules,
@@ -1493,15 +1537,10 @@ fn import_decoded(
     } else {
         Vec::new()
     };
-    let stems = lexemes
-        .iter()
-        .map(|lexeme| (lexeme.stem.clone(), lexeme.flags.clone()))
-        .collect();
     let dictionary = HunspellDictionary::from_parts(
         parsed_aff.flag_mode,
-        parsed_aff.has_language,
+        true,
         parsed_aff.case_language,
-        stems,
         lexemes,
         parsed_aff.prefixes,
         parsed_aff.suffixes,
@@ -1688,6 +1727,7 @@ enum CountedSection {
     MorphologyAliases,
     InputConversions,
     OutputConversions,
+    BreakPatterns,
 }
 
 #[allow(
@@ -1695,7 +1735,10 @@ enum CountedSection {
     reason = "the directive dispatch stays together to preserve the line-oriented parser contract"
 )]
 fn parse_aff(source: &str, text: &str) -> ParsedAff {
-    let mut parsed = ParsedAff::default();
+    let mut parsed = ParsedAff {
+        break_characters: BTreeSet::from(['-']),
+        ..ParsedAff::default()
+    };
     let mut lines = text.lines().enumerate();
 
     while let Some((index, original_line)) = lines.next() {
@@ -2102,12 +2145,7 @@ fn parse_input_conversions(
             ));
             continue;
         };
-        let at_word_end = from.ends_with('_');
-        let from = if at_word_end {
-            &from[..from.len() - '_'.len_utf8()]
-        } else {
-            from
-        };
+        let (from, at_word_start, at_word_end) = split_conversion_anchors(from);
         let to = if to == "0" { "" } else { to };
         if from.is_empty() || from.len() > MAX_LINE_BYTES || to.len() > MAX_LINE_BYTES {
             parsed.diagnostics.push(diagnostic(
@@ -2122,6 +2160,7 @@ fn parse_input_conversions(
         parsed.input_conversions.push(InputConversion {
             from: Box::from(from),
             to: Box::from(to),
+            at_word_start,
             at_word_end,
         });
     }
@@ -2195,12 +2234,7 @@ fn parse_output_conversions(
             ));
             continue;
         };
-        let at_word_end = from.ends_with('_');
-        let from = if at_word_end {
-            &from[..from.len() - '_'.len_utf8()]
-        } else {
-            from
-        };
+        let (from, at_word_start, at_word_end) = split_conversion_anchors(from);
         let to = if to == "0" { "" } else { to };
         if from.is_empty() || from.len() > MAX_LINE_BYTES || to.len() > MAX_LINE_BYTES {
             parsed.diagnostics.push(diagnostic(
@@ -2215,20 +2249,50 @@ fn parse_output_conversions(
         parsed.output_conversions.push(InputConversion {
             from: Box::from(from),
             to: Box::from(to),
+            at_word_start,
             at_word_end,
         });
     }
 }
 
+fn split_conversion_anchors(value: &str) -> (&str, bool, bool) {
+    let at_word_start = value.starts_with('_');
+    let value = if at_word_start { &value[1..] } else { value };
+    let at_word_end = value.ends_with('_');
+    let value = if at_word_end {
+        &value[..value.len() - '_'.len_utf8()]
+    } else {
+        value
+    };
+    (value, at_word_start, at_word_end)
+}
+
 fn apply_conversions(word: &str, conversions: &[InputConversion]) -> String {
-    let mut converted = word.to_owned();
-    for conversion in conversions {
-        if conversion.at_word_end {
-            if let Some(prefix) = converted.strip_suffix(conversion.from.as_ref()) {
-                converted = format!("{prefix}{}", conversion.to);
-            }
+    let mut converted = String::with_capacity(word.len());
+    let mut index = 0;
+    while index < word.len() {
+        let remaining = &word[index..];
+        let matching = conversions
+            .iter()
+            .filter(|conversion| {
+                (!conversion.at_word_start || index == 0)
+                    && (!conversion.at_word_end || conversion.from.len() == remaining.len())
+                    && remaining.starts_with(conversion.from.as_ref())
+            })
+            .fold(None, |best: Option<&InputConversion>, conversion| {
+                best.filter(|best| best.from.len() >= conversion.from.len())
+                    .or(Some(conversion))
+            });
+        if let Some(conversion) = matching {
+            converted.push_str(&conversion.to);
+            index += conversion.from.len();
         } else {
-            converted = converted.replace(conversion.from.as_ref(), conversion.to.as_ref());
+            let character = remaining
+                .chars()
+                .next()
+                .expect("index stays at a UTF-8 character boundary");
+            converted.push(character);
+            index += character.len_utf8();
         }
     }
     converted
@@ -2629,6 +2693,7 @@ fn parse_compound_rules(
         ));
         return;
     }
+    let mut expansion_count = 0_usize;
     for _ in 0..rule_count {
         let Some((index, line)) = lines.next() else {
             parsed.diagnostics.push(diagnostic(
@@ -2644,35 +2709,56 @@ fn parse_compound_rules(
         let rule_fields = aff_fields(line);
         let pattern = rule_fields.get(1).copied().unwrap_or_default();
         let patterns = parse_compound_rule_patterns(pattern, parsed.flag_mode);
-        if rule_fields.len() != 2 || rule_fields[0] != "COMPOUNDRULE" || patterns.is_none() {
+        if rule_fields.len() != 2 || rule_fields[0] != "COMPOUNDRULE" || patterns.is_err() {
+            let message = patterns.err().unwrap_or(
+                "compound rules require bounded literal flags with optional postfix `*`, `+`, or `?`",
+            );
             parsed.diagnostics.push(diagnostic(
                 source,
                 index + 1,
                 "COMPOUNDRULE",
                 Severity::Error,
-                "compound rules require bounded literal flags with optional postfix `*`, `+`, or `?`",
+                message,
             ));
             continue;
         }
-        parsed.compound.rules.push(CompoundRule {
-            patterns: patterns.expect("validated above"),
-        });
+        let patterns = patterns.expect("validated above");
+        if expansion_count.saturating_add(patterns.len()) > MAX_COMPOUND_RULE_EXPANSIONS {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "COMPOUNDRULE",
+                Severity::Error,
+                "compound rule expansions exceed the dictionary limit of 16,384",
+            ));
+            continue;
+        }
+        expansion_count += patterns.len();
+        parsed.compound.rules.push(CompoundRule { patterns });
     }
 }
 
-fn parse_compound_rule_patterns(pattern: &str, flag_mode: FlagMode) -> Option<Vec<Vec<Flag>>> {
+fn parse_compound_rule_patterns(
+    pattern: &str,
+    flag_mode: FlagMode,
+) -> Result<Vec<Vec<Flag>>, &'static str> {
+    if pattern.contains(['(', ')']) {
+        return Err("parenthesized COMPOUNDRULE groups are not supported");
+    }
     if flag_mode != FlagMode::Unicode {
         return decode_flag_sequence(pattern, flag_mode)
             .filter(|flags| (2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len()))
-            .map(|flags| vec![flags]);
+            .map(|flags| vec![flags])
+            .ok_or("compound rules require two through sixteen literal flags");
     }
-    let tokens = unicode_flag_tokens(pattern)?;
+    let tokens =
+        unicode_flag_tokens(pattern).ok_or("compound rules require valid Unicode flag tokens")?;
     let mut parts = Vec::new();
     let mut index = 0;
     while index < tokens.len() {
         let token = tokens[index];
         if matches!(token, "*" | "+" | "?") {
-            return None;
+            return Err("compound quantifiers must follow a flag");
         }
         index += 1;
         let (minimum, maximum) = match tokens.get(index) {
@@ -2700,12 +2786,17 @@ fn parse_compound_rule_patterns(pattern: &str, flag_mode: FlagMode) -> Option<Ve
                 let mut next = prefix.clone();
                 next.extend(std::iter::repeat(flag.clone()).take(count));
                 expanded.push(next);
+                if expanded.len() > MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE {
+                    return Err("compound rule expansions exceed the per-rule limit of 1,024");
+                }
             }
         }
         patterns = expanded;
     }
     patterns.retain(|flags| (2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len()));
-    (!patterns.is_empty()).then_some(patterns)
+    (!patterns.is_empty())
+        .then_some(patterns)
+        .ok_or("compound rules require two through sixteen components")
 }
 
 fn parse_break_patterns(
@@ -2734,6 +2825,19 @@ fn parse_break_patterns(
             "BREAK count must be between 1 and 256",
         ));
         return;
+    }
+    if !parsed
+        .declared_sections
+        .contains(&CountedSection::BreakPatterns)
+    {
+        // Hunspell's default BREAK set is `-`, `^-`, and `-$`. The latter two
+        // only reject a leading or trailing separator, which the component
+        // splitter already does, so the stored literal `-` preserves the
+        // supported recognition behavior.
+        parsed.break_characters.clear();
+        parsed
+            .declared_sections
+            .insert(CountedSection::BreakPatterns);
     }
     for _ in 0..pattern_count {
         let Some((index, line)) = lines.next() else {
@@ -3059,8 +3163,8 @@ fn parse_condition_atoms(field: &str) -> Result<Vec<ConditionAtom>, String> {
     }
     let mut atoms = Vec::new();
     let mut index = 0;
-    while index < characters.len() {
-        match characters[index] {
+    while let Some(character) = characters.get(index).copied() {
+        match character {
             '.' => {
                 atoms.push(ConditionAtom::Any);
                 index += 1;
@@ -3133,7 +3237,7 @@ fn parse_dic(
     ignored_characters: &BTreeSet<char>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Lexeme> {
-    let mut entries = BTreeMap::<Box<str>, BTreeSet<Flag>>::new();
+    let mut entries = Vec::new();
     let mut expected_count = None;
     let mut first_content = true;
     let mut entry_count = 0;
@@ -3236,7 +3340,10 @@ fn parse_dic(
             morphology_alias_count,
             diagnostics,
         );
-        entries.entry(stem).or_default().extend(entry_flags);
+        entries.push(Lexeme {
+            stem,
+            flags: entry_flags,
+        });
     }
 
     if let Some((count_line, expected_count)) =
@@ -3250,10 +3357,8 @@ fn parse_dic(
             &format!("declared {expected_count} entries but parsed {entry_count}"),
         ));
     }
+    entries.sort_by(|left, right| left.stem.cmp(&right.stem));
     entries
-        .into_iter()
-        .map(|(stem, flags)| Lexeme { stem, flags })
-        .collect()
 }
 
 fn decode_entry_flags(
@@ -3270,7 +3375,7 @@ fn decode_entry_flags(
 }
 
 fn is_flag_alias_reference(value: &str, aliases: &[Option<BTreeSet<Flag>>]) -> bool {
-    !aliases.is_empty() && value.chars().all(char::is_numeric)
+    !aliases.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn validate_morphology_alias_reference(
@@ -3511,7 +3616,8 @@ mod tests {
 
     use super::{
         import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
-        ImportMode, Severity, MAX_AFF_BYTES, MAX_COMPOUND_SCALARS, MAX_DIC_BYTES,
+        ImportMode, Severity, MAX_AFF_BYTES, MAX_COMPOUND_SCALARS,
+        MAX_DERIVED_CANDIDATES_PER_LOOKUP, MAX_DIC_BYTES,
     };
 
     const AFFIXES: &str =
@@ -4296,11 +4402,12 @@ mod tests {
     }
 
     #[test]
-    fn capitalization_fallback_requires_lang() {
+    fn capitalization_fallback_applies_without_lang() {
         let imported = import("test.aff", "", "test.dic", "1\nword\n", ImportMode::Strict)
             .expect("dictionary imports");
 
-        assert!(!imported.dictionary().contains("WORD"));
+        assert!(imported.dictionary().contains("Word"));
+        assert!(imported.dictionary().contains("WORD"));
     }
 
     #[test]
@@ -4335,6 +4442,161 @@ mod tests {
             .diagnostics()
             .iter()
             .any(|diagnostic| diagnostic.directive() == "BREAK"));
+    }
+
+    #[test]
+    fn default_break_patterns_join_hyphenated_words() {
+        let imported = import(
+            "test.aff",
+            "",
+            "test.dic",
+            "2\nE\nMail\n",
+            ImportMode::Strict,
+        )
+        .expect("the default BREAK patterns are supported");
+
+        assert!(imported.dictionary().contains("E-Mail"));
+        assert!(!imported.dictionary().contains("-Mail"));
+    }
+
+    #[test]
+    fn iconv_uses_single_pass_longest_match_and_word_start_anchors() {
+        let imported = import(
+            "test.aff",
+            "ICONV 3\nICONV ab x\nICONV x y\nICONV _pre 0\n",
+            "test.dic",
+            "2\nx\nword\n",
+            ImportMode::Strict,
+        )
+        .expect("ICONV rules import");
+
+        assert!(imported.dictionary().contains("ab"));
+        assert!(!imported.dictionary().contains("y"));
+        assert!(imported.dictionary().contains("preword"));
+    }
+
+    #[test]
+    fn unicode_digit_flags_are_not_treated_as_af_aliases() {
+        let imported = import(
+            "test.aff",
+            "AF 1\nAF A\n",
+            "test.dic",
+            "1\nword/٣\n",
+            ImportMode::Strict,
+        )
+        .expect("Unicode flag remains a literal flag");
+
+        assert!(imported.dictionary().contains("word"));
+    }
+
+    #[test]
+    fn parenthesized_compound_rules_are_precise_strict_errors() {
+        for affixes in [
+            "FLAG UTF-8\nCOMPOUNDRULE 1\nCOMPOUNDRULE (A)(B)\n",
+            "FLAG long\nCOMPOUNDRULE 1\nCOMPOUNDRULE (aa)(bb)\n",
+            "FLAG num\nCOMPOUNDRULE 1\nCOMPOUNDRULE (1)(2)\n",
+        ] {
+            let error = import(
+                "test.aff",
+                affixes,
+                "test.dic",
+                "1\nword\n",
+                ImportMode::Strict,
+            )
+            .expect_err("unsupported groups must not silently change flag meaning");
+            assert!(error.diagnostics().iter().any(|diagnostic| {
+                diagnostic.directive() == "COMPOUNDRULE"
+                    && diagnostic.message().contains("parenthesized")
+            }));
+        }
+    }
+
+    #[test]
+    fn compound_rule_expansion_is_bounded_before_large_allocation() {
+        let pattern = "A*".repeat(16);
+        let affixes = format!("COMPOUNDRULE 1\nCOMPOUNDRULE {pattern}\n");
+        let result = import(
+            "test.aff",
+            &affixes,
+            "test.dic",
+            "1\na/A\n",
+            ImportMode::Lenient,
+        )
+        .expect("lenient import returns the safe subset");
+
+        assert!(result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.directive() == "COMPOUNDRULE"
+                && diagnostic.message().contains("per-rule limit")
+        }));
+    }
+
+    #[test]
+    fn homonym_flags_are_evaluated_independently() {
+        let imported = import(
+            "test.aff",
+            "NEEDAFFIX N\n",
+            "test.dic",
+            "2\nfoo/N\nfoo/S\n",
+            ImportMode::Strict,
+        )
+        .expect("homonym fixture imports");
+
+        assert!(imported.dictionary().contains("foo"));
+    }
+
+    #[test]
+    fn continuation_needaffix_and_onlyincompound_flags_are_enforced() {
+        let imported = import(
+            "test.aff",
+            "NEEDAFFIX N\nONLYINCOMPOUND O\nCOMPOUNDBEGIN B\nCOMPOUNDEND E\nCOMPOUNDMIN 1\nSFX A N 1\nSFX A 0 x/N .\nSFX N N 1\nSFX N 0 y .\nSFX C N 1\nSFX C 0 z/O .\n",
+            "test.dic",
+            "2\nroot/AB\nend/EC\n",
+            ImportMode::Strict,
+        )
+        .expect("continuation flags import");
+        let dictionary = imported.dictionary();
+
+        assert!(!dictionary.contains("rootx"));
+        assert!(dictionary.contains("rootxy"));
+        assert!(!dictionary.contains("endz"));
+        assert!(dictionary.contains("rootendz"));
+    }
+
+    #[test]
+    fn affix_composition_is_limited_to_one_prefix_and_two_suffixes() {
+        let imported = import(
+            "test.aff",
+            "PFX A Y 1\nPFX A 0 un/D .\nPFX D Y 1\nPFX D 0 re .\nSFX B Y 1\nSFX B 0 s/C .\nSFX C Y 1\nSFX C 0 x/D .\nSFX D Y 1\nSFX D 0 y .\n",
+            "test.dic",
+            "1\nword/AB\n",
+            ImportMode::Strict,
+        )
+        .expect("composition fixture imports");
+        let dictionary = imported.dictionary();
+
+        assert!(dictionary.contains("unword"));
+        assert!(!dictionary.contains("reunword"));
+        assert!(dictionary.contains("wordsx"));
+        assert!(!dictionary.contains("wordsxy"));
+    }
+
+    #[test]
+    fn reverse_affix_candidates_have_a_per_lookup_limit() {
+        let mut dictionary = String::new();
+        for index in 0..=MAX_DERIVED_CANDIDATES_PER_LOOKUP {
+            writeln!(dictionary, "word{index}/A").expect("writing to String does not fail");
+        }
+        let dictionary = format!("{}\n{dictionary}", MAX_DERIVED_CANDIDATES_PER_LOOKUP + 1);
+        let imported = import(
+            "test.aff",
+            "SFX A N 1\nSFX A 0 0 .\n",
+            "test.dic",
+            &dictionary,
+            ImportMode::Strict,
+        )
+        .expect("large affix class imports");
+
+        assert!(!imported.dictionary().contains("not-a-generated-form"));
     }
 
     #[test]
