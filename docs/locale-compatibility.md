@@ -24,6 +24,9 @@ The columns deliberately use different kinds of evidence:
   only supported recognition directives or suggestion-only directives. It is
   not a successful full-pair import, dictionary-entry audit, or recognition
   result.
+- **Strict probe** records one current strict import of the digest-verified
+  local source pair. It establishes neither recognition probes nor a reusable
+  fixture.
 - **Known boundary** identifies why `validate --strict` must currently be
   expected to reject the pair, or what still needs live evidence. Suggestion
   directives alone produce warnings and do not fail strict mode; every other
@@ -39,23 +42,23 @@ into an accidental quality promise.
 
 | Locale | Script / practical group | Source encoding | AFF strict gate | Known boundary |
 | --- | --- | --- | --- | --- |
-| `en_US` | Latin | UTF-8 | Blocked | The 2026-08-11 strict probe reaches its quantified `COMPOUNDRULE` patterns, which remain outside the bounded literal rule model. `ONLYINCOMPOUND` and `WORDCHARS` are no longer blockers. |
+| `en_US` | Latin | UTF-8 | Strict probe | The 2026-08-11 digest-verified exact pair strict-imports after bounded `COMPOUNDRULE` quantifier support. `TRY` and `NOSUGGEST` remain suggestion-only warnings. Recognition probes and an opt-in fixture remain required before a broader support claim. |
 | `de_DE` | Latin | ISO-8859-1 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports and builds the runtime cache. It accepts `Straße`, `Häuser`, and `Häusern`, and rejects `Ferrolex`. `TRY`, `MAP`, and `NOSUGGEST` remain suggestion-only warnings; this is not full upstream recognition parity. |
 | `es_ES` | Latin | UTF-8 | Blocked | Its multi-scalar `PFX` flag declarations are outside the current flag model. `MAP` and `TRY` are suggestion-only warnings, but do not remove that recognition gate. |
-| `fr_FR` | Latin | UTF-8 | Blocked | `BREAK`, `FULLSTRIP`, `ICONV`, `OCONV`, and `WORDCHARS` are recognition-affecting omissions. |
+| `fr_FR` | Latin | UTF-8 | Blocked | `FULLSTRIP`, `ICONV`, `OCONV`, and `WORDCHARS` strict-import. Its anchored, multi-scalar `BREAK` patterns remain recognition-affecting errors; `TRY`, `MAP`, `KEY`, and `NOSUGGEST` are suggestion-only warnings. |
 | `it_IT` | Latin | UTF-8 | Blocked | `HOME`, `LANG`, `NAME`, and `VERSION` are not part of the importer subset. |
 | `pt_BR` | Latin | UTF-8 with leading BOM in `.aff` | Blocked | The byte importer normalizes the leading BOM; `BREAK`, `ONLYMAXDIFF`, and `WARN` remain outside the subset. |
 | `pt_PT` | Latin | UTF-8 | Blocked | `LANG` remains outside the recognition subset; `KEY`, `MAP`, and `TRY` are only suggestion warnings. |
-| `nl_NL` | Latin | UTF-8 | Blocked | Compound-position and compound-check directives, `COMPOUNDRULE`, `FORCEUCASE`, `OCONV`, and `WORDCHARS` exceed the subset. |
+| `nl_NL` | Latin | UTF-8 | Blocked | `ONLYMAXDIFF`, `WARN`, `FORCEUCASE`, non-positive `COMPOUNDMIN`, `CHECKCOMPOUND*`, and an oversized/complex `BREAK` section remain strict errors. `OCONV`, `WORDCHARS`, and bounded `COMPOUNDRULE` are no longer gates. |
 | `pl_PL` | Latin | ISO-8859-2 | Strict fixture | The exact-byte fixture imports through the public ISO-8859-2 byte path, compiles and reloads the runtime cache, accepts `słowo` and `słowami`, and rejects its synthetic negative probe. This validates the documented subset, not full Hunspell compatibility or redistribution terms. |
 | `ru_RU` | Cyrillic | UTF-8 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports, builds the runtime cache, accepts `русский` and `русского`, and rejects `русскии`. `TRY` is the only observed suggestion-only warning; the probes do not establish full upstream recognition parity. |
 | `tr_TR` | Latin, agglutinative | UTF-8 | Blocked | `LANG` is not implemented. Turkish should also receive generated-form probes before any support claim. |
 | `ar` | Arabic | UTF-8 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports with `FLAG long`, long-form `AF` aliases, and alias references in affix continuation flags. `TRY`, `KEY`, and `MAP` remain suggestion-only warnings; this is not full upstream recognition parity. |
 | `uk_UA` | Cyrillic | UTF-8 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports with literal `BREAK`, `ICONV`, `IGNORE`, `WORDCHARS`, bounded negative lookbehind, and start-anchored affix conditions. This is import evidence only, not full upstream recognition parity. |
-| `sv_SE` | Latin | UTF-8 | Blocked | Compound-position/check directives, `COMPOUNDRULE`, `FORCEUCASE`, `FULLSTRIP`, and `WORDCHARS` are outside the subset. |
+| `sv_SE` | Latin | UTF-8 | Blocked | Its anchored `BREAK` pattern, `CHECKCOMPOUNDTRIPLE`, `SIMPLIFIEDTRIPLE`, `CHECKCOMPOUNDDUP`, `ONLYMAXDIFF`, `FORCEUCASE`, and `CHECKCOMPOUNDREP` remain strict errors. Compound-position flags, `FULLSTRIP`, and `WORDCHARS` strict-import. |
 | `id_ID` | Latin | AFF ISO-8859-1; DIC UTF-8 | Blocked | `dictionary install` uses the reviewed per-file encoding override without rewriting cached bytes. `WORDCHARS` is an additional strict blocker. |
 | `hi_IN` | Devanagari | UTF-8 with leading BOM in `.aff` | Blocked | The byte importer normalizes the leading BOM; `BREAK`, `ICONV`, and `WORDCHARS` remain outside the subset. |
-| `bn_BD` | Bengali | UTF-8 | Blocked | `ICONV` is outside the importer subset; strict-import and recognition probes remain pending. |
+| `bn_BD` | Bengali | UTF-8 | Blocked | `ICONV` strict-imports, but the exact pair has unsupported affix-header syntax and many malformed/empty flag sections. Strict-import and recognition probes remain pending after those format boundaries are addressed. |
 
 `No known AFF error` is purposefully weaker than "strict validation passes".
 For example, strict mode also checks malformed affix rules, dictionary entries,

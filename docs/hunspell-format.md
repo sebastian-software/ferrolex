@@ -56,7 +56,8 @@ The current compatibility level recognizes `SET`, `FLAG`, `AF`, `AM`, `ICONV`,
 `OCONV`, `IGNORE`, `PFX`, `SFX`, `FULLSTRIP`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
-`ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded literal `COMPOUNDRULE` patterns, and bounded
+`ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded `COMPOUNDRULE` patterns with
+postfix `*`, `+`, or `?`, and bounded
 literal `BREAK` characters, and `CHECKSHARPS`.
 `PFX`/`SFX` headers declare a flag, whether rules cross-product, and a rule
 count. Each following rule belongs to that header and has:
@@ -96,10 +97,10 @@ error rather than receiving guessed condition semantics. The importer limits
 spelling rendered for Hunspell-backed suggestions; it never changes lookup
 recognition. `FULLSTRIP` permits an affix strip to consume the complete stem.
 
-`AF`, aliases, complex prefix modes, capitalization fallbacks, compound
-compound quantifiers and suggestion directives beyond the
-documented subset have their own later feature gates. They must be diagnosed
-rather than silently interpreted as simple affixes.
+Complex prefix modes, capitalization fallbacks, compound syntax beyond the
+bounded documented subset, and suggestion directives beyond the documented
+subset have their own later feature gates. They must be diagnosed rather than
+silently interpreted as simple affixes.
 
 `BREAK` currently accepts a counted list of one literal Unicode-scalar
 characters. A recognized word containing one of those characters is accepted
