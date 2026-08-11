@@ -35,11 +35,50 @@ struct Fixture {
     aff_decode: Decode,
     dic_decode: Decode,
     import_expectation: ImportExpectation,
-    accepted: Vec<String>,
+    accepted: Vec<Probe>,
     rejected: Vec<String>,
     source: String,
     license: String,
     license_evidence: String,
+}
+
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct Probe {
+    category: ProbeCategory,
+    word: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ProbeCategory {
+    Stem,
+    Affixed,
+    Compound,
+    SentenceInitial,
+    AllCaps,
+    KeepCase,
+}
+
+impl ProbeCategory {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "stem" => Ok(Self::Stem),
+            "affixed" => Ok(Self::Affixed),
+            "compound" => Ok(Self::Compound),
+            "sentence-initial" => Ok(Self::SentenceInitial),
+            "all-caps" => Ok(Self::AllCaps),
+            "keepcase" => Ok(Self::KeepCase),
+            _ => Err(format!("unknown probe category `{value}`")),
+        }
+    }
+
+    const fn documentation(self) -> &'static str {
+        match self {
+            Self::Stem => "docs/compatibility-fixtures.md",
+            Self::Affixed => "docs/affix-semantics.md",
+            Self::Compound => "docs/compound-semantics.md",
+            Self::SentenceInitial | Self::AllCaps | Self::KeepCase => "docs/hunspell-format.md",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -135,6 +174,9 @@ fn real_world_manifest_is_complete_and_source_pinned() {
         assert_eq!(fixture.dic_sha256.len(), 64, "SHA-256 is recorded");
         assert!(!fixture.license.is_empty());
         assert!(!fixture.accepted.is_empty());
+        for probe in &fixture.accepted {
+            assert!(!probe.word.is_empty(), "positive probe words are non-empty");
+        }
         assert!(!fixture.rejected.is_empty());
         if fixture.import_expectation == ImportExpectation::Blocked {
             assert_eq!(fixture.aff_decode, Decode::NotUtf8);
@@ -183,7 +225,7 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
             return;
         }
     };
-    let _dic_text = match fixture.dic_decode.decode(&dic_bytes) {
+    let dic_text = match fixture.dic_decode.decode(&dic_bytes) {
         Ok(text) => text,
         Err(reason) => {
             writeln!(report, "  format=blocked ({reason})")
@@ -199,6 +241,7 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
         return;
     };
     let directives = directives_in(&aff_text);
+    assert_strict_probe_coverage(fixture, &directives);
     let imported = import_bytes(
         &aff_path.display().to_string(),
         &aff_bytes,
@@ -228,11 +271,14 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     writeln!(report, "  runtime_cache=compiled-and-validated")
         .expect("writing to String does not fail");
 
-    for word in &fixture.accepted {
+    for probe in &fixture.accepted {
         assert!(
-            dictionary.contains(word),
-            "{} must recognize recorded positive probe `{word}`",
-            fixture.id
+            dictionary.contains(&probe.word),
+            "{} must recognize {} probe `{}`; see {}",
+            fixture.id,
+            probe_category_name(probe.category),
+            probe.word,
+            probe.category.documentation()
         );
     }
     for word in &fixture.rejected {
@@ -245,11 +291,120 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     writeln!(
         report,
         "  recognition=accepted:{} rejected:{}",
-        join(&fixture.accepted),
+        join(fixture.accepted.iter().map(|probe| probe.word.as_str())),
         join(&fixture.rejected)
     )
     .expect("writing to String does not fail");
     write_scorecard(fixture, &dictionary, &aff_path, report);
+    report_keepcase_coverage(fixture, &aff_text, &dic_text, report);
+}
+
+fn assert_strict_probe_coverage(fixture: &Fixture, directives: &BTreeSet<&str>) {
+    if fixture.import_expectation != ImportExpectation::Strict {
+        return;
+    }
+
+    let categories = fixture
+        .accepted
+        .iter()
+        .map(|probe| probe.category)
+        .collect::<BTreeSet<_>>();
+    for category in [ProbeCategory::Stem, ProbeCategory::Affixed] {
+        assert!(
+            categories.contains(&category),
+            "{} strict fixture needs a {} probe; see {}",
+            fixture.id,
+            probe_category_name(category),
+            category.documentation()
+        );
+    }
+    if directives
+        .iter()
+        .any(|directive| directive.starts_with("COMPOUND"))
+    {
+        assert!(
+            categories.contains(&ProbeCategory::Compound),
+            "{} declares compound directives and needs a compound probe; see {}",
+            fixture.id,
+            ProbeCategory::Compound.documentation()
+        );
+    }
+    if fixture
+        .accepted
+        .iter()
+        .any(|probe| probe.word.chars().any(char::is_lowercase))
+    {
+        for category in [ProbeCategory::SentenceInitial, ProbeCategory::AllCaps] {
+            assert!(
+                categories.contains(&category),
+                "{} has cased probes and needs a {} probe; see {}",
+                fixture.id,
+                probe_category_name(category),
+                category.documentation()
+            );
+        }
+    }
+}
+
+fn report_keepcase_coverage(
+    fixture: &Fixture,
+    aff_text: &str,
+    dic_text: &str,
+    report: &mut String,
+) {
+    let Some(flag) = keepcase_flag(aff_text) else {
+        return;
+    };
+    let is_used = dic_text.lines().skip(1).any(|line| {
+        line.rsplit_once('/')
+            .is_some_and(|(_, flags)| flags.chars().any(|candidate| candidate == flag))
+    });
+    let categories = fixture
+        .accepted
+        .iter()
+        .map(|probe| probe.category)
+        .collect::<BTreeSet<_>>();
+    let has_probe = categories.contains(&ProbeCategory::KeepCase);
+    if fixture.import_expectation == ImportExpectation::Strict {
+        assert!(
+            !is_used || has_probe,
+            "{} dictionary uses KEEPCASE `{flag}` and needs a keepcase probe; see {}",
+            fixture.id,
+            ProbeCategory::KeepCase.documentation()
+        );
+    }
+    writeln!(
+        report,
+        "  keepcase={} ({})",
+        match (is_used, has_probe) {
+            (true, true) => "probe-recorded",
+            (true, false) => "dictionary-uses-flag",
+            (false, _) => "not-used-by-dictionary",
+        },
+        flag
+    )
+    .expect("writing to String does not fail");
+}
+
+fn keepcase_flag(aff_text: &str) -> Option<char> {
+    aff_text.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        (fields.next() == Some("KEEPCASE"))
+            .then(|| fields.next())
+            .flatten()
+            .and_then(|flag| flag.chars().next())
+    })
+}
+
+const fn probe_category_name(category: ProbeCategory) -> &'static str {
+    match category {
+        ProbeCategory::Stem => "stem",
+        ProbeCategory::Affixed => "affixed",
+        ProbeCategory::Compound => "compound",
+        ProbeCategory::SentenceInitial => "sentence-initial",
+        ProbeCategory::AllCaps => "all-caps",
+        ProbeCategory::KeepCase => "keepcase",
+    }
 }
 
 fn write_blocked_scorecard(fixture: &Fixture, reason: &str) {
@@ -276,13 +431,13 @@ fn write_scorecard(
         .take(128)
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
-    corpus.extend(fixture.accepted.iter().cloned());
+    corpus.extend(fixture.accepted.iter().map(|probe| probe.word.clone()));
     corpus.extend(fixture.rejected.iter().cloned());
     corpus.extend(
         fixture
             .accepted
             .iter()
-            .map(|word| format!("{word}ferrolexcompat")),
+            .map(|probe| format!("{}ferrolexcompat", probe.word)),
     );
     let corpus = corpus
         .into_iter()
@@ -466,12 +621,20 @@ fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
             fields.len()
         ));
     }
-    let parse_words = |value: &str| {
+    let parse_probes = |value: &str| {
         value
-            .split(',')
-            .filter(|word| !word.is_empty())
-            .map(str::to_owned)
-            .collect()
+            .split(';')
+            .filter(|probe| !probe.is_empty())
+            .map(|probe| {
+                let (category, word) = probe.split_once('=').ok_or_else(|| {
+                    format!("manifest line {line_number} probe `{probe}` needs category=word")
+                })?;
+                Ok(Probe {
+                    category: ProbeCategory::parse(category)?,
+                    word: word.to_owned(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
     };
     Ok(Fixture {
         id: fields[0].to_owned(),
@@ -489,8 +652,12 @@ fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
         aff_decode: Decode::parse(fields[8])?,
         dic_decode: Decode::parse(fields[9])?,
         import_expectation: ImportExpectation::parse(fields[10])?,
-        accepted: parse_words(fields[11]),
-        rejected: parse_words(fields[12]),
+        accepted: parse_probes(fields[11])?,
+        rejected: fields[12]
+            .split(',')
+            .filter(|word| !word.is_empty())
+            .map(str::to_owned)
+            .collect(),
         source: fields[13].to_owned(),
         license: fields[14].to_owned(),
         license_evidence: fields[15].to_owned(),

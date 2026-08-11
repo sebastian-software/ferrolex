@@ -10,41 +10,72 @@ source review visible.
 
 [`crates/ferrolex-hunspell/tests/real_world/manifest.tsv`](../crates/ferrolex-hunspell/tests/real_world/manifest.tsv)
 is the authoritative registry. It pins a source revision, file sizes,
-SHA-256 values, decoding status, import expectation, positive recognition
-probes, and a negative probe for every fixture. It deliberately contains
-metadata only, never dictionary words or affix rules.
+SHA-256 values, decoding status, import expectation, category-labelled positive
+recognition probes, and a negative probe for every fixture. It deliberately
+contains only this bounded metadata and probe set, never dictionary source data
+or affix rules.
 
-The first two cases were selected for complementary evidence rather than their
-licenses alone:
+The current reviewed LibreOffice fixtures are `en_US`, `de_DE`, `fr_FR`,
+`nl_NL`, `hu_HU`, `ar`, and `tr_TR`. Their source-specific license evidence is
+the final column of the manifest. Those terms govern the dictionary data, not
+ferrolex. They are acceptable for an opt-in test because no third-party content
+is distributed by this repository. Adding a fixture still requires a review of
+the exact source's embedded license or notice; a package-level or hosting-site
+license alone is insufficient.
 
-| ID | Source and license evidence | Purpose | Current expected result |
-| --- | --- | --- | --- |
-| `en_CA` | Chromium's pinned Hunspell dictionary repository includes [`README_en_CA.txt`](https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/50fb79b30a2e3e512c88884152f26b255d0e4074/README_en_CA.txt), which states the permissive redistribution conditions inherited from Geoff Kuenning's word list. | A compact, real ISO-8859-1 dictionary with ordinary English affixes and compound directives. | The harness uses the public byte importer, which losslessly decodes the declared ISO-8859-1 input. It records recognition-affecting diagnostics such as `COMPOUNDRULE` instead of hiding them. |
-| `hu_HU` | The [`Magyar Ispell COPYING`](https://github.com/laszlonemeth/magyarispell/blob/455229e26eaf5c9ed5bb7a4456c131fc0985e399/COPYING) file explicitly grants GPL-2.0-or-later, LGPL-2.1-or-later, or MPL-1.1-or-later; its project identifies LibreOffice's `hu_HU` files as the release dictionary. | A large morphology stress case required by the RFC. | The pinned `.aff` bytes are not valid UTF-8 despite their `SET` line, so the suite reports a format boundary rather than silently lossy-decoding the input. |
-| `pl_PL` | LibreOffice's pinned locale directory carries a [locale-specific upstream notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/pl_PL/README_pl_PL.txt). Its exact data license remains an explicit review item before any redistribution decision. | First strict byte-import reference case: ISO-8859-2 decoding, runtime-cache compilation, and cache loading are all exercised against exact upstream bytes. | Strict import accepts the documented subset; cached recognition accepts `słowo` and `słowami` and rejects the synthetic negative probe. This is bounded ferrolex-subset evidence, not general Hunspell parity. |
+### Probe categories
 
-These terms govern the dictionary data, not ferrolex. They are acceptable for
-an opt-in test because no third-party content is distributed by this repository.
-Adding a fixture still requires a review of the exact source's embedded
-license/notice; a package-level or hosting-site license alone is insufficient.
+The positive-probe field uses semicolon-separated `category=word` entries. The
+categories make the intended recognition mechanism visible in code review and
+give failed probes a precise documentation link:
+
+| Category | Contract | Failure reference |
+| --- | --- | --- |
+| `stem` | Stored dictionary entry. | This document |
+| `affixed` | Prefix or suffix recognition derived from a stored stem. | [Affix semantics](affix-semantics.md) |
+| `compound` | Recognition through declared compound rules or positions. | [Compound semantics](compound-semantics.md) |
+| `sentence-initial` | Initial-capital lookup through Hunspell-style casing fallback. | [Hunspell import contract](hunspell-format.md) |
+| `all-caps` | All-uppercase lookup through Hunspell-style casing fallback. | [Hunspell import contract](hunspell-format.md) |
+| `keepcase` | A dictionary entry marked by `KEEPCASE`; casing fallback must not admit it. | [Hunspell import contract](hunspell-format.md) |
+
+Every strict fixture must carry `stem` and `affixed` probes. If its AFF file
+declares a compound directive, it must also carry `compound`. A fixture with
+cased text must carry both casing categories. `KEEPCASE` is required only when
+the pinned dictionary actually uses its declared flag. The current `de_DE`
+AFF file declares `KEEPCASE w`, but its pinned dictionary has no `w`-flagged
+entry; the suite reports that fact rather than claiming a non-existent probe.
+Arabic has neither a cased script nor a `COMPOUND*` directive in its pinned
+AFF file, so its strict fixture records a stem and an affixed clitic form only.
 
 ## Preparing fixtures locally
 
 Create the following outside the repository or under the ignored
 `.compat-fixtures` directory. Obtain the files from the revision-pinned URLs in
-the manifest; the suite intentionally has no downloader.
+the manifest; the test harness intentionally has no downloader.
 
 ```text
 .compat-fixtures/
-├── en_CA/
-│   ├── en_CA.aff
-│   └── en_CA.dic
-└── hu_HU/
-    ├── hu_HU.aff
-    └── hu_HU.dic
-└── pl_PL/
-    ├── pl_PL.aff
-    └── pl_PL.dic
+├── en_US/
+│   ├── en_US.aff
+│   └── en_US.dic
+├── de_DE/
+│   ├── de_DE_frami.aff
+│   └── de_DE_frami.dic
+├── fr_FR/
+│   ├── fr.aff
+│   └── fr.dic
+├── nl_NL/
+│   ├── nl_NL.aff
+│   └── nl_NL.dic
+├── hu_HU/
+│   ├── hu_HU.aff
+│   └── hu_HU.dic
+├── ar/
+│   ├── ar.aff
+│   └── ar.dic
+└── tr_TR/
+    ├── tr_TR.aff
+    └── tr_TR.dic
 ```
 
 Before enabling the suite, compare both byte size and SHA-256 with the
@@ -52,9 +83,13 @@ manifest. The harness repeats both checks before importing. On macOS and most
 Linux installations, the optional manual check is:
 
 ```sh
-shasum -a 256 .compat-fixtures/en_CA/en_CA.aff .compat-fixtures/en_CA/en_CA.dic
+shasum -a 256 .compat-fixtures/en_US/en_US.aff .compat-fixtures/en_US/en_US.dic
+shasum -a 256 .compat-fixtures/de_DE/de_DE_frami.aff .compat-fixtures/de_DE/de_DE_frami.dic
+shasum -a 256 .compat-fixtures/fr_FR/fr.aff .compat-fixtures/fr_FR/fr.dic
+shasum -a 256 .compat-fixtures/nl_NL/nl_NL.aff .compat-fixtures/nl_NL/nl_NL.dic
 shasum -a 256 .compat-fixtures/hu_HU/hu_HU.aff .compat-fixtures/hu_HU/hu_HU.dic
-shasum -a 256 .compat-fixtures/pl_PL/pl_PL.aff .compat-fixtures/pl_PL/pl_PL.dic
+shasum -a 256 .compat-fixtures/ar/ar.aff .compat-fixtures/ar/ar.dic
+shasum -a 256 .compat-fixtures/tr_TR/tr_TR.aff .compat-fixtures/tr_TR/tr_TR.dic
 ```
 
 Then run the opt-in integration test:
