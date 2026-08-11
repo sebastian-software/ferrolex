@@ -8,6 +8,7 @@
 
 mod cache;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -35,6 +36,7 @@ const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
 const MAX_BREAK_PATTERNS: usize = 256;
 const MAX_REPLACEMENT_RULES: usize = 4_096;
 const MAX_AFFIX_ALIASES: usize = 100_000;
+const MAX_INPUT_CONVERSIONS: usize = 4_096;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -236,10 +238,19 @@ pub struct HunspellDictionary {
     sharp_uppercase_forms: BTreeSet<Box<str>>,
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
+    ignored_characters: BTreeSet<char>,
+    input_conversions: Vec<InputConversion>,
 }
 
 impl Dictionary for HunspellDictionary {
     fn contains(&self, word: &str) -> bool {
+        let word = self.normalize_input(word);
+        self.contains_normalized(word.as_ref())
+    }
+}
+
+impl HunspellDictionary {
+    fn contains_normalized(&self, word: &str) -> bool {
         self.stems.get(word).is_some_and(|flags| {
             !self.is_forbidden(flags)
                 && !self.requires_affix(flags)
@@ -253,9 +264,7 @@ impl Dictionary for HunspellDictionary {
             || self.matches_break_word(word)
             || self.sharp_uppercase_forms.contains(word)
     }
-}
 
-impl HunspellDictionary {
     #[allow(
         clippy::too_many_arguments,
         reason = "the importer and cache hand over every owned runtime section explicitly"
@@ -270,6 +279,8 @@ impl HunspellDictionary {
         break_characters: BTreeSet<char>,
         word_characters: BTreeSet<char>,
         replacement_rules: Vec<ReplacementRule>,
+        ignored_characters: BTreeSet<char>,
+        input_conversions: Vec<InputConversion>,
     ) -> Self {
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
@@ -293,6 +304,8 @@ impl HunspellDictionary {
             sharp_uppercase_forms,
             word_characters,
             replacement_rules,
+            ignored_characters,
+            input_conversions,
         }
     }
 
@@ -322,6 +335,26 @@ impl HunspellDictionary {
     #[must_use]
     pub fn replacement_rules(&self) -> &[ReplacementRule] {
         &self.replacement_rules
+    }
+
+    fn normalize_input<'input>(&self, word: &'input str) -> Cow<'input, str> {
+        if self.input_conversions.is_empty() && self.ignored_characters.is_empty() {
+            return Cow::Borrowed(word);
+        }
+        let mut normalized = word.to_owned();
+        for conversion in &self.input_conversions {
+            if conversion.at_word_end {
+                if let Some(prefix) = normalized.strip_suffix(conversion.from.as_ref()) {
+                    normalized = format!("{prefix}{}", conversion.to);
+                }
+            } else {
+                normalized = normalized.replace(conversion.from.as_ref(), conversion.to.as_ref());
+            }
+        }
+        if !self.ignored_characters.is_empty() {
+            normalized.retain(|character| !self.ignored_characters.contains(&character));
+        }
+        Cow::Owned(normalized)
     }
 
     fn matches_single_affix_word(&self, word: &str) -> bool {
@@ -712,11 +745,11 @@ impl HunspellDictionary {
         let mut had_break = false;
         for part in parts {
             had_break = true;
-            if part.is_empty() || !self.contains(part) {
+            if part.is_empty() || !self.contains_normalized(part) {
                 return false;
             }
         }
-        had_break && self.contains(first)
+        had_break && self.contains_normalized(first)
     }
 }
 
@@ -804,6 +837,13 @@ struct Lexeme {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct Flag(Box<str>);
+
+#[derive(Clone, Debug)]
+struct InputConversion {
+    from: Box<str>,
+    to: Box<str>,
+    at_word_end: bool,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AffixKind {
@@ -1209,11 +1249,13 @@ fn import_decoded(
     mode: ImportMode,
     mut diagnostics: Vec<Diagnostic>,
 ) -> Result<ImportResult, ImportError> {
-    let parsed_aff = if enforce_input_limit(aff_source, aff_text, MAX_AFF_BYTES, &mut diagnostics) {
-        parse_aff(aff_source, aff_text)
-    } else {
-        ParsedAff::default()
-    };
+    let mut parsed_aff =
+        if enforce_input_limit(aff_source, aff_text, MAX_AFF_BYTES, &mut diagnostics) {
+            parse_aff(aff_source, aff_text)
+        } else {
+            ParsedAff::default()
+        };
+    normalize_affix_text_for_ignored_characters(aff_source, &mut parsed_aff, &mut diagnostics);
     diagnostics.extend(parsed_aff.diagnostics.clone());
     let lexemes = if enforce_input_limit(dic_source, dic_text, MAX_DIC_BYTES, &mut diagnostics) {
         parse_dic(
@@ -1221,6 +1263,7 @@ fn import_decoded(
             dic_text,
             &parsed_aff.flag_aliases,
             parsed_aff.morphology_aliases.len(),
+            &parsed_aff.ignored_characters,
             &mut diagnostics,
         )
     } else {
@@ -1240,6 +1283,8 @@ fn import_decoded(
         parsed_aff.break_characters,
         parsed_aff.word_characters,
         parsed_aff.replacement_rules,
+        parsed_aff.ignored_characters,
+        parsed_aff.input_conversions,
     );
 
     if mode == ImportMode::Strict
@@ -1394,11 +1439,19 @@ struct ParsedAff {
     break_characters: BTreeSet<char>,
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
-    replacement_rules_declared: bool,
     flag_aliases: Vec<Option<BTreeSet<Flag>>>,
-    flag_aliases_declared: bool,
     morphology_aliases: Vec<Option<Box<str>>>,
-    morphology_aliases_declared: bool,
+    ignored_characters: BTreeSet<char>,
+    input_conversions: Vec<InputConversion>,
+    declared_sections: BTreeSet<CountedSection>,
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum CountedSection {
+    ReplacementRules,
+    FlagAliases,
+    MorphologyAliases,
+    InputConversions,
 }
 
 #[allow(
@@ -1539,6 +1592,16 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
             ),
             "AF" => parse_flag_aliases(source, &mut lines, line_number, &fields, &mut parsed),
             "AM" => parse_morphology_aliases(source, &mut lines, line_number, &fields, &mut parsed),
+            "ICONV" => {
+                parse_input_conversions(source, &mut lines, line_number, &fields, &mut parsed);
+            }
+            "IGNORE" => parse_ignored_characters(
+                source,
+                line_number,
+                &fields,
+                &mut parsed.ignored_characters,
+                &mut parsed.diagnostics,
+            ),
             "REP" => parse_replacement_rules(source, &mut lines, line_number, &fields, &mut parsed),
             "PFX" | "SFX" => parse_affix_group(
                 source,
@@ -1582,7 +1645,10 @@ fn parse_flag_aliases(
         ));
         return;
     }
-    if parsed.flag_aliases_declared {
+    if parsed
+        .declared_sections
+        .contains(&CountedSection::FlagAliases)
+    {
         parsed.diagnostics.push(diagnostic(
             source,
             line_number,
@@ -1592,7 +1658,7 @@ fn parse_flag_aliases(
         ));
         return;
     }
-    parsed.flag_aliases_declared = true;
+    parsed.declared_sections.insert(CountedSection::FlagAliases);
 
     for _ in 0..count {
         let Some((index, line)) = next_alias_line(lines) else {
@@ -1651,7 +1717,10 @@ fn parse_morphology_aliases(
         ));
         return;
     }
-    if parsed.morphology_aliases_declared {
+    if parsed
+        .declared_sections
+        .contains(&CountedSection::MorphologyAliases)
+    {
         parsed.diagnostics.push(diagnostic(
             source,
             line_number,
@@ -1661,7 +1730,9 @@ fn parse_morphology_aliases(
         ));
         return;
     }
-    parsed.morphology_aliases_declared = true;
+    parsed
+        .declared_sections
+        .insert(CountedSection::MorphologyAliases);
 
     for _ in 0..count {
         let Some((index, line)) = next_alias_line(lines) else {
@@ -1698,10 +1769,183 @@ fn parse_alias_count(fields: &[&str]) -> Option<usize> {
         .flatten()
 }
 
+fn parse_input_conversions(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = parse_alias_count(fields) else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "ICONV",
+            Severity::Error,
+            "ICONV header requires exactly one non-negative rule count",
+        ));
+        return;
+    };
+    if count > MAX_INPUT_CONVERSIONS {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "ICONV",
+            Severity::Error,
+            "ICONV rule count exceeds the configured limit of 4096",
+        ));
+        return;
+    }
+    if parsed
+        .declared_sections
+        .contains(&CountedSection::InputConversions)
+    {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "ICONV",
+            Severity::Error,
+            "ICONV may only be declared once",
+        ));
+        return;
+    }
+    parsed
+        .declared_sections
+        .insert(CountedSection::InputConversions);
+
+    for _ in 0..count {
+        let Some((index, line)) = next_alias_line(lines) else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "ICONV",
+                Severity::Error,
+                "ICONV header ended before all declared rules were supplied",
+            ));
+            return;
+        };
+        let rule_fields = line.split_whitespace().collect::<Vec<_>>();
+        let Some((from, to)) = matches!(rule_fields.as_slice(), ["ICONV", _, _])
+            .then(|| (rule_fields[1], rule_fields[2]))
+        else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "ICONV",
+                Severity::Error,
+                "ICONV rules require exactly two non-empty literal strings",
+            ));
+            continue;
+        };
+        let at_word_end = from.ends_with('_');
+        let from = if at_word_end {
+            &from[..from.len() - '_'.len_utf8()]
+        } else {
+            from
+        };
+        if from.is_empty()
+            || to.is_empty()
+            || from.len() > MAX_LINE_BYTES
+            || to.len() > MAX_LINE_BYTES
+        {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "ICONV",
+                Severity::Error,
+                "ICONV rules require bounded non-empty source and target strings",
+            ));
+            continue;
+        }
+        parsed.input_conversions.push(InputConversion {
+            from: Box::from(from),
+            to: Box::from(to),
+            at_word_end,
+        });
+    }
+}
+
+fn parse_ignored_characters(
+    source: &str,
+    line: usize,
+    fields: &[&str],
+    ignored_characters: &mut BTreeSet<char>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if fields.len() != 2 || fields[1].is_empty() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "IGNORE",
+            Severity::Error,
+            "IGNORE requires exactly one non-empty Unicode character set",
+        ));
+        return;
+    }
+    if !ignored_characters.is_empty() {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "IGNORE",
+            Severity::Error,
+            "IGNORE may only be declared once",
+        ));
+        return;
+    }
+    ignored_characters.extend(fields[1].chars());
+}
+
 fn next_alias_line<'source>(
     lines: &mut std::iter::Enumerate<std::str::Lines<'source>>,
 ) -> Option<(usize, &'source str)> {
     lines.find_map(|(index, line)| (!is_ignored_line(line.trim())).then_some((index, line.trim())))
+}
+
+fn normalize_affix_text_for_ignored_characters(
+    source: &str,
+    parsed: &mut ParsedAff,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if parsed.ignored_characters.is_empty() {
+        return;
+    }
+    for rule in parsed.prefixes.iter_mut().chain(&mut parsed.suffixes) {
+        rule.strip = remove_ignored_characters(&rule.strip, &parsed.ignored_characters);
+        rule.add = remove_ignored_characters(&rule.add, &parsed.ignored_characters);
+        for atom in &rule.condition.atoms {
+            if matches!(atom, ConditionAtom::Literal(character) if parsed.ignored_characters.contains(character))
+            {
+                diagnostics.push(diagnostic(
+                    source,
+                    1,
+                    "IGNORE",
+                    Severity::Error,
+                    "IGNORE cannot safely remove a literal affix-condition character",
+                ));
+                break;
+            }
+            if matches!(atom, ConditionAtom::Class { members, .. } if members.iter().any(|character| parsed.ignored_characters.contains(character)))
+            {
+                diagnostics.push(diagnostic(
+                    source,
+                    1,
+                    "IGNORE",
+                    Severity::Error,
+                    "IGNORE cannot safely remove an affix-condition class character",
+                ));
+                break;
+            }
+        }
+    }
+}
+
+fn remove_ignored_characters(value: &str, ignored_characters: &BTreeSet<char>) -> Box<str> {
+    Box::from(
+        value
+            .chars()
+            .filter(|character| !ignored_characters.contains(character))
+            .collect::<String>(),
+    )
 }
 
 fn parse_replacement_rules(
@@ -1735,7 +1979,10 @@ fn parse_replacement_rules(
         ));
         return;
     }
-    if parsed.replacement_rules_declared {
+    if parsed
+        .declared_sections
+        .contains(&CountedSection::ReplacementRules)
+    {
         parsed.diagnostics.push(diagnostic(
             source,
             line_number,
@@ -1745,7 +1992,9 @@ fn parse_replacement_rules(
         ));
         return;
     }
-    parsed.replacement_rules_declared = true;
+    parsed
+        .declared_sections
+        .insert(CountedSection::ReplacementRules);
 
     for _ in 0..count {
         let Some((index, line)) = lines.next() else {
@@ -2345,6 +2594,7 @@ fn parse_dic(
     text: &str,
     flag_aliases: &[Option<BTreeSet<Flag>>],
     morphology_alias_count: usize,
+    ignored_characters: &BTreeSet<char>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Lexeme> {
     let mut entries = BTreeMap::<Box<str>, BTreeSet<Flag>>::new();
@@ -2390,6 +2640,7 @@ fn parse_dic(
         let (stem, flags) = field
             .split_once('/')
             .map_or((field, None), |(stem, flags)| (stem, Some(flags)));
+        let stem = remove_ignored_characters(stem, ignored_characters);
         if stem.is_empty() {
             diagnostics.push(diagnostic(
                 source,
@@ -2444,10 +2695,7 @@ fn parse_dic(
             morphology_alias_count,
             diagnostics,
         );
-        entries
-            .entry(Box::<str>::from(stem))
-            .or_default()
-            .extend(entry_flags);
+        entries.entry(stem).or_default().extend(entry_flags);
     }
 
     if let Some((count_line, expected_count)) =
@@ -2672,6 +2920,41 @@ mod tests {
         assert!(result.dictionary().contains("roots"));
         assert!(result.dictionary().contains("othered"));
         assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn normalizes_iconv_and_ignore_before_every_lookup_strategy() {
+        let result = import(
+            "normalization.aff",
+            "IGNORE \u{301}\nICONV 2\nICONV æ ae\nICONV -_ x\nSFX A Y 1\nSFX A 0 s .\n",
+            "normalization.dic",
+            "3\naer\nfinx\nword/A\n",
+            ImportMode::Strict,
+        )
+        .expect("normalization directives import cleanly");
+        let dictionary = result.dictionary();
+
+        assert!(dictionary.contains("ær"));
+        assert!(dictionary.contains("fin-"));
+        assert!(dictionary.contains("wo\u{301}rds"));
+        assert!(!dictionary.contains("fins"));
+    }
+
+    #[test]
+    fn malformed_iconv_or_ignore_are_strict_errors() {
+        let error = import(
+            "normalization.aff",
+            "IGNORE\nICONV 1\nICONV only-source\n",
+            "normalization.dic",
+            "1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect_err("recognition-affecting directives must be complete");
+
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            matches!(diagnostic.directive(), "ICONV" | "IGNORE")
+                && diagnostic.severity() == Severity::Error
+        }));
     }
 
     #[test]

@@ -16,9 +16,9 @@ use sha2::{Digest as _, Sha256};
 
 use super::{
     AffixKind, AffixRule, CompoundConfig, CompoundRule, Condition, ConditionAtom, Flag,
-    HunspellDictionary, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
+    HunspellDictionary, InputConversion, Lexeme, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
     MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES,
-    MAX_FLAGS_PER_ENTRY, MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
+    MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES, MAX_REPLACEMENT_RULES,
 };
 use ferrolex_suggest::ReplacementRule;
 
@@ -34,7 +34,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 1;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 9;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 10;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -219,6 +219,15 @@ pub fn compile_runtime_cache(
         write_u32(&mut output, u32::from(*character));
     }
     write_replacement_rules(&mut output, &dictionary.replacement_rules)?;
+    write_count(
+        &mut output,
+        dictionary.ignored_characters.len(),
+        "ignored character count",
+    )?;
+    for character in &dictionary.ignored_characters {
+        write_u32(&mut output, u32::from(*character));
+    }
+    write_input_conversions(&mut output, &dictionary.input_conversions)?;
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -331,6 +340,18 @@ pub fn load_runtime_cache(
         }
     }
     let replacement_rules = read_replacement_rules(&mut reader)?;
+    let ignored_character_count = reader.count(MAX_LINE_BYTES, "ignored character count")?;
+    reader.require_minimum_items(ignored_character_count, 4, "ignored characters")?;
+    let mut ignored_characters = BTreeSet::new();
+    for _ in 0..ignored_character_count {
+        let character = reader.character()?;
+        if !ignored_characters.insert(character) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "duplicate ignored character",
+            ));
+        }
+    }
+    let input_conversions = read_input_conversions(&mut reader)?;
     let compound = CompoundConfig {
         flag,
         begin,
@@ -360,6 +381,8 @@ pub fn load_runtime_cache(
         break_characters,
         word_characters,
         replacement_rules,
+        ignored_characters,
+        input_conversions,
     );
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)
@@ -460,6 +483,21 @@ fn validate_dictionary(
     }
     if dictionary.replacement_rules.len() > MAX_REPLACEMENT_RULES {
         return Err(error.error("replacement rule count exceeds importer limit"));
+    }
+    if dictionary.ignored_characters.len() > MAX_LINE_BYTES {
+        return Err(error.error("ignored character count exceeds importer line limit"));
+    }
+    if dictionary.input_conversions.len() > MAX_INPUT_CONVERSIONS {
+        return Err(error.error("input conversion count exceeds importer limit"));
+    }
+    for conversion in &dictionary.input_conversions {
+        if conversion.from.is_empty()
+            || conversion.to.is_empty()
+            || conversion.from.len() > MAX_LINE_BYTES
+            || conversion.to.len() > MAX_LINE_BYTES
+        {
+            return Err(error.error("input conversion has invalid string text"));
+        }
     }
     for rule in &dictionary.replacement_rules {
         if rule.from().len() > MAX_LINE_BYTES || rule.to().len() > MAX_LINE_BYTES {
@@ -641,6 +679,19 @@ fn write_replacement_rules(
     Ok(())
 }
 
+fn write_input_conversions(
+    output: &mut Vec<u8>,
+    conversions: &[InputConversion],
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, conversions.len(), "input conversion count")?;
+    for conversion in conversions {
+        write_string(output, &conversion.from, "input conversion source")?;
+        write_string(output, &conversion.to, "input conversion target")?;
+        output.push(u8::from(conversion.at_word_end));
+    }
+    Ok(())
+}
+
 fn write_count(
     output: &mut Vec<u8>,
     count: usize,
@@ -699,6 +750,38 @@ fn read_replacement_rules(
         rules.push(rule);
     }
     Ok(rules)
+}
+
+fn read_input_conversions(
+    reader: &mut Reader<'_>,
+) -> Result<Vec<InputConversion>, RuntimeCacheError> {
+    let count = reader.count(MAX_INPUT_CONVERSIONS, "input conversion count")?;
+    reader.require_minimum_items(count, 9, "input conversions")?;
+    let mut conversions = Vec::with_capacity(count);
+    for _ in 0..count {
+        let from = reader.string(MAX_LINE_BYTES, "input conversion source")?;
+        let to = reader.string(MAX_LINE_BYTES, "input conversion target")?;
+        let at_word_end = match reader.byte()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(RuntimeCacheError::InvalidArtifact(
+                    "invalid input conversion end marker",
+                ))
+            }
+        };
+        if from.is_empty() || to.is_empty() {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "input conversion has empty string text",
+            ));
+        }
+        conversions.push(InputConversion {
+            from: Box::from(from),
+            to: Box::from(to),
+            at_word_end,
+        });
+    }
+    Ok(conversions)
 }
 
 fn read_rules(
@@ -965,9 +1048,9 @@ mod tests {
     };
     use crate::{import, ImportMode};
 
-    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP teh the\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
+    const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nWORDCHARS -.ß\nREP 1\nREP teh the\nIGNORE \u{301}\nICONV 2\nICONV æ ae\nICONV -_ x\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\n";
     const DIC: &str =
-        "9\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\n";
+        "11\nword/AB\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())
@@ -1021,6 +1104,8 @@ mod tests {
             ['-', '.', 'ß']
         );
         assert_eq!(loaded.replacement_rules(), original.replacement_rules());
+        assert!(loaded.contains("ær"));
+        assert!(loaded.contains("fin-"));
         assert!(!loaded.contains("Teil"));
     }
 

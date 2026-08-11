@@ -52,7 +52,8 @@ is an error for that entry, not a panic.
 
 ## Initial AFF subset
 
-The current compatibility level recognizes `SET`, `FLAG`, `AF`, `AM`, `PFX`, `SFX`,
+The current compatibility level recognizes `SET`, `FLAG`, `AF`, `AM`, `ICONV`,
+`IGNORE`, `PFX`, `SFX`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
 `ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded literal `COMPOUNDRULE` patterns, and bounded
@@ -79,6 +80,15 @@ morphology-alias table. Its references are validated, but their morphology text
 is discarded because the current runtime does not expose morphology metadata.
 Malformed `AF` is an error because it can change recognition; malformed `AM`
 is a warning because it cannot.
+
+`ICONV` is a counted input-conversion table. ferrolex applies its literal
+rules in source order to every lookup input before dictionary recognition; a
+source ending in `_` is restricted to the end of the input word. `IGNORE`
+declares Unicode scalar values removed from input, dictionary stems, and affix
+strip/add text. Both directives can change recognition, so malformed input is
+an error. An ignored character inside an affix condition remains an explicit
+error rather than receiving guessed condition semantics. The importer limits
+`ICONV` to 4,096 rules.
 
 `AF`, aliases, complex prefix modes, capitalization fallbacks, compound
 compound quantifiers and suggestion directives beyond the
