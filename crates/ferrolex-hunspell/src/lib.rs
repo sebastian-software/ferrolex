@@ -4295,9 +4295,15 @@ fn is_suggestion_only_directive(directive: &str) -> bool {
             | "NGRAMSUGS"
             | "NOSPLITSUGS"
             | "NOSUGGEST"
+            | "ONLYMAXDIFF"
             | "PHONE"
             | "SUGSWITHDOTS"
             | "TRY"
+            | "WARN"
+            | "FORBIDWARN"
+            | "HOME"
+            | "NAME"
+            | "VERSION"
     )
 }
 
@@ -4657,6 +4663,24 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.directive() == "REP"
                 && diagnostic.severity() == Severity::Warning));
+    }
+
+    #[test]
+    fn informational_and_warning_directives_do_not_block_strict_import() {
+        let result = import(
+            "metadata.aff",
+            "WARN W\nFORBIDWARN F\nONLYMAXDIFF\nHOME https://example.invalid\nNAME Test dictionary\nVERSION 1\n",
+            "metadata.dic",
+            "1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect("non-recognition directives are warnings");
+
+        assert!(result.dictionary().contains("word"));
+        assert!(result
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.severity() == Severity::Warning));
     }
 
     #[test]

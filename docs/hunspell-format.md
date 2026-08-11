@@ -104,6 +104,11 @@ Complex prefix modes, compound syntax beyond the bounded documented subset, and
 suggestion directives beyond the documented subset have their own later feature
 gates. They must be diagnosed rather than silently interpreted as simple affixes.
 
+`WARN`, `FORBIDWARN`, and `ONLYMAXDIFF` are suggestion-ranking controls, while
+`HOME`, `NAME`, and `VERSION` are informational metadata. ferrolex preserves
+their source-aware warning diagnostics but does not let them block strict
+recognition import; it does not yet expose or apply their suggestion behavior.
+
 `BREAK` accepts up to 256 literal Unicode patterns. A plain pattern splits one
 word into two independently recognized non-empty parts; `^pattern` removes one
 leading pattern and `pattern$` removes one trailing pattern. The matcher does
