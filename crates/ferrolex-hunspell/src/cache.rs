@@ -31,13 +31,13 @@ const HEADER_BYTES: usize = MAGIC.len() + 2 + 4 + (CHECKSUM_BYTES * 2);
 const MAX_RUNTIME_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 /// The on-disk layout version for a Hunspell runtime cache.
-pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 2;
+pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 3;
 
 /// The recognition semantics encoded by a Hunspell runtime cache.
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 24;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 25;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -310,6 +310,7 @@ pub fn compile_runtime_cache(
     write_input_conversions(&mut output, &dictionary.input_conversions)?;
     write_input_conversions(&mut output, &dictionary.output_conversions)?;
     output.push(u8::from(dictionary.full_strip));
+    output.push(u8::from(dictionary.complex_prefixes));
     output.extend_from_slice(&Sha256::digest(&output));
     Ok(output)
 }
@@ -490,6 +491,7 @@ pub fn load_runtime_cache(
     let input_conversions = read_input_conversions(&mut reader)?;
     let output_conversions = read_input_conversions(&mut reader)?;
     let full_strip = read_boolean(&mut reader, "invalid fullstrip marker")?;
+    let complex_prefixes = read_boolean(&mut reader, "invalid complex-prefix marker")?;
     let compound = CompoundConfig {
         flag,
         begin,
@@ -531,6 +533,7 @@ pub fn load_runtime_cache(
         input_conversions,
         output_conversions,
         full_strip,
+        complex_prefixes,
     );
     validate_dictionary(&dictionary, DictionaryError::Load)?;
     Ok(dictionary)

@@ -56,7 +56,7 @@ is an error for that entry, not a panic.
 
 The current compatibility level recognizes `SET`, `FLAG`, `LANG`, `AF`, `AM`, `ICONV`,
 `OCONV`, `IGNORE`, `PFX`, `SFX`, `FULLSTRIP`,
-`CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
+`CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPLEXPREFIXES`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
 `ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded `COMPOUNDRULE` patterns with
 postfix `*`, `+`, or `?`, and bounded

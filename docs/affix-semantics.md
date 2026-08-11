@@ -40,6 +40,11 @@ to two suffixes when the lexeme carries the required flags. The prefix operates
 on the stem first, then the suffixes operate on the prefixed form. Rules without
 that opt-in are never combined merely because both independently match.
 
+`COMPLEXPREFIXES` changes the prefix limit to two. The first prefix must pass a
+continuation flag to the second; both still occur before any suffix, and all
+existing rule, depth, and candidate budgets apply. Without this directive,
+ferrolex never approximates a second prefix.
+
 ## Advanced flags
 
 Continuation flags following an add field (`add/flags`) are the only same-kind

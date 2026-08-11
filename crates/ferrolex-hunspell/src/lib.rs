@@ -263,6 +263,7 @@ pub struct HunspellDictionary {
     input_conversions: Vec<InputConversion>,
     output_conversions: Vec<InputConversion>,
     full_strip: bool,
+    complex_prefixes: bool,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -318,6 +319,7 @@ impl HunspellDictionary {
         input_conversions: Vec<InputConversion>,
         output_conversions: Vec<InputConversion>,
         full_strip: bool,
+        complex_prefixes: bool,
     ) -> Self {
         let stem_indices = stem_indices(&lexemes);
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
@@ -349,6 +351,7 @@ impl HunspellDictionary {
             input_conversions,
             output_conversions,
             full_strip,
+            complex_prefixes,
         }
     }
 
@@ -548,7 +551,7 @@ impl HunspellDictionary {
             };
             for index in rule_indices {
                 let rule = &rules[*index];
-                if !state.can_apply(rule) {
+                if !state.can_apply(rule, self.complex_prefixes) {
                     continue;
                 }
                 if let Some(form) = rule.apply(&state.form, self.full_strip) {
@@ -1495,12 +1498,15 @@ impl FormState {
         }
     }
 
-    fn can_apply(&self, rule: &AffixRule) -> bool {
+    fn can_apply(&self, rule: &AffixRule, complex_prefixes: bool) -> bool {
         !self.used_rules.contains(&rule.id)
             && match rule.kind {
-                // Hunspell permits one prefix. A prefix is applied before any
-                // suffix so the resulting form remains unambiguous.
-                AffixKind::Prefix => self.prefix_count == 0 && self.suffix_count == 0,
+                // COMPLEXPREFIXES permits a second prefix. Prefixes still
+                // precede every suffix so the derived form remains bounded.
+                AffixKind::Prefix => {
+                    self.prefix_count < if complex_prefixes { 2 } else { 1 }
+                        && self.suffix_count == 0
+                }
                 // Continuation classes may supply one additional suffix.
                 AffixKind::Suffix => self.suffix_count < 2,
             }
@@ -1897,7 +1903,8 @@ fn import_decoded(
         parsed_aff.ignored_characters,
         parsed_aff.input_conversions,
         parsed_aff.output_conversions,
-        parsed_aff.full_strip,
+        parsed_aff.affix_behavior.full_strip,
+        parsed_aff.affix_behavior.complex_prefixes,
     );
 
     if mode == ImportMode::Strict
@@ -2128,8 +2135,14 @@ struct ParsedAff {
     ignored_characters: BTreeSet<char>,
     input_conversions: Vec<InputConversion>,
     output_conversions: Vec<InputConversion>,
-    full_strip: bool,
+    affix_behavior: AffixBehavior,
     declared_sections: BTreeSet<CountedSection>,
+}
+
+#[derive(Default)]
+struct AffixBehavior {
+    full_strip: bool,
+    complex_prefixes: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2253,7 +2266,15 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 line_number,
                 directive,
                 &fields,
-                &mut parsed.full_strip,
+                &mut parsed.affix_behavior.full_strip,
+                &mut parsed.diagnostics,
+            ),
+            "COMPLEXPREFIXES" => parse_marker(
+                source,
+                line_number,
+                directive,
+                &fields,
+                &mut parsed.affix_behavior.complex_prefixes,
                 &mut parsed.diagnostics,
             ),
             "ONLYINCOMPOUND" => parse_special_flag(
@@ -4919,26 +4940,40 @@ mod tests {
     }
 
     #[test]
-    fn recognition_affecting_unknown_directives_are_errors_in_strict_mode() {
-        let affixes = "COMPLEXPREFIXES\n";
-        let lenient = import(
-            "test.aff",
-            affixes,
-            "test.dic",
-            "1\nword\n",
-            ImportMode::Lenient,
+    fn complex_prefixes_allow_two_prefixes_and_one_suffix_for_rtl_forms() {
+        let affixes = "COMPLEXPREFIXES\nPFX A Y 1\nPFX A 0 م/B .\nPFX B Y 1\nPFX B 0 ال .\nSFX C Y 1\nSFX C 0 ات .\n";
+        let entries = "1\nكتب/AC\n";
+        let without_marker = import(
+            "simple-prefixes.aff",
+            affixes
+                .strip_prefix("COMPLEXPREFIXES\n")
+                .expect("known marker"),
+            "rtl.dic",
+            entries,
+            ImportMode::Strict,
         )
-        .expect("lenient import returns a safe subset");
+        .expect("single-prefix compatibility fixture imports");
+        assert!(
+            !without_marker.dictionary().contains("المكتبات"),
+            "a second prefix is never approximated without COMPLEXPREFIXES"
+        );
 
-        assert_eq!(lenient.diagnostics()[0].severity(), Severity::Error);
-        assert!(import(
-            "test.aff",
+        let imported = import(
+            "complex-prefixes.aff",
             affixes,
-            "test.dic",
-            "1\nword\n",
-            ImportMode::Strict
+            "rtl.dic",
+            entries,
+            ImportMode::Strict,
         )
-        .is_err());
+        .expect("COMPLEXPREFIXES imports cleanly");
+        assert!(imported.dictionary().contains("المكتبات"));
+
+        let sources = SourceDigests::from_source_bytes(affixes.as_bytes(), entries.as_bytes());
+        let cache = compile_runtime_cache(imported.dictionary(), sources)
+            .expect("complex prefixes compile into the runtime cache");
+        let loaded = load_runtime_cache(&cache, sources)
+            .expect("complex prefixes load from the runtime cache");
+        assert!(loaded.contains("المكتبات"));
     }
 
     #[test]
