@@ -52,7 +52,7 @@ is an error for that entry, not a panic.
 
 ## Initial AFF subset
 
-The current compatibility level recognizes `SET`, `FLAG`, `PFX`, `SFX`,
+The current compatibility level recognizes `SET`, `FLAG`, `AF`, `AM`, `PFX`, `SFX`,
 `CIRCUMFIX`, `FORBIDDENWORD`, `NEEDAFFIX`, `KEEPCASE`, `COMPOUNDFLAG`, and
 `COMPOUNDMIN`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`,
 `ONLYINCOMPOUND`, `COMPOUNDPERMITFLAG`, bounded literal `COMPOUNDRULE` patterns, and bounded
@@ -71,6 +71,14 @@ generated form under the [affix semantics](affix-semantics.md). Extra affix
 morphology fields are reported and ignored. Conditions are anchored prefix or
 suffix tests, according to the rule kind. See [compound semantics](compound-semantics.md)
 for the deliberately bounded compound subset.
+
+`AF` is a counted flag-alias table. A dictionary entry with a numeric flag
+section, such as `word/2`, resolves to the second `AF` row before recognition;
+malformed aliases never cause a later row to shift position. `AM` is a counted
+morphology-alias table. Its references are validated, but their morphology text
+is discarded because the current runtime does not expose morphology metadata.
+Malformed `AF` is an error because it can change recognition; malformed `AM`
+is a warning because it cannot.
 
 `AF`, aliases, complex prefix modes, capitalization fallbacks, compound
 compound quantifiers and suggestion directives beyond the

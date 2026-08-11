@@ -34,6 +34,7 @@ const MAX_COMPOUND_RULES: usize = 1_024;
 const MAX_COMPOUND_RULE_COMPONENTS: usize = 16;
 const MAX_BREAK_PATTERNS: usize = 256;
 const MAX_REPLACEMENT_RULES: usize = 4_096;
+const MAX_AFFIX_ALIASES: usize = 100_000;
 
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1215,7 +1216,13 @@ fn import_decoded(
     };
     diagnostics.extend(parsed_aff.diagnostics.clone());
     let lexemes = if enforce_input_limit(dic_source, dic_text, MAX_DIC_BYTES, &mut diagnostics) {
-        parse_dic(dic_source, dic_text, &mut diagnostics)
+        parse_dic(
+            dic_source,
+            dic_text,
+            &parsed_aff.flag_aliases,
+            parsed_aff.morphology_aliases.len(),
+            &mut diagnostics,
+        )
     } else {
         Vec::new()
     };
@@ -1388,6 +1395,10 @@ struct ParsedAff {
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
     replacement_rules_declared: bool,
+    flag_aliases: Vec<Option<BTreeSet<Flag>>>,
+    flag_aliases_declared: bool,
+    morphology_aliases: Vec<Option<Box<str>>>,
+    morphology_aliases_declared: bool,
 }
 
 #[allow(
@@ -1526,6 +1537,8 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.word_characters,
                 &mut parsed.diagnostics,
             ),
+            "AF" => parse_flag_aliases(source, &mut lines, line_number, &fields, &mut parsed),
+            "AM" => parse_morphology_aliases(source, &mut lines, line_number, &fields, &mut parsed),
             "REP" => parse_replacement_rules(source, &mut lines, line_number, &fields, &mut parsed),
             "PFX" | "SFX" => parse_affix_group(
                 source,
@@ -1540,6 +1553,155 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
     }
 
     parsed
+}
+
+fn parse_flag_aliases(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = parse_alias_count(fields) else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "AF",
+            Severity::Error,
+            "AF header requires exactly one non-negative alias count",
+        ));
+        return;
+    };
+    if count > MAX_AFFIX_ALIASES {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "AF",
+            Severity::Error,
+            "AF alias count exceeds the configured limit of 100,000",
+        ));
+        return;
+    }
+    if parsed.flag_aliases_declared {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "AF",
+            Severity::Error,
+            "AF may only be declared once",
+        ));
+        return;
+    }
+    parsed.flag_aliases_declared = true;
+
+    for _ in 0..count {
+        let Some((index, line)) = next_alias_line(lines) else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "AF",
+                Severity::Error,
+                "AF header ended before all declared aliases were supplied",
+            ));
+            return;
+        };
+        let alias_fields = line.split_whitespace().collect::<Vec<_>>();
+        let flags = match alias_fields.as_slice() {
+            ["AF"] => Some(BTreeSet::new()),
+            ["AF", flags] if flags.chars().count() <= MAX_FLAGS_PER_ENTRY => decode_flags(flags),
+            _ => None,
+        };
+        if flags.is_none() {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "AF",
+                Severity::Error,
+                "AF aliases require zero or one flag-set field with at most 256 flags",
+            ));
+        }
+        parsed.flag_aliases.push(flags);
+    }
+}
+
+fn parse_morphology_aliases(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = parse_alias_count(fields) else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "AM",
+            Severity::Warning,
+            "AM header requires exactly one non-negative alias count",
+        ));
+        return;
+    };
+    if count > MAX_AFFIX_ALIASES {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "AM",
+            Severity::Warning,
+            "AM alias count exceeds the configured limit of 100,000",
+        ));
+        return;
+    }
+    if parsed.morphology_aliases_declared {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "AM",
+            Severity::Warning,
+            "AM may only be declared once",
+        ));
+        return;
+    }
+    parsed.morphology_aliases_declared = true;
+
+    for _ in 0..count {
+        let Some((index, line)) = next_alias_line(lines) else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "AM",
+                Severity::Warning,
+                "AM header ended before all declared aliases were supplied",
+            ));
+            return;
+        };
+        let alias = line
+            .strip_prefix("AM")
+            .map(str::trim_start)
+            .filter(|alias| !alias.is_empty())
+            .map(Box::from);
+        if alias.is_none() {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "AM",
+                Severity::Warning,
+                "AM aliases require non-empty morphology text",
+            ));
+        }
+        parsed.morphology_aliases.push(alias);
+    }
+}
+
+fn parse_alias_count(fields: &[&str]) -> Option<usize> {
+    (fields.len() == 2)
+        .then(|| fields[1].parse().ok())
+        .flatten()
+}
+
+fn next_alias_line<'source>(
+    lines: &mut std::iter::Enumerate<std::str::Lines<'source>>,
+) -> Option<(usize, &'source str)> {
+    lines.find_map(|(index, line)| (!is_ignored_line(line.trim())).then_some((index, line.trim())))
 }
 
 fn parse_replacement_rules(
@@ -2178,7 +2340,13 @@ fn empty_marker(value: &str) -> Box<str> {
 }
 
 #[allow(clippy::too_many_lines)]
-fn parse_dic(source: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec<Lexeme> {
+fn parse_dic(
+    source: &str,
+    text: &str,
+    flag_aliases: &[Option<BTreeSet<Flag>>],
+    morphology_alias_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Lexeme> {
     let mut entries = BTreeMap::<Box<str>, BTreeSet<Flag>>::new();
     let mut expected_count = None;
     let mut first_content = true;
@@ -2217,7 +2385,8 @@ fn parse_dic(source: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec
             ));
             break;
         }
-        let field = line.split_whitespace().next().unwrap_or_default();
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let field = fields.first().copied().unwrap_or_default();
         let (stem, flags) = field
             .split_once('/')
             .map_or((field, None), |(stem, flags)| (stem, Some(flags)));
@@ -2254,7 +2423,7 @@ fn parse_dic(source: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec
                 continue;
             }
             Some(value) => {
-                if let Some(flags) = decode_flags(value) {
+                if let Some(flags) = decode_entry_flags(value, flag_aliases) {
                     flags
                 } else {
                     diagnostics.push(diagnostic(
@@ -2268,6 +2437,13 @@ fn parse_dic(source: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec
                 }
             }
         };
+        validate_morphology_alias_reference(
+            source,
+            index + 1,
+            fields.get(1).copied(),
+            morphology_alias_count,
+            diagnostics,
+        );
         entries
             .entry(Box::<str>::from(stem))
             .or_default()
@@ -2289,6 +2465,46 @@ fn parse_dic(source: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec
         .into_iter()
         .map(|(stem, flags)| Lexeme { stem, flags })
         .collect()
+}
+
+fn decode_entry_flags(value: &str, aliases: &[Option<BTreeSet<Flag>>]) -> Option<BTreeSet<Flag>> {
+    if !aliases.is_empty() && value.chars().all(char::is_numeric) {
+        let alias = value.parse::<usize>().ok()?.checked_sub(1)?;
+        aliases.get(alias)?.clone()
+    } else {
+        decode_flags(value)
+    }
+}
+
+fn validate_morphology_alias_reference(
+    source: &str,
+    line: usize,
+    value: Option<&str>,
+    alias_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if alias_count == 0 {
+        return;
+    }
+    let Some(value) = value else {
+        return;
+    };
+    let Some(alias) = value
+        .parse::<usize>()
+        .ok()
+        .and_then(|value| value.checked_sub(1))
+    else {
+        return;
+    };
+    if alias >= alias_count {
+        diagnostics.push(diagnostic(
+            source,
+            line,
+            "AM",
+            Severity::Warning,
+            "dictionary entry references an undefined AM morphology alias",
+        ));
+    }
 }
 
 fn decode_flags(value: &str) -> Option<BTreeSet<Flag>> {
@@ -2440,6 +2656,59 @@ mod tests {
         assert!(!dictionary.contains("unkinds"));
         assert!(!dictionary.contains("partys"));
         assert!(!dictionary.contains("Strasse"));
+    }
+
+    #[test]
+    fn resolves_af_aliases_and_validates_am_references() {
+        let result = import(
+            "aliases.aff",
+            "AF 2\nAF AB\nAF C\nAM 2\nAM st:root\nAM st:other\nSFX B Y 1\nSFX B 0 s .\nSFX C Y 1\nSFX C 0 ed .\n",
+            "aliases.dic",
+            "2\nroot/1 1\nother/2 2\n",
+            ImportMode::Strict,
+        )
+        .expect("valid aliases import cleanly");
+
+        assert!(result.dictionary().contains("roots"));
+        assert!(result.dictionary().contains("othered"));
+        assert!(result.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn malformed_af_aliases_never_shift_dictionary_references() {
+        let result = import(
+            "aliases.aff",
+            "AF 2\nAF A\nAF malformed extra\nSFX A Y 1\nSFX A 0 s .\n",
+            "aliases.dic",
+            "1\nroot/2\n",
+            ImportMode::Lenient,
+        )
+        .expect("lenient imports retain only well-formed data");
+
+        assert!(!result.dictionary().contains("roots"));
+        assert!(result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "AF"
+                && diagnostic.severity() == Severity::Error));
+    }
+
+    #[test]
+    fn malformed_am_aliases_are_warning_diagnostics() {
+        let result = import(
+            "aliases.aff",
+            "AM 1\nAM\n",
+            "aliases.dic",
+            "1\nword 1\n",
+            ImportMode::Lenient,
+        )
+        .expect("lenient imports preserve the safe subset");
+
+        assert!(result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "AM"
+                && diagnostic.severity() == Severity::Warning));
     }
 
     #[test]
