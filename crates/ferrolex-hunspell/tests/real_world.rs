@@ -286,6 +286,7 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     let imported =
         import_fixture_bytes(fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes, mode)
             .unwrap_or_else(|error| panic!("{} import unexpectedly failed: {error}", fixture.id));
+    assert_neutral_ir_spike(fixture, imported.ir());
     let diagnostics = imported
         .diagnostics()
         .iter()
@@ -334,6 +335,32 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     .expect("writing to String does not fail");
     write_scorecard(fixture, &dictionary, &aff_path, report);
     report_keepcase_coverage(fixture, &aff_text, &dic_text, report);
+}
+
+fn assert_neutral_ir_spike(fixture: &Fixture, ir: &ferrolex_compiler::DictionaryIr) {
+    match fixture.id.as_str() {
+        "hu_HU" => {
+            assert!(
+                !ir.morphology.is_empty(),
+                "Hungarian AM morphology reaches the neutral IR"
+            );
+            assert!(
+                !ir.input_conversions.is_empty() && !ir.compound.rules.is_empty(),
+                "Hungarian conversions and compound rules reach the neutral IR"
+            );
+        }
+        "ar" => {
+            assert!(
+                !ir.prefixes.is_empty() && !ir.suffixes.is_empty(),
+                "Arabic affix rules reach the neutral IR"
+            );
+            assert!(
+                !ir.ignored_characters.is_empty() && !ir.input_conversions.is_empty(),
+                "Arabic input normalization reaches the neutral IR"
+            );
+        }
+        _ => {}
+    }
 }
 
 fn import_fixture_bytes(

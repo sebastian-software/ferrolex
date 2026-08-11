@@ -292,6 +292,7 @@ name = "ferrolex-hunspell"
 version = "0.1.0"
 dependencies = [
  "encoding_rs",
+ "ferrolex-compiler",
  "ferrolex-core",
  "ferrolex-suggest",
  "sha2",

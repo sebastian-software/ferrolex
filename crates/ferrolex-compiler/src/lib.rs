@@ -8,10 +8,18 @@
 
 #![forbid(unsafe_code)]
 
+mod ir;
+
 use std::fmt;
 
 use ferrolex_core::Dictionary;
 use ferrolex_suggest::CandidateSource;
+
+pub use ir::{
+    AffixKindIr, AffixRuleIr, BreakPatternIr, CaseLanguageIr, CompoundConfigIr, CompoundPatternIr,
+    CompoundSyllableLimitIr, ConditionAtomIr, ConditionIr, DictionaryIr, FlagIr, FlagModeIr,
+    InputConversionIr, LexemeIr, ReplacementRuleIr, SpecialFlagsIr,
+};
 
 const MAGIC: [u8; 8] = *b"FLEXDIC\0";
 const FORMAT_VERSION: u16 = 1;
@@ -90,6 +98,26 @@ impl ExactDictionaryIr {
     /// Visits normalized IR words in deterministic UTF-8 byte order.
     pub fn words(&self) -> impl ExactSizeIterator<Item = &str> + DoubleEndedIterator + '_ {
         self.words.iter().map(Box::as_ref)
+    }
+
+    /// Projects exact-word input into the shared linguistic IR.
+    ///
+    /// Exact word lists deliberately use only the lexeme portion of the IR;
+    /// all other fields retain their semantics-free defaults.
+    #[must_use]
+    pub fn as_dictionary_ir(&self) -> DictionaryIr {
+        DictionaryIr {
+            lexemes: self
+                .words
+                .iter()
+                .map(|word| LexemeIr {
+                    stem: word.to_string(),
+                    flags: std::collections::BTreeSet::new(),
+                    morphology: Vec::new(),
+                })
+                .collect(),
+            ..DictionaryIr::default()
+        }
     }
 }
 
@@ -767,6 +795,19 @@ mod tests {
             compile_exact_ir(&ir).expect("IR compiles"),
             compile_words(["apple", "東京"]).expect("word list compiles")
         );
+    }
+
+    #[test]
+    fn exact_word_ir_projects_to_the_shared_linguistic_model() {
+        let ir = ExactDictionaryIr::new(["東京", "apple", "apple"])
+            .expect("non-empty UTF-8 words build an IR");
+        let linguistic = ir.as_dictionary_ir();
+
+        assert_eq!(linguistic.lexemes.len(), 2);
+        assert_eq!(linguistic.lexemes[0].stem, "apple");
+        assert_eq!(linguistic.lexemes[1].stem, "東京");
+        assert!(linguistic.prefixes.is_empty());
+        assert!(linguistic.suffixes.is_empty());
     }
 
     #[test]

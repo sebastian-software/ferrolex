@@ -13,6 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use encoding_rs::ISO_8859_2;
+use ferrolex_compiler::{
+    AffixKindIr, AffixRuleIr, BreakPatternIr, CaseLanguageIr, CompoundConfigIr, CompoundPatternIr,
+    CompoundSyllableLimitIr, ConditionAtomIr, ConditionIr, DictionaryIr, FlagIr, FlagModeIr,
+    InputConversionIr, LexemeIr, ReplacementRuleIr, SpecialFlagsIr,
+};
 use ferrolex_core::Dictionary;
 use ferrolex_suggest::{CandidateSource, ReplacementRule};
 
@@ -220,6 +225,7 @@ impl std::error::Error for ImportError {}
 #[derive(Clone, Debug)]
 pub struct ImportResult {
     dictionary: HunspellDictionary,
+    ir: DictionaryIr,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -228,6 +234,12 @@ impl ImportResult {
     #[must_use]
     pub fn dictionary(&self) -> &HunspellDictionary {
         &self.dictionary
+    }
+
+    /// Returns the source-neutral semantic representation used for compilation.
+    #[must_use]
+    pub fn ir(&self) -> &DictionaryIr {
+        &self.ir
     }
 
     /// Returns warnings and lenient-mode errors encountered during import.
@@ -281,6 +293,54 @@ impl Dictionary for HunspellDictionary {
 }
 
 impl HunspellDictionary {
+    /// Lowers the immutable runtime dictionary into source-neutral semantics.
+    ///
+    /// Derived indexes and caches are intentionally omitted. The returned IR
+    /// owns every declared field required to rebuild recognition behavior.
+    #[must_use]
+    pub fn to_ir(&self) -> DictionaryIr {
+        DictionaryIr {
+            flag_mode: flag_mode_to_ir(self.flag_mode),
+            case_fallback: self.case_fallback,
+            case_language: case_language_to_ir(self.case_language),
+            morphology: self
+                .morphology
+                .values_by_id()
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            lexemes: self.lexemes.iter().map(lexeme_to_ir).collect(),
+            prefixes: self.prefixes.iter().map(affix_rule_to_ir).collect(),
+            suffixes: self.suffixes.iter().map(affix_rule_to_ir).collect(),
+            special_flags: special_flags_to_ir(&self.special_flags),
+            compound: compound_to_ir(&self.compound),
+            break_patterns: self
+                .break_patterns
+                .iter()
+                .map(break_pattern_to_ir)
+                .collect(),
+            word_characters: self.word_characters.clone(),
+            replacement_rules: self
+                .replacement_rules
+                .iter()
+                .map(replacement_rule_to_ir)
+                .collect(),
+            ignored_characters: self.ignored_characters.clone(),
+            input_conversions: self
+                .input_conversions
+                .iter()
+                .map(input_conversion_to_ir)
+                .collect(),
+            output_conversions: self
+                .output_conversions
+                .iter()
+                .map(input_conversion_to_ir)
+                .collect(),
+            full_strip: self.full_strip,
+            complex_prefixes: self.complex_prefixes,
+        }
+    }
+
     fn contains_normalized(&self, word: &str, allow_keep_case: bool) -> bool {
         self.matches_without_break(word, allow_keep_case)
             || self.matches_break_word(word, allow_keep_case)
@@ -1738,6 +1798,168 @@ impl ConditionAtom {
     }
 }
 
+fn flag_mode_to_ir(mode: FlagMode) -> FlagModeIr {
+    match mode {
+        FlagMode::Unicode => FlagModeIr::Unicode,
+        FlagMode::Long => FlagModeIr::Long,
+        FlagMode::Numeric => FlagModeIr::Numeric,
+    }
+}
+
+fn case_language_to_ir(language: CaseLanguage) -> CaseLanguageIr {
+    match language {
+        CaseLanguage::Default => CaseLanguageIr::Default,
+        CaseLanguage::Turkic => CaseLanguageIr::Turkic,
+    }
+}
+
+fn flag_to_ir(flag: &Flag) -> FlagIr {
+    match flag {
+        Flag::Numeric(value) => FlagIr::Numeric(*value),
+        Flag::Text(value) => FlagIr::Text(value.to_string()),
+    }
+}
+
+fn flags_to_ir(flags: &BTreeSet<Flag>) -> BTreeSet<FlagIr> {
+    flags.iter().map(flag_to_ir).collect()
+}
+
+fn morphology_to_ir(morphology: &Morphology) -> Vec<u32> {
+    morphology.iter().map(|id| id.0).collect()
+}
+
+fn lexeme_to_ir(lexeme: &Lexeme) -> LexemeIr {
+    LexemeIr {
+        stem: lexeme.stem.to_string(),
+        flags: flags_to_ir(&lexeme.flags),
+        morphology: morphology_to_ir(&lexeme.morphology),
+    }
+}
+
+fn affix_rule_to_ir(rule: &AffixRule) -> AffixRuleIr {
+    AffixRuleIr {
+        id: u32::try_from(rule.id).expect("affix rule IDs are bounded by the importer"),
+        kind: match rule.kind {
+            AffixKind::Prefix => AffixKindIr::Prefix,
+            AffixKind::Suffix => AffixKindIr::Suffix,
+        },
+        flag: flag_to_ir(&rule.flag),
+        strip: rule.strip.to_string(),
+        add: rule.add.to_string(),
+        condition: condition_to_ir(&rule.condition),
+        cross_product: rule.cross_product,
+        continuation_flags: flags_to_ir(&rule.continuation_flags),
+        morphology: morphology_to_ir(&rule.morphology),
+    }
+}
+
+fn condition_to_ir(condition: &Condition) -> ConditionIr {
+    ConditionIr {
+        atoms: condition.atoms.iter().map(condition_atom_to_ir).collect(),
+        not_preceded_by: condition.not_preceded_by.as_ref().map(condition_atom_to_ir),
+        anchored_at_start: condition.anchored_at_start,
+    }
+}
+
+fn condition_atom_to_ir(atom: &ConditionAtom) -> ConditionAtomIr {
+    match atom {
+        ConditionAtom::Any => ConditionAtomIr::Any,
+        ConditionAtom::Literal(character) => ConditionAtomIr::Literal(*character),
+        ConditionAtom::Class { members, negated } => ConditionAtomIr::Class {
+            members: members.clone(),
+            negated: *negated,
+        },
+    }
+}
+
+fn special_flags_to_ir(flags: &SpecialFlags) -> SpecialFlagsIr {
+    SpecialFlagsIr {
+        circumfix: flags.circumfix.as_ref().map(flag_to_ir),
+        forbidden_word: flags.forbidden_word.as_ref().map(flag_to_ir),
+        keep_case: flags.keep_case.as_ref().map(flag_to_ir),
+        need_affix: flags.need_affix.as_ref().map(flag_to_ir),
+        only_in_compound: flags.only_in_compound.as_ref().map(flag_to_ir),
+        check_sharps: flags.check_sharps,
+    }
+}
+
+fn compound_to_ir(compound: &CompoundConfig) -> CompoundConfigIr {
+    CompoundConfigIr {
+        flag: compound.flag.as_ref().map(flag_to_ir),
+        begin: compound.begin.as_ref().map(flag_to_ir),
+        middle: compound.middle.as_ref().map(flag_to_ir),
+        end: compound.end.as_ref().map(flag_to_ir),
+        permit: compound.permit.as_ref().map(flag_to_ir),
+        forbid: compound.forbid.as_ref().map(flag_to_ir),
+        force_uppercase: compound.force_uppercase.as_ref().map(flag_to_ir),
+        minimum_length: compound.minimum_length,
+        maximum_words: compound.maximum_words,
+        check_duplicate: compound.check_duplicate,
+        check_replacement: compound.check_replacement,
+        check_case: compound.check_case,
+        check_triple: compound.check_triple,
+        simplified_triple: compound.simplified_triple,
+        patterns: compound
+            .patterns
+            .iter()
+            .map(compound_pattern_to_ir)
+            .collect(),
+        syllable_limit: compound
+            .syllable_limit
+            .as_ref()
+            .map(|limit| CompoundSyllableLimitIr {
+                maximum: limit.maximum,
+                vowels: limit.vowels.clone(),
+            }),
+        rules: compound
+            .rules
+            .iter()
+            .map(|rule| {
+                rule.patterns
+                    .iter()
+                    .map(|pattern| pattern.iter().map(flag_to_ir).collect())
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
+fn compound_pattern_to_ir(pattern: &CompoundPattern) -> CompoundPatternIr {
+    CompoundPatternIr {
+        ending: pattern.ending.to_string(),
+        ending_flag: pattern.ending_flag.as_ref().map(flag_to_ir),
+        beginning: pattern.beginning.to_string(),
+        beginning_flag: pattern.beginning_flag.as_ref().map(flag_to_ir),
+        replacement: pattern.replacement.as_ref().map(ToString::to_string),
+    }
+}
+
+fn break_pattern_to_ir(pattern: &BreakPattern) -> BreakPatternIr {
+    BreakPatternIr {
+        text: pattern.text.to_string(),
+        at_start: pattern.at_start,
+        at_end: pattern.at_end,
+    }
+}
+
+fn input_conversion_to_ir(conversion: &InputConversion) -> InputConversionIr {
+    InputConversionIr {
+        from: conversion.from.to_string(),
+        to: conversion.to.to_string(),
+        at_word_start: conversion.at_word_start,
+        at_word_end: conversion.at_word_end,
+    }
+}
+
+fn replacement_rule_to_ir(rule: &ReplacementRule) -> ReplacementRuleIr {
+    ReplacementRuleIr {
+        from: rule.from().to_owned(),
+        to: rule.to().to_owned(),
+        at_word_start: rule.at_word_start(),
+        at_word_end: rule.at_word_end(),
+    }
+}
+
 /// Imports UTF-8 `.aff` and `.dic` text into ferrolex's neutral runtime model.
 ///
 /// The supported feature set is documented in `docs/hunspell-format.md` and
@@ -1963,6 +2185,7 @@ fn import_decoded(
     }
 
     Ok(ImportResult {
+        ir: dictionary.to_ir(),
         dictionary,
         diagnostics,
     })
@@ -4491,6 +4714,12 @@ mod tests {
             result.dictionary().morphology.values_by_id(),
             vec!["st:root", "st:other", "po:noun"]
         );
+        let ir = result.ir();
+        assert_eq!(ir.morphology, ["st:root", "st:other", "po:noun"]);
+        assert_eq!(ir.lexemes.len(), 2);
+        assert_eq!(ir.suffixes.len(), 2);
+        assert_eq!(ir.suffixes[0].add, "s");
+        assert_eq!(ir.lexemes[1].morphology, [0, 2]);
 
         let cache = compile_runtime_cache(
             result.dictionary(),
