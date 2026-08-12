@@ -19,7 +19,7 @@ use ferrolex_compiler::{
     CompiledDictionary, FrequencyListError, LoadError, ValidationError,
     MAX_COMPILED_ARTIFACT_BYTES,
 };
-use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
+use ferrolex_core::{Checker, Dictionary, Normalization, UserDictionary, WordList};
 use ferrolex_dictionaries::{
     find_locale, DictionaryInstaller, FetchError as DictionaryFetchError, InstalledDictionary,
     LibreOfficeDictionary, ManifestError as DictionaryManifestError, SourceEncoding, UreqFetcher,
@@ -35,7 +35,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -188,7 +188,53 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
                 catalog_import_encodings(source.encoding()),
             )
         }
+        DictionaryCommand::AddWord { word, path } => add_user_dictionary_word(word, path),
     }
+}
+
+fn add_user_dictionary_word(word: &str, path: &Path) -> Result<RunOutcome, CliError> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(CliError::ReadDictionary {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    let dictionary = UserDictionary::from_text(Normalization::Nfc, &text);
+    let added = dictionary.insert(word).map_err(CliError::InvalidUserWord)?;
+    atomic_write(path, &dictionary.to_text())?;
+    println!(
+        "{}: {}",
+        if added { "added" } else { "already present" },
+        path.display()
+    );
+    Ok(RunOutcome::Success)
+}
+
+fn atomic_write(path: &Path, text: &str) -> Result<(), CliError> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| CliError::WriteUserDictionary {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let temporary = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("words"),
+        std::process::id()
+    ));
+    fs::write(&temporary, text).map_err(|source| CliError::WriteUserDictionary {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    fs::rename(&temporary, path).map_err(|source| CliError::WriteUserDictionary {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodings> {
@@ -1221,14 +1267,68 @@ fn parse_dictionary_arguments(
         }
         Some("fetch") => parse_dictionary_catalog_arguments(arguments, "fetch"),
         Some("install") => parse_dictionary_catalog_arguments(arguments, "install"),
+        Some("add-word") => parse_add_word_arguments(arguments),
         Some("--help" | "-h") => Ok(Command::Help),
         Some(subcommand) => Err(CliError::Usage(format!(
             "unknown dictionary subcommand `{subcommand}`"
         ))),
         None => Err(CliError::Usage(
-            "dictionary requires `list`, `fetch`, or `install`".to_owned(),
+            "dictionary requires `list`, `fetch`, `install`, or `add-word`".to_owned(),
         )),
     }
+}
+
+fn parse_add_word_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut workspace = None;
+    let mut global = false;
+    let mut word = None;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--workspace" => set_once_path(&mut workspace, &mut arguments, "--workspace")?,
+            "--global" => global = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")))
+            }
+            _ => {
+                if word.replace(argument).is_some() {
+                    return Err(CliError::Usage(
+                        "dictionary add-word accepts exactly one word".to_owned(),
+                    ));
+                }
+            }
+        }
+    }
+    if global && workspace.is_some() {
+        return Err(CliError::Usage(
+            "choose either `--workspace` or `--global`".to_owned(),
+        ));
+    }
+    let word =
+        word.ok_or_else(|| CliError::Usage("dictionary add-word requires one word".to_owned()))?;
+    let path = if global {
+        global_user_dictionary_path()?
+    } else {
+        workspace
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".ferrolex/words.txt")
+    };
+    Ok(Command::Dictionary(DictionaryCommand::AddWord {
+        word,
+        path,
+    }))
+}
+
+fn global_user_dictionary_path() -> Result<PathBuf, CliError> {
+    if let Some(directory) = env::var_os("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(directory).join("ferrolex/words.txt"));
+    }
+    env::var_os("HOME")
+        .map(|directory| PathBuf::from(directory).join(".config/ferrolex/words.txt"))
+        .ok_or_else(|| CliError::Usage("`--global` requires HOME or XDG_CONFIG_HOME".to_owned()))
 }
 
 fn parse_dictionary_catalog_arguments(
@@ -1701,6 +1801,7 @@ enum DictionaryCommand {
     List,
     Fetch { locale: String, cache_path: PathBuf },
     Install { locale: String, cache_path: PathBuf },
+    AddWord { word: String, path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -1749,6 +1850,11 @@ enum CliError {
         path: PathBuf,
         source: io::Error,
     },
+    WriteUserDictionary {
+        path: PathBuf,
+        source: io::Error,
+    },
+    InvalidUserWord(ferrolex_core::WordListError),
     ReadProjectConfig {
         path: PathBuf,
         source: io::Error,
@@ -1854,6 +1960,16 @@ impl fmt::Display for CliError {
                     path.display()
                 )
             }
+            Self::WriteUserDictionary { path, source } => {
+                write!(
+                    formatter,
+                    "could not atomically write user dictionary `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::InvalidUserWord(source) => {
+                write!(formatter, "invalid user dictionary word: {source}")
+            }
             Self::ReadProjectConfig { path, source } => {
                 write!(
                     formatter,
@@ -1894,6 +2010,7 @@ impl Error for CliError {
             | Self::ReadHunspellCache { source, .. }
             | Self::WriteArtifact { source, .. }
             | Self::WriteHunspellCache { source, .. }
+            | Self::WriteUserDictionary { source, .. }
             | Self::ReadProjectConfig { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
             Self::CompileFrequencyList(source) => Some(source),
@@ -1907,6 +2024,7 @@ impl Error for CliError {
             Self::ApplyProjectConfig { source, .. } => Some(source),
             Self::DictionaryManifest(source) => Some(source),
             Self::FetchDictionary(source) => Some(source),
+            Self::InvalidUserWord(source) => Some(source),
         }
     }
 }

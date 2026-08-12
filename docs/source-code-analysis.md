@@ -61,6 +61,16 @@ methods use the same deterministic UTF-8 word-list syntax as base lists, so a
 caller can atomically persist an overlay without imposing filesystem policy on
 the core crate.
 
+The CLI stores workspace additions in `.ferrolex/words.txt` and global
+additions in `$XDG_CONFIG_HOME/ferrolex/words.txt` (or
+`$HOME/.config/ferrolex/words.txt`). Use `ferrolex dictionary add-word WORD`
+for the current workspace, `--workspace PATH` for an explicit project root, or
+`--global` for the user-wide list. Each update writes a sorted complete
+replacement to a temporary sibling and then renames it atomically. Concurrent
+processes should serialize add-word operations themselves: atomic replacement
+prevents partial files but intentionally does not merge two independently read
+snapshots.
+
 ## Technical vocabulary
 
 Use a reviewed plain UTF-8 word list for technology names, APIs, and product
