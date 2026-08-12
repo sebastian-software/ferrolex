@@ -29,11 +29,10 @@ The corpus tests cover these boundaries:
   work-budget configuration. Results must stay within their configured output
   budget and every case must complete without a panic.
 
-These tests are a deterministic regression corpus, rather than a claim of
-coverage-guided fuzzing. They protect the current parser, loader, compound,
-and suggestion limits on every ordinary CI run. A future dedicated
-`cargo-fuzz` campaign can reuse these cases as seed inputs without changing
-the public crates or their MSRV.
+These tests are a deterministic regression corpus. They protect the current
+parser, loader, compound, and suggestion limits on every ordinary CI run; the
+same representative cases seed the dedicated coverage-guided fuzzing corpus
+under `fuzz/corpus/`.
 
 The regular CI license job checks that both root license texts are present and
 non-empty. Third-party dictionary sources are not bundled; their manifest and
@@ -44,6 +43,29 @@ Run the focused suite with:
 ```sh
 cargo +1.81 test -p ferrolex-hunspell -p ferrolex-compiler -p ferrolex-suggest
 ```
+
+## Coverage-guided fuzzing
+
+The nightly-only `fuzz/` workspace deliberately sits outside the shipped
+workspace and its Rust 1.81 MSRV contract. Its targets cover raw Hunspell
+import in every supported byte encoding, the FLXHSP runtime-cache loader, the
+FLEXDIC loader, suggestion queries, and compound evaluation. Their initial
+corpus consists of the deterministic robustness cases above; minimize and add
+any crash or sanitizer finding to the appropriate target corpus before fixing
+it and file the finding as a GitHub issue.
+
+Run a short local smoke pass with:
+
+```sh
+cargo +nightly install cargo-fuzz --locked
+for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation; do
+  cargo +nightly fuzz run "$target" -- -runs=256
+done
+```
+
+For an investigation, run one target without `-runs` and stop it manually. CI
+runs the bounded smoke pass only; it is evidence that every fuzz boundary
+builds and executes, not a substitute for a sustained local campaign.
 
 Run the complete repository gate with the commands in CI:
 

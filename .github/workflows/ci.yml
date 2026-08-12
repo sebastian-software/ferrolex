@@ -39,6 +39,20 @@ jobs:
           # that are not accepted by current cargo-deny versions.
           arguments: ""
 
+  fuzz-smoke:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - run: cargo install cargo-fuzz --locked
+      - run: |
+          for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation; do
+            cargo +nightly fuzz run "$target" -- -runs=256
+          done
+
   compatibility:
     name: Compatibility fixtures
     runs-on: ubuntu-latest
