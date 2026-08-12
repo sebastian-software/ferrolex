@@ -3,7 +3,10 @@
 ## Language and commits
 
 All durable repository artifacts use US English. Commit messages follow the
-[Conventional Commits](https://www.conventionalcommits.org/) specification.
+[Conventional Commits](https://www.conventionalcommits.org/) specification;
+pull-request titles are checked in CI. Release Please creates one product
+release PR for the whole Rust workspace. All public workspace crates share a
+version and release record through the root `ferrolex` umbrella package.
 
 ## Code provenance
 
