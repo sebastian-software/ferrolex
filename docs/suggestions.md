@@ -3,8 +3,8 @@
 `ferrolex-suggest` is deliberately separate from `Dictionary::contains`.
 Candidate sources enumerate stable lexical candidates; a generic dictionary is
 not assumed to be enumerable. The first implementation uses Unicode-scalar
-optimal-string-alignment distance, including adjacent transpositions, and
-ranks by `(distance, byte-lexical spelling)`.
+optimal-string-alignment distance, including adjacent transpositions. Candidate
+generation and ranking are separate deterministic stages.
 
 `WordList`, `UserDictionary`, and `HunspellDictionary` are candidate sources.
 A mutable `UserDictionary` is snapshotted before suggestion work begins, so
@@ -37,6 +37,13 @@ its provenance-bound runtime cache. A `REP` rule is two non-empty,
 whitespace-free literal spellings; unsupported variants produce a warning and
 never affect word recognition.
 
+Hunspell `KEY` and counted `MAP` directives are retained as ranking signals.
+For an otherwise single-character substitution, an adjacent `KEY` neighbor or
+two characters from one `MAP` group receives a better ranking distance. The
+reported edit distance remains the actual OSA or `REP` distance, recognition is
+unchanged, and `|` separates keyboard rows. Invalid suggestion-only entries
+emit warnings without preventing dictionary import.
+
 All work is bounded by explicit candidate, word-length, and edit-cell limits.
 The edit-cell budget is charged only when the candidate can reach the
 dynamic-programming calculation: candidates whose length difference already
@@ -45,13 +52,13 @@ matches likewise do not use edit-distance cells. The result reports whether it
 is complete or stopped by a configured budget, so partial output is never
 presented as exhaustive.
 
-Suggestions are ordered by `(distance, byte-lexical display spelling)`. If two
-source candidates render to the same requested display spelling, only the
-first result in that order is returned, even when other ranked entries fall
-between the duplicates. Case is used only for display: comparison lowercases
-Unicode scalar values deterministically, while non-empty input preserves lower,
-title, or upper style requested by the query. An empty query does not imply an
-uppercase display style.
+Suggestions are ordered by `(ranking distance, actual distance, byte-lexical
+display spelling)`. If two source candidates render to the same requested
+display spelling, only the first result in that order is returned, even when
+other ranked entries fall between the duplicates. Case is used only for display:
+comparison lowercases Unicode scalar values deterministically, while non-empty
+input preserves lower, title, or upper style requested by the query. An empty
+query does not imply an uppercase display style.
 
 The `ferrolex suggest` command exposes `--max-results`,
 `--max-edit-distance`, `--max-candidates`, and `--max-edit-cells`. The latter

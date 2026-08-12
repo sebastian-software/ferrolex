@@ -19,7 +19,7 @@ use ferrolex_compiler::{
     InputConversionIr, LexemeIr, ReplacementRuleIr, SpecialFlagsIr,
 };
 use ferrolex_core::Dictionary;
-use ferrolex_suggest::{CandidateSource, ReplacementRule};
+use ferrolex_suggest::{CandidateSource, RankingSignals, ReplacementRule};
 
 pub use cache::{
     compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, load_runtime_artifact,
@@ -55,6 +55,7 @@ const MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE: usize = 1_024;
 const MAX_COMPOUND_RULE_EXPANSIONS: usize = 16_384;
 const MAX_BREAK_PATTERNS: usize = 256;
 const MAX_REPLACEMENT_RULES: usize = 4_096;
+const MAX_CHARACTER_MAPS: usize = 4_096;
 const MAX_AFFIX_ALIASES: usize = 100_000;
 const MAX_INPUT_CONVERSIONS: usize = 4_096;
 const MAX_MORPHOLOGY_STRINGS: usize = 1_000_000;
@@ -278,6 +279,8 @@ pub struct HunspellDictionary {
     sharp_uppercase_forms: BTreeSet<Box<str>>,
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
+    keyboard: Option<Box<str>>,
+    character_maps: Vec<String>,
     ignored_characters: BTreeSet<char>,
     input_conversions: Vec<InputConversion>,
     output_conversions: Vec<InputConversion>,
@@ -328,6 +331,12 @@ impl HunspellDictionary {
                 .replacement_rules
                 .iter()
                 .map(replacement_rule_to_ir)
+                .collect(),
+            keyboard: self.keyboard.as_deref().map(str::to_owned),
+            character_maps: self
+                .character_maps
+                .iter()
+                .map(ToString::to_string)
                 .collect(),
             ignored_characters: self.ignored_characters.clone(),
             input_conversions: self
@@ -383,6 +392,8 @@ impl HunspellDictionary {
         break_patterns: Vec<BreakPattern>,
         word_characters: BTreeSet<char>,
         replacement_rules: Vec<ReplacementRule>,
+        keyboard: Option<Box<str>>,
+        character_maps: Vec<String>,
         ignored_characters: BTreeSet<char>,
         input_conversions: Vec<InputConversion>,
         output_conversions: Vec<InputConversion>,
@@ -416,6 +427,8 @@ impl HunspellDictionary {
             sharp_uppercase_forms,
             word_characters,
             replacement_rules,
+            keyboard,
+            character_maps,
             ignored_characters,
             input_conversions,
             output_conversions,
@@ -450,6 +463,12 @@ impl HunspellDictionary {
     #[must_use]
     pub fn replacement_rules(&self) -> &[ReplacementRule] {
         &self.replacement_rules
+    }
+
+    /// Returns imported `KEY` and `MAP` data for deterministic suggestion ranking.
+    #[must_use]
+    pub fn ranking_signals(&self) -> RankingSignals<'_> {
+        RankingSignals::new(self.keyboard.as_deref(), &self.character_maps)
     }
 
     /// Returns whether a stored stem is valid to offer as a suggestion.
@@ -2326,6 +2345,8 @@ fn import_decoded(
         parsed_aff.break_patterns,
         parsed_aff.word_characters,
         parsed_aff.replacement_rules,
+        parsed_aff.keyboard,
+        parsed_aff.character_maps,
         parsed_aff.ignored_characters,
         parsed_aff.input_conversions,
         parsed_aff.output_conversions,
@@ -2557,6 +2578,8 @@ struct ParsedAff {
     break_patterns: Vec<BreakPattern>,
     word_characters: BTreeSet<char>,
     replacement_rules: Vec<ReplacementRule>,
+    keyboard: Option<Box<str>>,
+    character_maps: Vec<String>,
     flag_aliases: Vec<Option<BTreeSet<Flag>>>,
     morphology_aliases: Vec<Option<Morphology>>,
     morphology: MorphologyTable,
@@ -2603,6 +2626,7 @@ fn default_break_patterns() -> Vec<BreakPattern> {
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum CountedSection {
     ReplacementRules,
+    CharacterMaps,
     FlagAliases,
     MorphologyAliases,
     InputConversions,
@@ -2878,6 +2902,8 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &mut parsed.diagnostics,
             ),
             "REP" => parse_replacement_rules(source, &mut lines, line_number, &fields, &mut parsed),
+            "KEY" => parse_keyboard(source, line_number, &fields, &mut parsed),
+            "MAP" => parse_character_maps(source, &mut lines, line_number, &fields, &mut parsed),
             "PFX" | "SFX" => parse_affix_group(
                 source,
                 directive,
@@ -3443,6 +3469,107 @@ fn parse_replacement_rule(from: &str, to: &str) -> Option<ReplacementRule> {
     let at_word_end = from.ends_with('$');
     let from = from.strip_suffix('$').unwrap_or(from);
     ReplacementRule::with_boundaries(from, to, at_word_start, at_word_end)
+}
+
+fn parse_keyboard(source: &str, line: usize, fields: &[&str], parsed: &mut ParsedAff) {
+    let Some(layout) = fields.get(1).filter(|_| fields.len() == 2) else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line,
+            "KEY",
+            Severity::Warning,
+            "KEY requires exactly one non-empty keyboard layout",
+        ));
+        return;
+    };
+    if layout.is_empty() || layout.len() > MAX_LINE_BYTES || parsed.keyboard.is_some() {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line,
+            "KEY",
+            Severity::Warning,
+            "KEY may only be declared once with a bounded non-empty layout",
+        ));
+        return;
+    }
+    parsed.keyboard = Some(Box::from(*layout));
+}
+
+fn parse_character_maps(
+    source: &str,
+    lines: &mut std::iter::Enumerate<std::str::Lines<'_>>,
+    line_number: usize,
+    fields: &[&str],
+    parsed: &mut ParsedAff,
+) {
+    let Some(count) = parse_alias_count(fields) else {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "MAP",
+            Severity::Warning,
+            "MAP header requires exactly one non-negative group count",
+        ));
+        return;
+    };
+    if count > MAX_CHARACTER_MAPS {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "MAP",
+            Severity::Warning,
+            "MAP group count exceeds the configured limit of 4096",
+        ));
+        return;
+    }
+    if !parsed
+        .declared_sections
+        .insert(CountedSection::CharacterMaps)
+    {
+        parsed.diagnostics.push(diagnostic(
+            source,
+            line_number,
+            "MAP",
+            Severity::Warning,
+            "MAP may only be declared once",
+        ));
+        return;
+    }
+    for _ in 0..count {
+        let Some((index, line)) = lines.next() else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                line_number,
+                "MAP",
+                Severity::Warning,
+                "MAP header ended before all declared groups were supplied",
+            ));
+            return;
+        };
+        let rule_fields = aff_fields(line);
+        let Some(group) = matches!(rule_fields.as_slice(), ["MAP", _]).then_some(rule_fields[1])
+        else {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "MAP",
+                Severity::Warning,
+                "MAP groups require exactly one non-empty character group",
+            ));
+            continue;
+        };
+        if group.is_empty() || group.len() > MAX_LINE_BYTES || group.chars().count() < 2 {
+            parsed.diagnostics.push(diagnostic(
+                source,
+                index + 1,
+                "MAP",
+                Severity::Warning,
+                "MAP groups require two or more bounded characters",
+            ));
+            continue;
+        }
+        parsed.character_maps.push(group.to_owned());
+    }
 }
 
 fn parse_unknown_directive(
@@ -4786,9 +4913,7 @@ fn enforce_byte_input_limit(
 fn is_suggestion_only_directive(directive: &str) -> bool {
     matches!(
         directive,
-        "KEY"
-            | "MAP"
-            | "MAXCPDSUGS"
+        "MAXCPDSUGS"
             | "MAXDIFF"
             | "MAXNGRAMSUGS"
             | "NGRAMSUGS"
@@ -4904,6 +5029,44 @@ mod tests {
             loaded.lexemes[0].morphology,
             result.dictionary().lexemes[0].morphology
         );
+    }
+
+    #[test]
+    fn imports_key_and_map_for_suggestion_ranking_and_runtime_cache() {
+        let result = import(
+            "ranking.aff",
+            "KEY qw|er\nMAP 1\nMAP áz\n",
+            "ranking.dic",
+            "4\ne\nw\na\nz\n",
+            ImportMode::Strict,
+        )
+        .expect("ranking signals import cleanly");
+        let dictionary = result.dictionary();
+
+        assert_eq!(
+            Suggester::new(dictionary, SuggestConfig::default())
+                .with_ranking_signals(dictionary.ranking_signals())
+                .suggest("q")
+                .suggestions()[0]
+                .word(),
+            "w"
+        );
+        assert_eq!(
+            Suggester::new(dictionary, SuggestConfig::default())
+                .with_ranking_signals(dictionary.ranking_signals())
+                .suggest("á")
+                .suggestions()[0]
+                .word(),
+            "z"
+        );
+        assert_eq!(result.ir().keyboard.as_deref(), Some("qw|er"));
+        assert_eq!(result.ir().character_maps, ["áz"]);
+
+        let sources = SourceDigests::from_source_bytes(b"ranking.aff", b"ranking.dic");
+        let cache = compile_runtime_cache(dictionary, sources).expect("ranking cache compiles");
+        let loaded = load_runtime_cache(&cache, sources).expect("ranking cache loads");
+        assert_eq!(loaded.to_ir().keyboard.as_deref(), Some("qw|er"));
+        assert_eq!(loaded.to_ir().character_maps, ["áz"]);
     }
 
     #[test]

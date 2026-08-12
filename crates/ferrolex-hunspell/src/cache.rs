@@ -18,8 +18,8 @@ use super::{
     AffixKind, AffixRule, BreakPattern, CaseLanguage, CompoundConfig, CompoundPattern,
     CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode,
     HunspellDictionary, InputConversion, Lexeme, Morphology, MorphologyId, MorphologyTable,
-    SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS, MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES,
-    MAX_COMPOUND_RULE_COMPONENTS, MAX_COMPOUND_RULE_EXPANSIONS,
+    SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS, MAX_CHARACTER_MAPS, MAX_COMPOUND_PATTERNS,
+    MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_COMPOUND_RULE_EXPANSIONS,
     MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS, MAX_CONDITION_ATOMS,
     MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES,
     MAX_MORPHOLOGY_FIELDS_PER_RECORD, MAX_MORPHOLOGY_STRINGS, MAX_REPLACEMENT_RULES,
@@ -32,13 +32,13 @@ const HEADER_BYTES: usize = MAGIC.len() + 2 + 4 + (CHECKSUM_BYTES * 2);
 const MAX_RUNTIME_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 /// The on-disk layout version for a Hunspell runtime cache.
-pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 5;
+pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 6;
 
 /// The recognition semantics encoded by a Hunspell runtime cache.
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 27;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 28;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -228,6 +228,12 @@ pub fn compile_runtime_cache(
         &dictionary.morphology,
     )?;
     write_special_flags(&mut output, &dictionary.special_flags, dictionary.flag_mode)?;
+    write_optional_string(
+        &mut output,
+        dictionary.keyboard.as_deref(),
+        "keyboard layout",
+    )?;
+    write_character_maps(&mut output, &dictionary.character_maps)?;
     write_optional_flag(
         &mut output,
         dictionary.compound.flag.as_ref(),
@@ -455,6 +461,8 @@ pub fn load_runtime_cache(
     let prefixes = read_rules(&mut reader, AffixKind::Prefix, flag_mode, &morphology)?;
     let suffixes = read_rules(&mut reader, AffixKind::Suffix, flag_mode, &morphology)?;
     let special_flags = read_special_flags(&mut reader, flag_mode)?;
+    let keyboard = read_optional_string(&mut reader, "keyboard layout")?.map(Box::from);
+    let character_maps = read_character_maps(&mut reader)?;
     let flag = read_optional_flag(&mut reader, flag_mode)?;
     let begin = read_optional_flag(&mut reader, flag_mode)?;
     let middle = read_optional_flag(&mut reader, flag_mode)?;
@@ -578,6 +586,8 @@ pub fn load_runtime_cache(
         break_patterns,
         word_characters,
         replacement_rules,
+        keyboard,
+        character_maps,
         ignored_characters,
         input_conversions,
         output_conversions,
@@ -797,6 +807,21 @@ fn validate_dictionary(
     }
     if dictionary.replacement_rules.len() > MAX_REPLACEMENT_RULES {
         return Err(error.error("replacement rule count exceeds importer limit"));
+    }
+    if dictionary
+        .keyboard
+        .as_ref()
+        .is_some_and(|layout| layout.is_empty() || layout.len() > MAX_LINE_BYTES)
+    {
+        return Err(error.error("keyboard layout is outside the importer limit"));
+    }
+    if dictionary.character_maps.len() > MAX_CHARACTER_MAPS
+        || dictionary
+            .character_maps
+            .iter()
+            .any(|group| group.len() > MAX_LINE_BYTES || group.chars().count() < 2)
+    {
+        return Err(error.error("character map is outside the importer limit"));
     }
     if dictionary.ignored_characters.len() > MAX_LINE_BYTES {
         return Err(error.error("ignored character count exceeds importer line limit"));
@@ -1111,6 +1136,31 @@ fn write_string(
         u32::try_from(value.len()).map_err(|_| RuntimeCacheError::InvalidDictionary(name))?,
     );
     output.extend_from_slice(value.as_bytes());
+    Ok(())
+}
+
+fn write_optional_string(
+    output: &mut Vec<u8>,
+    value: Option<&str>,
+    name: &'static str,
+) -> Result<(), RuntimeCacheError> {
+    if let Some(value) = value {
+        output.push(1);
+        write_string(output, value, name)
+    } else {
+        output.push(0);
+        Ok(())
+    }
+}
+
+fn write_character_maps(
+    output: &mut Vec<u8>,
+    character_maps: &[String],
+) -> Result<(), RuntimeCacheError> {
+    write_count(output, character_maps.len(), "character map count")?;
+    for group in character_maps {
+        write_string(output, group, "character map group")?;
+    }
     Ok(())
 }
 
@@ -1583,6 +1633,35 @@ fn read_optional_flag(
             "invalid optional flag marker",
         )),
     }
+}
+
+fn read_optional_string(
+    reader: &mut Reader<'_>,
+    name: &'static str,
+) -> Result<Option<String>, RuntimeCacheError> {
+    match reader.byte()? {
+        0 => Ok(None),
+        1 => reader.string(MAX_LINE_BYTES, name).map(Some),
+        _ => Err(RuntimeCacheError::InvalidArtifact(
+            "invalid optional string marker",
+        )),
+    }
+}
+
+fn read_character_maps(reader: &mut Reader<'_>) -> Result<Vec<String>, RuntimeCacheError> {
+    let count = reader.count(MAX_CHARACTER_MAPS, "character map count")?;
+    reader.require_minimum_items(count, 5, "character maps")?;
+    let mut character_maps = Vec::with_capacity(count);
+    for _ in 0..count {
+        let group = reader.string(MAX_LINE_BYTES, "character map group")?;
+        if group.chars().count() < 2 {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "character map group has fewer than two characters",
+            ));
+        }
+        character_maps.push(group);
+    }
+    Ok(character_maps)
 }
 
 fn read_flags(

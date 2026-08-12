@@ -113,9 +113,16 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     if let Some(max_edit_cells) = command.max_edit_cells {
         config.max_edit_cells = max_edit_cells;
     }
-    let result = Suggester::new(source.as_ref(), config)
-        .with_replacement_rules(&replacements)
-        .suggest(&command.word);
+    let result = if let Some(dictionary) = output_dictionary.as_ref() {
+        Suggester::new(source.as_ref(), config)
+            .with_replacement_rules(&replacements)
+            .with_ranking_signals(dictionary.ranking_signals())
+            .suggest(&command.word)
+    } else {
+        Suggester::new(source.as_ref(), config)
+            .with_replacement_rules(&replacements)
+            .suggest(&command.word)
+    };
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",

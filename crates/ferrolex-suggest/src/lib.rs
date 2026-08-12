@@ -91,6 +91,7 @@ impl Default for SuggestConfig {
 pub struct Suggestion {
     word: String,
     distance: usize,
+    ranking_distance: usize,
 }
 
 /// An explicit spelling replacement preferred during suggestion ranking.
@@ -100,6 +101,24 @@ pub struct ReplacementRule {
     to: String,
     at_word_start: bool,
     at_word_end: bool,
+}
+
+/// Optional source-provided signals used only to rank generated candidates.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RankingSignals<'source> {
+    keyboard: Option<&'source str>,
+    character_maps: &'source [String],
+}
+
+impl<'source> RankingSignals<'source> {
+    /// Creates ranking signals from one `KEY` layout and zero or more `MAP` groups.
+    #[must_use]
+    pub const fn new(keyboard: Option<&'source str>, character_maps: &'source [String]) -> Self {
+        Self {
+            keyboard,
+            character_maps,
+        }
+    }
 }
 
 impl ReplacementRule {
@@ -199,6 +218,7 @@ pub struct Suggester<'source, S: ?Sized> {
     source: &'source S,
     config: SuggestConfig,
     replacements: &'source [ReplacementRule],
+    ranking_signals: RankingSignals<'source>,
 }
 
 impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
@@ -209,6 +229,7 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             source,
             config,
             replacements: &[],
+            ranking_signals: RankingSignals::new(None, &[]),
         }
     }
 
@@ -219,6 +240,13 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
         replacements: &'source [ReplacementRule],
     ) -> Self {
         self.replacements = replacements;
+        self
+    }
+
+    /// Adds optional source-provided deterministic ranking signals.
+    #[must_use]
+    pub const fn with_ranking_signals(mut self, ranking_signals: RankingSignals<'source>) -> Self {
+        self.ranking_signals = ranking_signals;
         self
     }
     /// Generates ranked suggestions for `query`.
@@ -242,6 +270,7 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                 &query_chars,
                 self.config,
                 self.replacements,
+                self.ranking_signals,
                 &mut suggestions,
                 &mut examined,
                 &mut cells,
@@ -262,6 +291,7 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                             &query_chars,
                             self.config,
                             self.replacements,
+                            self.ranking_signals,
                             &mut suggestions,
                             &mut examined,
                             &mut cells,
@@ -272,7 +302,7 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             }
             matches!(completeness, Completeness::Complete)
         });
-        suggestions.sort_unstable_by(compare_suggestions);
+        rank_suggestions(&mut suggestions);
         let mut presented = BTreeSet::new();
         suggestions.retain(|suggestion| presented.insert(suggestion.word.clone()));
         suggestions.truncate(self.config.max_results);
@@ -294,6 +324,7 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     query_chars: &[char],
     config: SuggestConfig,
     replacements: &[ReplacementRule],
+    ranking_signals: RankingSignals<'_>,
     suggestions: &mut Vec<Suggestion>,
     examined: &mut usize,
     cells: &mut usize,
@@ -332,6 +363,12 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
         suggestions.push(Suggestion {
             word: present(candidate, query),
             distance,
+            ranking_distance: ranking_distance(
+                query_chars,
+                &candidate_chars,
+                distance,
+                ranking_signals,
+            ),
         });
     }
     true
@@ -356,6 +393,55 @@ fn is_related_seed(query: &str, candidate: &str, maximum: usize) -> bool {
         .take_while(|(left, right)| left == right)
         .count();
     common_prefix >= required_common || common_suffix >= required_common
+}
+
+fn rank_suggestions(suggestions: &mut [Suggestion]) {
+    suggestions.sort_unstable_by(compare_suggestions);
+}
+
+fn ranking_distance(
+    query: &[char],
+    candidate: &[char],
+    distance: usize,
+    signals: RankingSignals<'_>,
+) -> usize {
+    if distance != 1 || query.len() != candidate.len() {
+        return distance;
+    }
+    let mut difference = None;
+    for (left, right) in query.iter().zip(candidate) {
+        if left != right && difference.replace((*left, *right)).is_some() {
+            return distance;
+        }
+    }
+    let Some((left, right)) = difference else {
+        return distance;
+    };
+    let keyboard_match = signals.keyboard.is_some_and(|keyboard| {
+        let mut previous = None;
+        for current in keyboard.chars() {
+            if current == '|' {
+                previous = None;
+                continue;
+            }
+            if previous.is_some_and(|previous| {
+                (previous == left && current == right) || (previous == right && current == left)
+            }) {
+                return true;
+            }
+            previous = Some(current);
+        }
+        false
+    });
+    let map_match = signals.character_maps.iter().any(|group| {
+        group.chars().any(|character| character == left)
+            && group.chars().any(|character| character == right)
+    });
+    if keyboard_match || map_match {
+        0
+    } else {
+        distance
+    }
 }
 
 fn replacement_distance(
@@ -388,8 +474,9 @@ fn replacement_distance(
 }
 
 fn compare_suggestions(left: &Suggestion, right: &Suggestion) -> Ordering {
-    left.distance
-        .cmp(&right.distance)
+    left.ranking_distance
+        .cmp(&right.ranking_distance)
+        .then_with(|| left.distance.cmp(&right.distance))
         .then_with(|| left.word.cmp(&right.word))
 }
 
@@ -457,8 +544,8 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use super::{
-        replacement_distance, CandidateSource, Completeness, ReplacementRule, SuggestConfig,
-        Suggester, Suggestion,
+        replacement_distance, CandidateSource, Completeness, RankingSignals, ReplacementRule,
+        SuggestConfig, Suggester, Suggestion,
     };
     use ferrolex_core::{Normalization, UserDictionary, WordList};
 
@@ -560,6 +647,24 @@ mod tests {
         assert_eq!(result.suggestions()[0].word(), "the");
         assert_eq!(result.suggestions()[0].distance(), 0);
         assert!(ReplacementRule::new("", "the").is_none());
+    }
+
+    #[test]
+    fn keyboard_and_map_signals_rank_single_substitutions_before_lexical_ties() {
+        let keyboard_words = WordList::new(["e", "w"]).expect("valid words");
+        let map_words = WordList::new(["a", "z"]).expect("valid words");
+        let keyboard = String::from("qw");
+        let character_maps = Vec::from([String::from("áz")]);
+        let keyboard_result = Suggester::new(&keyboard_words, SuggestConfig::default())
+            .with_ranking_signals(RankingSignals::new(Some(&keyboard), &[]))
+            .suggest("q");
+        let map_result = Suggester::new(&map_words, SuggestConfig::default())
+            .with_ranking_signals(RankingSignals::new(None, &character_maps))
+            .suggest("á");
+
+        assert_eq!(keyboard_result.suggestions()[0].word(), "w");
+        assert_eq!(map_result.suggestions()[0].word(), "z");
+        assert_eq!(keyboard_result.suggestions()[0].distance(), 1);
     }
 
     #[test]

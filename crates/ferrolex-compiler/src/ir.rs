@@ -34,6 +34,10 @@ pub struct DictionaryIr {
     pub word_characters: BTreeSet<char>,
     /// Suggestion-ranking replacement rules.
     pub replacement_rules: Vec<ReplacementRuleIr>,
+    /// Keyboard layout retained for suggestion ranking only.
+    pub keyboard: Option<String>,
+    /// Character-equivalence groups retained for suggestion ranking only.
+    pub character_maps: Vec<String>,
     /// Characters removed before lookup and from imported spellings.
     pub ignored_characters: BTreeSet<char>,
     /// Input normalizations applied before lookup.
