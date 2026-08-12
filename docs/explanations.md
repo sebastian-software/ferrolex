@@ -52,3 +52,15 @@ The existing Criterion `hunspell lookup` group measures the direct `contains`
 lanes (`hit`, `miss`, `affixed`, `compound`, and `mixed-case`). It is the
 regression guard for this split: explanation work must remain outside that
 hot-path benchmark.
+
+## CLI
+
+The CLI reads the same verified runtime cache as other `--hunspell` commands:
+
+```sh
+ferrolex explain --hunspell de_DE.aff Haustürschlüssel
+```
+
+It prints `status`, `casing`, and either the matched stem/rules/components or a
+rejection reason. A rejected spelling is still a successful diagnostic command;
+use `ferrolex check` when the shell exit code should represent a spelling miss.

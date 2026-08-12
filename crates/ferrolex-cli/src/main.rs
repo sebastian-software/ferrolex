@@ -5,6 +5,7 @@
 use std::env;
 use std::error::Error;
 use std::fmt;
+use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -28,14 +29,15 @@ use ferrolex_dictionaries::{
 use ferrolex_hunspell::{
     compile_runtime_artifact, compile_runtime_cache, import_bytes as import_hunspell_bytes,
     import_bytes_with_encodings as import_hunspell_bytes_with_encodings, inspect_runtime_cache,
-    load_runtime_artifact, load_runtime_cache, ByteEncoding, ByteImportEncodings,
+    load_runtime_artifact, load_runtime_cache, Acceptance, AcceptanceKind, AppliedAffixKind,
+    ByteEncoding, ByteImportEncodings, CasingPath, CompoundComponentRole,
     Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError, ImportMode, ImportResult,
-    RuntimeCacheError, Severity, SourceDigests,
+    LookupExplanation, Rejection, RejectionReason, RuntimeCacheError, Severity, SourceDigests,
 };
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -59,11 +61,120 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
         }
         Command::Check(command) => check(&command),
         Command::Suggest(command) => suggest(&command),
+        Command::Explain(command) => explain(&command),
         Command::Analyze(command) => analyze(&command),
         Command::Compile(command) => compile(&command),
         Command::Inspect(path) => inspect_artifact(&path),
         Command::Validate(command) => validate(&command),
         Command::Dictionary(command) => dictionary(&command),
+    }
+}
+
+fn explain(command: &ExplainCommand) -> Result<RunOutcome, CliError> {
+    let dictionary = load_installed_hunspell_dictionary(&command.hunspell_affix_path)?;
+    print!("{}", render_explanation(&dictionary.explain(&command.word)));
+    Ok(RunOutcome::Success)
+}
+
+fn render_explanation(explanation: &LookupExplanation) -> String {
+    let mut output = String::new();
+    match explanation {
+        LookupExplanation::Accepted(accepted) => render_accepted(&mut output, accepted),
+        LookupExplanation::Rejected(rejected) => render_rejected(&mut output, rejected),
+        _ => {
+            writeln!(output, "status: unsupported diagnostic variant")
+                .expect("writing to a String cannot fail");
+        }
+    }
+    output
+}
+
+fn render_accepted(output: &mut String, accepted: &Acceptance) {
+    writeln!(output, "status: accepted").expect("writing to a String cannot fail");
+    match accepted.casing() {
+        CasingPath::Exact => writeln!(output, "casing: exact"),
+        CasingPath::CaseFallback { candidate } => {
+            writeln!(output, "casing: fallback ({candidate})")
+        }
+        _ => writeln!(output, "casing: compatibility path"),
+    }
+    .expect("writing to a String cannot fail");
+    match accepted.kind() {
+        AcceptanceKind::Stem { stem } => {
+            writeln!(output, "match: stem\nstem: {stem}").expect("writing to a String cannot fail");
+        }
+        AcceptanceKind::Affixed { stem, rules } => {
+            writeln!(output, "match: affixed\nstem: {stem}")
+                .expect("writing to a String cannot fail");
+            for (index, rule) in rules.iter().enumerate() {
+                let kind = match rule.kind() {
+                    AppliedAffixKind::Prefix => "prefix",
+                    AppliedAffixKind::Suffix => "suffix",
+                };
+                writeln!(
+                    output,
+                    "rule {}: {kind} strip={:?} add={:?}",
+                    index + 1,
+                    rule.strip(),
+                    rule.add()
+                )
+                .expect("writing to a String cannot fail");
+                if !rule.continuation_flags().is_empty() {
+                    writeln!(
+                        output,
+                        "  continuation-flags: {}",
+                        rule.continuation_flags().join(", ")
+                    )
+                    .expect("writing to a String cannot fail");
+                }
+            }
+        }
+        AcceptanceKind::Compound { components } => {
+            writeln!(output, "match: compound").expect("writing to a String cannot fail");
+            for (index, component) in components.iter().enumerate() {
+                writeln!(
+                    output,
+                    "component {}: {} (stem: {}; role: {})",
+                    index + 1,
+                    component.spelling(),
+                    component.stem(),
+                    compound_role_label(component.role())
+                )
+                .expect("writing to a String cannot fail");
+            }
+        }
+        AcceptanceKind::Compatibility { detail } => {
+            writeln!(output, "match: compatibility\ndetail: {detail}")
+                .expect("writing to a String cannot fail");
+        }
+        _ => {
+            writeln!(output, "match: unsupported diagnostic variant")
+                .expect("writing to a String cannot fail");
+        }
+    }
+}
+
+fn render_rejected(output: &mut String, rejected: &Rejection) {
+    writeln!(output, "status: rejected").expect("writing to a String cannot fail");
+    let reason = match rejected.reason() {
+        RejectionReason::ForbiddenStem { stem } => format!("forbidden stem ({stem})"),
+        RejectionReason::NeedsAffix { stem } => format!("stem requires an affix ({stem})"),
+        RejectionReason::OnlyInCompound { stem } => {
+            format!("stem is valid only in a compound ({stem})")
+        }
+        RejectionReason::KeepCase { stem } => format!("stem requires its stored case ({stem})"),
+        RejectionReason::NoDerivation => "no accepted stem or derivation".to_owned(),
+        _ => "unsupported diagnostic variant".to_owned(),
+    };
+    writeln!(output, "reason: {reason}").expect("writing to a String cannot fail");
+}
+
+const fn compound_role_label(role: CompoundComponentRole) -> &'static str {
+    match role {
+        CompoundComponentRole::Generic => "generic",
+        CompoundComponentRole::Begin => "begin",
+        CompoundComponentRole::Middle => "middle",
+        CompoundComponentRole::End => "end",
     }
 }
 
@@ -1162,6 +1273,7 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some("--help" | "-h") => Ok(Command::Help),
         Some("check") => parse_check_arguments(arguments),
         Some("suggest") => parse_suggest_arguments(arguments),
+        Some("explain") => parse_explain_arguments(arguments),
         Some("analyze") => parse_analyze_arguments(arguments),
         Some("compile") => parse_compile_arguments(arguments),
         Some("inspect") => parse_inspect_arguments(arguments),
@@ -1170,6 +1282,38 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
+}
+
+fn parse_explain_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut hunspell_affix_path = None;
+    let mut word = None;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--hunspell" => set_once_path(&mut hunspell_affix_path, &mut arguments, "--hunspell")?,
+            "--help" | "-h" => return Ok(Command::Help),
+            option if option.starts_with('-') => {
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
+            }
+            _ if word.is_some() => {
+                return Err(CliError::Usage(
+                    "explain accepts exactly one word".to_owned(),
+                ));
+            }
+            _ => word = Some(argument),
+        }
+    }
+    let hunspell_affix_path = hunspell_affix_path.ok_or_else(|| {
+        CliError::Usage("explain requires exactly one `--hunspell` path".to_owned())
+    })?;
+    let word =
+        word.ok_or_else(|| CliError::Usage("explain requires exactly one word".to_owned()))?;
+    Ok(Command::Explain(ExplainCommand {
+        hunspell_affix_path,
+        word,
+    }))
 }
 
 fn parse_inspect_arguments(
@@ -1742,6 +1886,7 @@ fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<()
 enum Command {
     Check(CheckCommand),
     Suggest(SuggestCommand),
+    Explain(ExplainCommand),
     Analyze(AnalyzeCommand),
     Compile(CompileCommand),
     Inspect(PathBuf),
@@ -1767,6 +1912,12 @@ struct SuggestCommand {
     max_edit_distance: Option<usize>,
     max_candidates: Option<usize>,
     max_edit_cells: Option<usize>,
+    word: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ExplainCommand {
+    hunspell_affix_path: PathBuf,
     word: String,
 }
 
@@ -2057,14 +2208,17 @@ mod tests {
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
     use ferrolex_core::Dictionary;
-    use ferrolex_hunspell::{load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests};
+    use ferrolex_hunspell::{
+        import, load_runtime_cache, CacheSource, ImportMode, RuntimeCacheError, SourceDigests,
+    };
 
     use super::{
         catalog_import_encodings, comment_syntax_for_path, glob_matches,
         install_hunspell_runtime_cache, line_and_column, parse_arguments, read_compiled_artifact,
-        run, runtime_cache_path, validate_hunspell, AnalyzeCommand, CheckCommand, CheckTarget,
-        CliError, Command, CommentSyntax, CompileCommand, CompileInput, DictionaryCommand,
-        RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
+        render_explanation, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
+        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
+        DictionaryCommand, ExplainCommand, RunOutcome, SourceEncoding, SuggestCommand,
+        ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -2094,6 +2248,58 @@ mod tests {
                 target: CheckTarget::Word("OAuth".to_owned()),
             })
         );
+    }
+
+    #[test]
+    fn parses_explain_with_one_hunspell_source_and_word() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "explain",
+                "--hunspell",
+                "de_DE.aff",
+                "Haustürschlüssel",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the explain command is valid");
+
+        assert_eq!(
+            command,
+            Command::Explain(ExplainCommand {
+                hunspell_affix_path: PathBuf::from("de_DE.aff"),
+                word: "Haustürschlüssel".to_owned(),
+            })
+        );
+        assert!(parse_arguments(["ferrolex", "explain", "word"].map(str::to_owned)).is_err());
+    }
+
+    #[test]
+    fn renders_affixed_compound_and_rejected_explanations() {
+        let dictionary = import(
+            "explain.aff",
+            "FORBIDDENWORD F\nSFX A Y 1\nSFX A 0 s .\nCOMPOUNDFLAG C\nCOMPOUNDMIN 1\n",
+            "explain.dic",
+            "6\nroot/A\nhaus/C\ntür/C\nschlüssel/C\nbad/F\nplain\n",
+            ImportMode::Strict,
+        )
+        .expect("CLI explanation fixture imports")
+        .dictionary()
+        .clone();
+
+        let affixed = render_explanation(&dictionary.explain("roots"));
+        assert!(affixed.contains("status: accepted"));
+        assert!(affixed.contains("match: affixed"));
+        assert!(affixed.contains("stem: root"));
+        assert!(affixed.contains("rule 1: suffix"));
+
+        let compound = render_explanation(&dictionary.explain("haustürschlüssel"));
+        assert!(compound.contains("match: compound"));
+        assert!(compound.contains("component 1: haus"));
+        assert!(compound.contains("component 3: schlüssel"));
+
+        let rejected = render_explanation(&dictionary.explain("bad"));
+        assert_eq!(rejected, "status: rejected\nreason: forbidden stem (bad)\n");
     }
 
     #[test]
@@ -3019,6 +3225,18 @@ mod tests {
         ];
         assert_eq!(
             run(check_arguments).expect("the matching runtime cache loads"),
+            RunOutcome::Success
+        );
+
+        let explain_arguments = [
+            "ferrolex".to_owned(),
+            "explain".to_owned(),
+            "--hunspell".to_owned(),
+            sources.affix_path.to_string_lossy().into_owned(),
+            "words".to_owned(),
+        ];
+        assert_eq!(
+            run(explain_arguments).expect("the matching runtime cache loads"),
             RunOutcome::Success
         );
 
