@@ -42,6 +42,10 @@ const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 /// lower than the import entry limit so a suffix with an empty `add` cannot turn
 /// a miss into a scan of the whole dictionary.
 const MAX_DERIVED_CANDIDATES_PER_LOOKUP: usize = 8_192;
+/// Caps local suggestion expansion from one query-aligned stem.
+const MAX_SUGGESTION_FORMS_PER_SEED: usize = 64;
+/// Caps query split positions considered for one compound suggestion seed.
+const MAX_SUGGESTION_COMPOUND_SPLITS: usize = 64;
 const MAX_COMPOUND_SCALARS: usize = 256;
 const MAX_COMPOUND_RULES: usize = 1_024;
 const MAX_COMPOUND_PATTERNS: usize = 1_024;
@@ -455,14 +459,97 @@ impl HunspellDictionary {
     /// the suggestion layer.
     #[must_use]
     pub fn is_suggestable_stem(&self, stem: &str) -> bool {
-        self.contains(stem)
-            && self.lexemes_for_stem(stem).any(|lexeme| {
-                !self
-                    .special_flags
-                    .no_suggest
-                    .as_ref()
-                    .is_some_and(|flag| lexeme.flags.contains(flag))
-            })
+        if !self.contains(stem) {
+            return false;
+        }
+        let mut lexemes = self.lexemes_for_stem(stem).peekable();
+        lexemes.peek().is_none() || lexemes.any(|lexeme| !self.is_no_suggest(&lexeme.flags))
+    }
+
+    fn visit_related_suggestion_forms(
+        &self,
+        query: &str,
+        stem: &str,
+        maximum_distance: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        let mut emitted = 0;
+        for lexeme in self.lexemes_for_stem(stem) {
+            if self.is_forbidden(&lexeme.flags) || self.is_no_suggest(&lexeme.flags) {
+                continue;
+            }
+            let mut states = vec![FormState::new(lexeme)];
+            let mut derivations = 0;
+            while let Some(state) = states.pop() {
+                if state.depth > 0
+                    && self.is_accepted_state(&state)
+                    && !self.is_no_suggest(&state.origin_flags)
+                    && !self.is_no_suggest(&state.flags)
+                {
+                    emitted += 1;
+                    if emitted > MAX_SUGGESTION_FORMS_PER_SEED || !visitor(&state.form) {
+                        return;
+                    }
+                }
+                if state.depth < MAX_AFFIX_CHAIN
+                    && self.expand_matching_rules(
+                        &state,
+                        AffixKind::Prefix,
+                        &self.prefixes,
+                        &self.prefix_rules_by_flag,
+                        &mut states,
+                        &mut derivations,
+                    )
+                {
+                    self.expand_matching_rules(
+                        &state,
+                        AffixKind::Suffix,
+                        &self.suffixes,
+                        &self.suffix_rules_by_flag,
+                        &mut states,
+                        &mut derivations,
+                    );
+                }
+            }
+        }
+        self.visit_compound_suggestion_forms(query, stem, maximum_distance, emitted, visitor);
+    }
+
+    fn visit_compound_suggestion_forms(
+        &self,
+        query: &str,
+        stem: &str,
+        maximum_distance: usize,
+        mut emitted: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        for (boundary, _) in query
+            .char_indices()
+            .skip(1)
+            .take(MAX_SUGGESTION_COMPOUND_SPLITS)
+        {
+            let (left, right) = query.split_at(boundary);
+            for (other, typo_component, stem_is_right) in
+                [(left, right, true), (right, left, false)]
+            {
+                if bounded_osa_distance(stem, typo_component, maximum_distance).is_none()
+                    || !self.contains(other)
+                {
+                    continue;
+                }
+                let candidate = if stem_is_right {
+                    format!("{other}{stem}")
+                } else {
+                    format!("{stem}{other}")
+                };
+                if candidate != query && self.contains(&candidate) {
+                    emitted += 1;
+                    if emitted > MAX_SUGGESTION_FORMS_PER_SEED || !visitor(&candidate) {
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     fn lexemes_for_stem(&self, stem: &str) -> impl Iterator<Item = &Lexeme> {
@@ -688,6 +775,13 @@ impl HunspellDictionary {
     fn is_only_in_compound(&self, flags: &BTreeSet<Flag>) -> bool {
         self.special_flags
             .only_in_compound
+            .as_ref()
+            .is_some_and(|flag| flags.contains(flag))
+    }
+
+    fn is_no_suggest(&self, flags: &BTreeSet<Flag>) -> bool {
+        self.special_flags
+            .no_suggest
             .as_ref()
             .is_some_and(|flag| flags.contains(flag))
     }
@@ -1258,6 +1352,46 @@ impl CandidateSource for HunspellDictionary {
     fn is_suggestion_candidate(&self, candidate: &str) -> bool {
         self.is_suggestable_stem(candidate)
     }
+
+    fn visit_related_candidates(
+        &self,
+        query: &str,
+        seed: &str,
+        max_edit_distance: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.visit_related_suggestion_forms(query, seed, max_edit_distance, visitor);
+    }
+}
+
+fn bounded_osa_distance(left: &str, right: &str, maximum: usize) -> Option<usize> {
+    let left = left.chars().collect::<Vec<_>>();
+    let right = right.chars().collect::<Vec<_>>();
+    if left.len().abs_diff(right.len()) > maximum {
+        return None;
+    }
+    let mut previous_previous = vec![0; right.len() + 1];
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_character) in left.iter().enumerate() {
+        let mut current = vec![left_index + 1; right.len() + 1];
+        for (right_index, right_character) in right.iter().enumerate() {
+            let cost = usize::from(left_character != right_character);
+            current[right_index + 1] = (previous[right_index + 1] + 1)
+                .min(current[right_index] + 1)
+                .min(previous[right_index] + cost);
+            if left_index > 0
+                && right_index > 0
+                && *left_character == right[right_index - 1]
+                && left[left_index - 1] == *right_character
+            {
+                current[right_index + 1] =
+                    current[right_index + 1].min(previous_previous[right_index - 1] + 1);
+            }
+        }
+        previous_previous = previous;
+        previous = current;
+    }
+    (previous[right.len()] <= maximum).then_some(previous[right.len()])
 }
 
 fn sharp_uppercase_forms(lexemes: &[Lexeme], special_flags: &SpecialFlags) -> BTreeSet<Box<str>> {
@@ -4695,7 +4829,7 @@ mod tests {
     use std::thread;
 
     use ferrolex_core::Dictionary;
-    use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
+    use ferrolex_suggest::{CandidateSource, Completeness, SuggestConfig, Suggester};
 
     use super::{
         compile_runtime_cache, import, import_bytes, import_bytes_with_encodings,
@@ -5069,6 +5203,39 @@ mod tests {
             .iter()
             .any(|suggestion| suggestion.word() == "public"));
         assert!(imported.ir().special_flags.no_suggest.is_some());
+    }
+
+    #[test]
+    fn suggestions_expand_affixes_and_query_aligned_compounds_within_budgets() {
+        let result = import(
+            "german-class.aff",
+            "SFX N Y 1\nSFX N 0 n .\nCOMPOUNDFLAG C\nCOMPOUNDMIN 1\n",
+            "german-class.dic",
+            "3\nHäuser/N\nBahn/C\nHof/C\n",
+            ImportMode::Strict,
+        )
+        .expect("the fixture imports");
+        let dictionary = result.dictionary();
+        let config = SuggestConfig {
+            max_edit_distance: 2,
+            max_candidates: 32,
+            max_edit_cells: 2_000,
+            ..SuggestConfig::default()
+        };
+
+        let affixed = Suggester::new(dictionary, config).suggest("Häusernn");
+        let compound = Suggester::new(dictionary, config).suggest("BahnHoff");
+
+        assert!(affixed
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "Häusern"));
+        assert!(compound
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "BahnHof"));
+        assert_eq!(affixed.completeness(), Completeness::Complete);
+        assert_eq!(compound.completeness(), Completeness::Complete);
     }
 
     #[test]

@@ -20,6 +20,20 @@ pub trait CandidateSource: Send + Sync {
     fn is_suggestion_candidate(&self, _candidate: &str) -> bool {
         true
     }
+
+    /// Visits bounded query-related forms for one stored candidate.
+    ///
+    /// The default has no derived forms. Sources that model morphology can use
+    /// the query and seed to expose a deliberately bounded local expansion;
+    /// every emitted form still consumes the caller's normal suggestion budget.
+    fn visit_related_candidates(
+        &self,
+        _query: &str,
+        _seed: &str,
+        _max_edit_distance: usize,
+        _visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+    }
 }
 
 impl CandidateSource for WordList {
@@ -221,51 +235,42 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
         let mut cells = 0_usize;
         let mut completeness = Completeness::Complete;
         self.source.visit_candidates(&mut |candidate| {
-            if examined == self.config.max_candidates {
-                completeness = Completeness::CandidateLimitReached;
+            if !consider_candidate(
+                self.source,
+                candidate,
+                query,
+                &query_chars,
+                self.config,
+                self.replacements,
+                &mut suggestions,
+                &mut examined,
+                &mut cells,
+                &mut completeness,
+            ) {
                 return false;
             }
-            examined += 1;
-            if !self.source.is_suggestion_candidate(candidate) {
-                return true;
-            }
-            let Some(candidate_chars) =
-                lowercase_chars_bounded(candidate, self.config.max_word_scalars)
-            else {
-                return true;
-            };
-            let distance = if let Some(distance) =
-                replacement_distance(&query_chars, &candidate_chars, self.replacements)
-            {
-                Some(distance)
-            } else {
-                // A length difference beyond the permitted distance cannot
-                // reach the dynamic-programming matrix. It must not spend the
-                // edit-cell budget merely because it appeared early in lexical
-                // candidate order.
-                if query_chars.len().abs_diff(candidate_chars.len()) > self.config.max_edit_distance
-                {
-                    return true;
-                }
-                let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
-                if cells.saturating_add(required) > self.config.max_edit_cells {
-                    completeness = Completeness::EditBudgetReached;
-                    return false;
-                }
-                cells += required;
-                osa_distance(
-                    &query_chars,
-                    &candidate_chars,
+            if is_related_seed(query, candidate, self.config.max_edit_distance) {
+                self.source.visit_related_candidates(
+                    query,
+                    candidate,
                     self.config.max_edit_distance,
-                )
-            };
-            if let Some(distance) = distance {
-                suggestions.push(Suggestion {
-                    word: present(candidate, query),
-                    distance,
-                });
+                    &mut |derived| {
+                        consider_candidate(
+                            self.source,
+                            derived,
+                            query,
+                            &query_chars,
+                            self.config,
+                            self.replacements,
+                            &mut suggestions,
+                            &mut examined,
+                            &mut cells,
+                            &mut completeness,
+                        )
+                    },
+                );
             }
-            true
+            matches!(completeness, Completeness::Complete)
         });
         suggestions.sort_unstable_by(compare_suggestions);
         let mut presented = BTreeSet::new();
@@ -276,6 +281,81 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             completeness,
         }
     }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one helper owns each mutable part of the bounded suggestion transaction"
+)]
+fn consider_candidate<S: CandidateSource + ?Sized>(
+    source: &S,
+    candidate: &str,
+    query: &str,
+    query_chars: &[char],
+    config: SuggestConfig,
+    replacements: &[ReplacementRule],
+    suggestions: &mut Vec<Suggestion>,
+    examined: &mut usize,
+    cells: &mut usize,
+    completeness: &mut Completeness,
+) -> bool {
+    if *examined == config.max_candidates {
+        *completeness = Completeness::CandidateLimitReached;
+        return false;
+    }
+    *examined += 1;
+    if !source.is_suggestion_candidate(candidate) {
+        return true;
+    }
+    let Some(candidate_chars) = lowercase_chars_bounded(candidate, config.max_word_scalars) else {
+        return true;
+    };
+    let distance =
+        if let Some(distance) = replacement_distance(query_chars, &candidate_chars, replacements) {
+            Some(distance)
+        } else {
+            // A length difference beyond the permitted distance cannot reach the
+            // dynamic-programming matrix. It must not spend the edit-cell budget
+            // merely because it appeared early in lexical candidate order.
+            if query_chars.len().abs_diff(candidate_chars.len()) > config.max_edit_distance {
+                return true;
+            }
+            let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
+            if cells.saturating_add(required) > config.max_edit_cells {
+                *completeness = Completeness::EditBudgetReached;
+                return false;
+            }
+            *cells += required;
+            osa_distance(query_chars, &candidate_chars, config.max_edit_distance)
+        };
+    if let Some(distance) = distance {
+        suggestions.push(Suggestion {
+            word: present(candidate, query),
+            distance,
+        });
+    }
+    true
+}
+
+fn is_related_seed(query: &str, candidate: &str, maximum: usize) -> bool {
+    let query = query.chars().collect::<Vec<_>>();
+    let candidate = candidate.chars().collect::<Vec<_>>();
+    let required_common = query
+        .len()
+        .min(candidate.len())
+        .saturating_sub(maximum.saturating_mul(2));
+    let common_prefix = query
+        .iter()
+        .zip(&candidate)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let common_suffix = query
+        .iter()
+        .rev()
+        .zip(candidate.iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    common_prefix >= required_common || common_suffix >= required_common
 }
 
 fn replacement_distance(

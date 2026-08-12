@@ -9,9 +9,13 @@ ranks by `(distance, byte-lexical spelling)`.
 `WordList`, `UserDictionary`, and `HunspellDictionary` are candidate sources.
 A mutable `UserDictionary` is snapshotted before suggestion work begins, so
 project-word updates never hold its lock across edit-distance comparisons.
-Hunspell candidates are its stored stems in UTF-8 byte order; affix-derived and
-compound forms are deliberately not enumerated because a source can describe
-an unbounded form space.
+Hunspell candidates start with stored stems in UTF-8 byte order. For a
+query-aligned near-miss stem, ferrolex also performs a bounded local affix
+expansion and checks bounded query split positions for valid compounds. It
+never pre-expands a dictionary: both the number of generated forms per seed and
+the number of compound splits are fixed internal limits, and emitted forms use
+the caller's ordinary candidate and edit-cell budgets. Thus an incomplete
+result remains explicit through `Completeness`.
 
 Before ranking, a Hunspell source filters stored stems through its recognition
 rules. `FORBIDDENWORD`, `NEEDAFFIX`, and `ONLYINCOMPOUND` pseudo-stems are not
