@@ -1259,6 +1259,34 @@ mod tests {
     }
 
     #[test]
+    fn directives_in_trailing_comments_are_ignored() {
+        let dictionary = WordList::new(["known"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "let value = 1; // ferrolex:ignore typo\ntypo";
+
+        let analysis =
+            analyzer.check(&Document::new(source).with_comment_syntax(CommentSyntax::line("//")));
+
+        assert!(analysis.directive_diagnostics().is_empty());
+        assert!(analysis
+            .findings()
+            .iter()
+            .any(|finding| finding.word() == "typo"));
+    }
+
+    #[test]
+    fn recognizes_html_comment_directives() {
+        let dictionary = WordList::new(["known"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "<!-- ferrolex:ignore typo -->\ntypo";
+
+        assert!(analyzer
+            .check(&Document::new(source).with_comment_syntax(CommentSyntax::Html))
+            .findings()
+            .is_empty());
+    }
+
+    #[test]
     fn reports_malformed_directives_without_stopping_analysis() {
         let dictionary = WordList::new(["known"]).expect("test words are valid");
         let analyzer = Analyzer::builder(&dictionary).build();

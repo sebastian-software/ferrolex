@@ -91,6 +91,8 @@ an ambient parser or silent configuration drift.
 
 Directives are only interpreted in the comment syntax supplied with a
 `Document`; text that merely resembles a directive has no special meaning.
+The CLI accepts a line prefix with `--comment-prefix` (including dash prefixes
+such as `--comment-prefix=--`) or HTML comments with `--comment-syntax html`.
 
 ```text
 // ferrolex:ignore OAuthAuthentcationProvider
@@ -102,6 +104,11 @@ Directives are only interpreted in the comment syntax supplied with a
 directive line until a following `enable`; the directives are intentionally not
 nested. Malformed or unknown directives produce structured diagnostics and do
 not prevent the rest of the document from being analyzed.
+
+Directives must occupy a complete comment line, apart from leading whitespace.
+For example, `let value = 1; // ferrolex:disable` is ordinary source text and
+does not alter analysis. This keeps directive recognition parser-independent
+and avoids treating comment-like text inside strings as configuration.
 
 The format is ferrolex-specific. cspell directives and configuration are not
 interpreted.

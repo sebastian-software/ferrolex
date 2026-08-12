@@ -35,7 +35,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX>] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -440,8 +440,8 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
         path: command.path.clone(),
         source,
     })?;
-    let document = match &command.comment_prefix {
-        Some(prefix) => Document::new(&source).with_comment_syntax(CommentSyntax::line(prefix)),
+    let document = match &command.comment_syntax {
+        Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
         None => Document::new(&source),
     };
     let mut builder = Analyzer::builder(&checker);
@@ -1080,7 +1080,7 @@ fn parse_analyze_arguments(
     let mut compiled_paths = Vec::new();
     let mut hunspell_affix_paths = Vec::new();
     let mut config_path = None;
-    let mut comment_prefix = None;
+    let mut comment_syntax = None;
     let mut path = None;
     let mut arguments = arguments.into_iter();
 
@@ -1099,14 +1099,53 @@ fn parse_analyze_arguments(
                 let prefix = arguments.next().ok_or_else(|| {
                     CliError::Usage("`--comment-prefix` requires a prefix".to_owned())
                 })?;
-                if prefix.is_empty() || prefix.starts_with('-') {
+                if prefix.is_empty() {
                     return Err(CliError::Usage(
-                        "`--comment-prefix` requires a non-option prefix".to_owned(),
+                        "`--comment-prefix` requires a non-empty prefix".to_owned(),
                     ));
                 }
-                if comment_prefix.replace(prefix).is_some() {
+                if comment_syntax
+                    .replace(CommentSyntax::line(prefix))
+                    .is_some()
+                {
                     return Err(CliError::Usage(
-                        "`--comment-prefix` may only be supplied once".to_owned(),
+                        "only one comment syntax may be supplied".to_owned(),
+                    ));
+                }
+            }
+            option if option.starts_with("--comment-prefix=") => {
+                let prefix = option
+                    .strip_prefix("--comment-prefix=")
+                    .expect("option was matched by its prefix");
+                if prefix.is_empty() {
+                    return Err(CliError::Usage(
+                        "`--comment-prefix` requires a non-empty prefix".to_owned(),
+                    ));
+                }
+                if comment_syntax
+                    .replace(CommentSyntax::line(prefix))
+                    .is_some()
+                {
+                    return Err(CliError::Usage(
+                        "only one comment syntax may be supplied".to_owned(),
+                    ));
+                }
+            }
+            "--comment-syntax" => {
+                let syntax = arguments.next().ok_or_else(|| {
+                    CliError::Usage("`--comment-syntax` requires a syntax".to_owned())
+                })?;
+                let syntax = match syntax.as_str() {
+                    "html" => CommentSyntax::Html,
+                    _ => {
+                        return Err(CliError::Usage(
+                            "`--comment-syntax` supports only `html`".to_owned(),
+                        ));
+                    }
+                };
+                if comment_syntax.replace(syntax).is_some() {
+                    return Err(CliError::Usage(
+                        "only one comment syntax may be supplied".to_owned(),
                     ));
                 }
             }
@@ -1135,7 +1174,7 @@ fn parse_analyze_arguments(
         compiled_paths,
         hunspell_affix_paths,
         config_path,
-        comment_prefix,
+        comment_syntax,
         path,
     }))
 }
@@ -1293,7 +1332,7 @@ struct AnalyzeCommand {
     compiled_paths: Vec<PathBuf>,
     hunspell_affix_paths: Vec<PathBuf>,
     config_path: Option<PathBuf>,
-    comment_prefix: Option<String>,
+    comment_syntax: Option<CommentSyntax>,
     path: PathBuf,
 }
 
@@ -1552,7 +1591,7 @@ mod tests {
     use super::{
         catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
         read_compiled_artifact, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
-        CheckCommand, CheckTarget, CliError, Command, CompileCommand, CompileInput,
+        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
         DictionaryCommand, RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
     };
 
@@ -1624,8 +1663,65 @@ mod tests {
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
-                comment_prefix: Some("//".to_owned()),
+                comment_syntax: Some(CommentSyntax::line("//")),
                 path: PathBuf::from("lib.rs"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_analyze_with_a_dash_comment_prefix() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "analyze",
+                "--dictionary",
+                "words.txt",
+                "--comment-prefix=--",
+                "query.sql",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Analyze(AnalyzeCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                config_path: None,
+                comment_syntax: Some(CommentSyntax::line("--")),
+                path: PathBuf::from("query.sql"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_analyze_with_html_comments() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "analyze",
+                "--dictionary",
+                "words.txt",
+                "--comment-syntax",
+                "html",
+                "README.md",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Analyze(AnalyzeCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                config_path: None,
+                comment_syntax: Some(CommentSyntax::Html),
+                path: PathBuf::from("README.md"),
             })
         );
     }
@@ -1653,7 +1749,7 @@ mod tests {
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
                 config_path: Some(PathBuf::from(".ferrolex/config")),
-                comment_prefix: None,
+                comment_syntax: None,
                 path: PathBuf::from("src/lib.rs"),
             })
         );
@@ -1695,7 +1791,7 @@ mod tests {
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
                 config_path: None,
-                comment_prefix: None,
+                comment_syntax: None,
                 path: PathBuf::from("src/lib.rs"),
             })
         );
@@ -1960,6 +2056,26 @@ mod tests {
 
         assert_eq!(
             run(arguments).expect("project policy is readable"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn analyzes_html_comment_directives() {
+        let dictionary = temporary_dictionary("known\n");
+        let source = temporary_file("<!-- ferrolex:ignore typo -->\ntypo\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "analyze".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "--comment-syntax".to_owned(),
+            "html".to_owned(),
+            source.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("HTML directives are recognized"),
             RunOutcome::Success
         );
     }
