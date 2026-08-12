@@ -8,7 +8,8 @@
 
 use std::ops::Range;
 
-use ferrolex_core::Dictionary;
+use ferrolex_core::{Dictionary, Normalization};
+use unicode_normalization::char::canonical_combining_class;
 
 /// A misspelled natural-language token and its byte range in the input text.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,7 +43,7 @@ impl<'text> Iterator for Misspellings<'_, 'text> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.tokens.find_map(|(range, word)| {
-            (!self.dictionary.contains(word)).then_some(Misspelling { word, range })
+            (!contains_normalized(self.dictionary, word)).then_some(Misspelling { word, range })
         })
     }
 }
@@ -89,7 +90,7 @@ impl<'text> Iterator for WordTokens<'text> {
 
         while let Some((offset, character)) = characters.next() {
             let character_end = tail_start + offset + character.len_utf8();
-            if character.is_alphabetic() {
+            if is_word_character(character) {
                 end = character_end;
                 continue;
             }
@@ -109,6 +110,14 @@ impl<'text> Iterator for WordTokens<'text> {
         self.next_byte = self.text.len();
         Some((start..end, &self.text[start..end]))
     }
+}
+
+fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
+    dictionary.contains(token) || dictionary.contains(Normalization::Nfc.normalize(token).as_ref())
+}
+
+fn is_word_character(character: char) -> bool {
+    character.is_alphabetic() || canonical_combining_class(character) != 0
 }
 
 #[cfg(test)]
@@ -134,6 +143,17 @@ mod tests {
         let dictionary = WordList::new(["don't", "l’esprit"]).expect("test entries are valid");
 
         assert!(check_text(&dictionary, "don't l’esprit").next().is_none());
+    }
+
+    #[test]
+    fn recognizes_nfd_words_without_changing_the_reported_source_text() {
+        let dictionary = WordList::new(["café"]).expect("test word is valid");
+        let text = "cafe\u{301} typo";
+        let misspellings = check_text(&dictionary, text).collect::<Vec<_>>();
+
+        assert_eq!(misspellings.len(), 1);
+        assert_eq!(misspellings[0].word(), "typo");
+        assert_eq!(&text[misspellings[0].range()], "typo");
     }
 
     #[test]

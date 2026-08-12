@@ -12,6 +12,7 @@ categories.workspace = true
 
 [dependencies]
 ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
+unicode-normalization = "0.1.25"
 
 [lints]
 workspace = true

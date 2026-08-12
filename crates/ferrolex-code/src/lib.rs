@@ -11,8 +11,9 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Range;
 
-use ferrolex_core::Dictionary;
+use ferrolex_core::{Dictionary, Normalization};
 use regex::Regex;
+use unicode_normalization::char::canonical_combining_class;
 
 /// The classification assigned to a complete source token.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -163,8 +164,14 @@ pub fn split_identifier(
     let mut segments = Vec::new();
     let mut run_start = None;
 
-    for (offset, character) in identifier.char_indices() {
-        if character.is_alphanumeric() {
+    let mut characters = identifier.char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        let apostrophe_between_words = matches!(character, '\'' | '’')
+            && run_start.is_some()
+            && characters
+                .peek()
+                .is_some_and(|(_, next)| next.is_alphabetic());
+        if is_word_character(character) || character.is_numeric() || apostrophe_between_words {
             run_start.get_or_insert(offset);
             continue;
         }
@@ -559,7 +566,7 @@ impl<'dictionary> Analyzer<'dictionary> {
             }
             if self.config.ignored_words.contains(segment.text())
                 || directive_ignored_words.contains(segment.text())
-                || self.dictionary.contains(segment.text())
+                || contains_normalized(self.dictionary, segment.text())
             {
                 continue;
             }
@@ -916,7 +923,7 @@ fn classify(token: &str) -> TokenClass {
         TokenClass::Identifier
     } else if token.chars().all(char::is_alphabetic) && token.chars().all(char::is_uppercase) {
         TokenClass::Acronym
-    } else if token.chars().all(char::is_alphabetic) {
+    } else if token.chars().all(is_word_character) {
         TokenClass::NaturalWord
     } else {
         TokenClass::Unknown
@@ -984,6 +991,14 @@ fn is_domain_label(label: &str) -> bool {
 
 fn is_generated_token(token: &str) -> bool {
     token.len() > 4 && token.starts_with("__") && token.ends_with("__")
+}
+
+fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
+    dictionary.contains(token) || dictionary.contains(Normalization::Nfc.normalize(token).as_ref())
+}
+
+fn is_word_character(character: char) -> bool {
+    character.is_alphabetic() || canonical_combining_class(character) != 0
 }
 
 fn split_run<'source>(
@@ -1072,6 +1087,7 @@ mod tests {
         assert_eq!(segments("user_profile_image"), ["user", "profile", "image"]);
         assert_eq!(segments("StraßeÜberblick"), ["Straße", "Überblick"]);
         assert_eq!(segments("version2Parser"), ["version", "2", "Parser"]);
+        assert_eq!(segments("cafe\u{301}"), ["cafe\u{301}"]);
     }
 
     #[test]
@@ -1175,6 +1191,20 @@ mod tests {
         assert_eq!(finding.class(), TokenClass::Identifier);
         assert_eq!(&source[finding.range()], finding.word());
         assert_eq!(&source[finding.token_range()], finding.token());
+    }
+
+    #[test]
+    fn normalizes_nfd_lookup_and_keeps_apostrophes_in_prose_words() {
+        let dictionary = WordList::new(["café", "don't"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "cafe\u{301} don't typo";
+
+        let analysis = analyzer.check(&Document::new(source));
+        let findings = analysis.findings();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].word(), "typo");
+        assert_eq!(&source[findings[0].range()], "typo");
     }
 
     #[test]

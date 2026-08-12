@@ -38,6 +38,15 @@ uses `0x`), so ordinary words and camel-case identifiers remain checked. Exact
 ignored words and regular expressions are supported; expressions are compiled
 as full-token matches, including alternations.
 
+## Unicode normalization and prose tokens
+
+Findings always retain the original source token and UTF-8 byte range. Before a
+dictionary lookup, ferrolex also tries its NFC form; this recognizes decomposed
+(NFD) text without rewriting source or silently changing a replacement range.
+Combining marks remain attached to their base letters, and straight or curly
+apostrophes between letters remain part of prose words such as `don't` and
+`l’esprit`.
+
 Project and user vocabulary belongs in a layered `Dictionary`. `UserDictionary`
 is the mutable overlay: adding a word is immediately visible to concurrent
 lookups without mutating base dictionaries. Its `from_text` and `to_text`

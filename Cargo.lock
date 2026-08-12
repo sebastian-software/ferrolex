@@ -260,6 +260,7 @@ version = "0.1.0"
 dependencies = [
  "ferrolex-core",
  "regex",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -312,6 +313,7 @@ name = "ferrolex-text"
 version = "0.1.0"
 dependencies = [
  "ferrolex-core",
+ "unicode-normalization",
 ]
 
 [[package]]
