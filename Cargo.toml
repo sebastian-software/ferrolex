@@ -34,6 +34,7 @@ members = [
     "crates/ferrolex-ffi",
     "crates/ferrolex-node",
     "crates/ferrolex-python",
+    "crates/ferrolex-lsp",
 ]
 resolver = "2"
 

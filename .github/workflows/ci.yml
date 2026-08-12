@@ -27,6 +27,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo test -p ferrolex-ffi --features c-abi
+      - run: cargo test -p ferrolex-lsp
       - run: cargo bench -p ferrolex-core --no-run
       - run: cargo bench -p ferrolex-compiler --no-run
       - run: cargo bench -p ferrolex-suggest --no-run
