@@ -145,6 +145,12 @@ untrusted Hunspell input, compiled artifacts, and bounded suggestions. See
 [Robustness testing](docs/robustness-testing.md) for the covered boundaries
 and focused command.
 
+## Security
+
+Please report vulnerabilities privately as described in the
+[security policy](SECURITY.md). Dictionary and artifact inputs are treated as
+untrusted throughout the supported import and loading paths.
+
 ## MSRV
 
 ferrolex supports Rust 1.81 and later.
