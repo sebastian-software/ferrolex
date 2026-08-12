@@ -1296,11 +1296,11 @@ impl HunspellDictionary {
                 && pattern.ending.as_ref() != "0"
                 && word[..start].ends_with(pattern.ending.as_ref())
                 && right.starts_with(pattern.beginning.as_ref())
-                && pattern.ending_flag.as_ref().map_or(true, |flag| {
+                && pattern.ending_flag.as_ref().is_none_or(|flag| {
                     self.lexemes_for_stem(&word[..start])
                         .any(|lexeme| lexeme.flags.contains(flag))
                 })
-                && pattern.beginning_flag.as_ref().map_or(true, |flag| {
+                && pattern.beginning_flag.as_ref().is_none_or(|flag| {
                     self.lexemes_for_stem(right)
                         .any(|lexeme| lexeme.flags.contains(flag))
                 })
@@ -1956,9 +1956,10 @@ impl Condition {
             .iter()
             .zip(&characters[start..])
             .all(|(atom, character)| atom.matches(*character))
-            && self.not_preceded_by.as_ref().map_or(true, |atom| {
-                start == 0 || !atom.matches(characters[start - 1])
-            })
+            && self
+                .not_preceded_by
+                .as_ref()
+                .is_none_or(|atom| start == 0 || !atom.matches(characters[start - 1]))
     }
 }
 
@@ -4088,7 +4089,7 @@ fn parse_compound_rule_patterns(
         for prefix in patterns {
             for count in minimum..=maximum.min(MAX_COMPOUND_RULE_COMPONENTS - prefix.len()) {
                 let mut next = prefix.clone();
-                next.extend(std::iter::repeat(flag.clone()).take(count));
+                next.extend(std::iter::repeat_n(flag.clone(), count));
                 expanded.push(next);
                 if expanded.len() > MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE {
                     return Err("compound rule expansions exceed the per-rule limit of 1,024");
@@ -4381,9 +4382,9 @@ fn parse_affix_rule(
         Some((_, "")) => return Err("affix continuation flags must not be empty".to_owned()),
         Some((_, flags))
             if !is_flag_alias_reference(flags, flag_aliases)
-                && !flag_mode
+                && flag_mode
                     .flag_count(flags)
-                    .is_some_and(|count| count <= MAX_FLAGS_PER_ENTRY) =>
+                    .is_none_or(|count| count > MAX_FLAGS_PER_ENTRY) =>
         {
             return Err("affix continuation flags exceed the 4096-flag importer limit".to_owned())
         }
@@ -4628,9 +4629,9 @@ fn parse_dic(
             }
             Some(value)
                 if !is_flag_alias_reference(value, flag_aliases)
-                    && !flag_mode
+                    && flag_mode
                         .flag_count(value)
-                        .is_some_and(|count| count <= MAX_FLAGS_PER_ENTRY) =>
+                        .is_none_or(|count| count > MAX_FLAGS_PER_ENTRY) =>
             {
                 diagnostics.push(diagnostic(
                     source,
