@@ -486,6 +486,15 @@ impl<'dictionary> Analyzer<'dictionary> {
         }
     }
 
+    /// Checks one identifier without constructing a [`Document`].
+    ///
+    /// This applies the analyzer's configured identifier splitting and ignore
+    /// policy. The returned findings keep ranges relative to `identifier`.
+    #[must_use]
+    pub fn check_identifier<'source>(&self, identifier: &'source str) -> Analysis<'source> {
+        self.check(&Document::new(identifier))
+    }
+
     /// Checks a document and returns findings plus directive diagnostics.
     #[must_use]
     pub fn check<'source>(&self, document: &Document<'source>) -> Analysis<'source> {
@@ -639,6 +648,24 @@ impl<'source> Finding<'source> {
     pub fn segment_index(&self) -> Option<usize> {
         self.segment_index
     }
+
+    /// Replaces this identifier segment in its complete token.
+    ///
+    /// The replacement follows the segment's lower-, upper-, or
+    /// initial-uppercase casing. It returns `None` for a finding that is not
+    /// part of an identifier.
+    #[must_use]
+    pub fn whole_identifier_suggestion(&self, suggestion: &str) -> Option<String> {
+        self.segment_index?;
+        let relative_start = self.range.start.checked_sub(self.token_range.start)?;
+        let relative_end = self.range.end.checked_sub(self.token_range.start)?;
+        let replacement = preserve_segment_casing(self.word, suggestion);
+        let mut token = String::with_capacity(self.token.len() + replacement.len());
+        token.push_str(&self.token[..relative_start]);
+        token.push_str(&replacement);
+        token.push_str(&self.token[relative_end..]);
+        Some(token)
+    }
 }
 
 /// Replaces an identifier finding with `suggestion` in its complete token.
@@ -647,15 +674,7 @@ impl<'source> Finding<'source> {
 /// casing so callers can offer one whole-identifier edit.
 #[must_use]
 pub fn recombine_identifier_suggestion(finding: &Finding<'_>, suggestion: &str) -> Option<String> {
-    finding.segment_index?;
-    let relative_start = finding.range.start.checked_sub(finding.token_range.start)?;
-    let relative_end = finding.range.end.checked_sub(finding.token_range.start)?;
-    let replacement = preserve_segment_casing(finding.word, suggestion);
-    let mut token = String::with_capacity(finding.token.len() + replacement.len());
-    token.push_str(&finding.token[..relative_start]);
-    token.push_str(&replacement);
-    token.push_str(&finding.token[relative_end..]);
-    Some(token)
+    finding.whole_identifier_suggestion(suggestion)
 }
 
 fn preserve_segment_casing(original: &str, suggestion: &str) -> String {
@@ -1191,6 +1210,22 @@ mod tests {
         assert_eq!(finding.class(), TokenClass::Identifier);
         assert_eq!(&source[finding.range()], finding.word());
         assert_eq!(&source[finding.token_range()], finding.token());
+    }
+
+    #[test]
+    fn checks_one_identifier_and_exposes_a_whole_identifier_suggestion() {
+        let dictionary =
+            WordList::new(["OAuth", "Authentication", "Provider"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+
+        let analysis = analyzer.check_identifier("OAuthAuthentcationProvider");
+        let finding = analysis.findings().first().expect("the typo is reported");
+
+        assert_eq!(finding.word(), "Authentcation");
+        assert_eq!(
+            finding.whole_identifier_suggestion("authentication"),
+            Some("OAuthAuthenticationProvider".to_owned())
+        );
     }
 
     #[test]

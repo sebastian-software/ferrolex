@@ -26,6 +26,13 @@ identifier text and follows lower-, upper-, and initial-uppercase segment
 casing, for example `OAuthAuthentcationProvider` becomes
 `OAuthAuthenticationProvider`.
 
+For one-off integrations, `Analyzer::check_identifier` applies the same
+configured splitting and policy directly to an identifier. Every identifier
+`Finding` can turn a segment candidate into its full-token replacement with
+`whole_identifier_suggestion`; the older free recombination helper remains
+available. `ferrolex analyze --suggest` emits up to three bounded suggestions
+per finding and renders identifier candidates as full, case-preserving edits.
+
 ## Classification and ignores
 
 The generic classifier identifies natural words, identifiers, acronyms, URLs,

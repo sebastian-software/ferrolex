@@ -35,7 +35,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -311,6 +311,131 @@ fn load_checker(
     Ok(builder.build())
 }
 
+/// Dictionary inputs retained both for recognition and bounded suggestions.
+struct AnalysisDictionary {
+    sources: Vec<AnalysisSource>,
+}
+
+enum AnalysisSource {
+    WordList(WordList),
+    Artifact(ArtifactDictionary),
+    Hunspell(Box<HunspellDictionary>),
+}
+
+impl Dictionary for AnalysisDictionary {
+    fn contains(&self, word: &str) -> bool {
+        self.sources.iter().any(|source| match source {
+            AnalysisSource::WordList(dictionary) => dictionary.contains(word),
+            AnalysisSource::Artifact(dictionary) => dictionary.contains(word),
+            AnalysisSource::Hunspell(dictionary) => dictionary.contains(word),
+        })
+    }
+}
+
+impl CandidateSource for AnalysisDictionary {
+    fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        for source in &self.sources {
+            let mut keep_going = true;
+            match source {
+                AnalysisSource::WordList(dictionary) => dictionary.visit_candidates(&mut |word| {
+                    keep_going = visitor(word);
+                    keep_going
+                }),
+                AnalysisSource::Artifact(dictionary) => dictionary.visit_candidates(&mut |word| {
+                    keep_going = visitor(word);
+                    keep_going
+                }),
+                AnalysisSource::Hunspell(dictionary) => dictionary.visit_candidates(&mut |word| {
+                    keep_going = visitor(word);
+                    keep_going
+                }),
+            }
+            if !keep_going {
+                break;
+            }
+        }
+    }
+
+    fn is_suggestion_candidate(&self, candidate: &str) -> bool {
+        self.sources.iter().any(|source| match source {
+            AnalysisSource::WordList(_) => true,
+            AnalysisSource::Artifact(dictionary) => dictionary.is_suggestion_candidate(candidate),
+            AnalysisSource::Hunspell(dictionary) => dictionary.is_suggestion_candidate(candidate),
+        })
+    }
+
+    fn candidate_frequency(&self, candidate: &str) -> Option<u64> {
+        self.sources.iter().find_map(|source| match source {
+            AnalysisSource::WordList(_) => None,
+            AnalysisSource::Artifact(dictionary) => dictionary.candidate_frequency(candidate),
+            AnalysisSource::Hunspell(dictionary) => dictionary.candidate_frequency(candidate),
+        })
+    }
+
+    fn visit_related_candidates(
+        &self,
+        query: &str,
+        seed: &str,
+        max_edit_distance: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        for source in &self.sources {
+            let mut keep_going = true;
+            match source {
+                AnalysisSource::WordList(_) => {}
+                AnalysisSource::Artifact(dictionary) => dictionary.visit_related_candidates(
+                    query,
+                    seed,
+                    max_edit_distance,
+                    &mut |word| {
+                        keep_going = visitor(word);
+                        keep_going
+                    },
+                ),
+                AnalysisSource::Hunspell(dictionary) => dictionary.visit_related_candidates(
+                    query,
+                    seed,
+                    max_edit_distance,
+                    &mut |word| {
+                        keep_going = visitor(word);
+                        keep_going
+                    },
+                ),
+            }
+            if !keep_going {
+                break;
+            }
+        }
+    }
+}
+
+fn load_analysis_dictionary(
+    dictionary_paths: &[PathBuf],
+    compiled_paths: &[PathBuf],
+    hunspell_affix_paths: &[PathBuf],
+) -> Result<AnalysisDictionary, CliError> {
+    let mut sources = Vec::new();
+    for path in dictionary_paths {
+        let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
+            path: path.clone(),
+            source,
+        })?;
+        sources.push(AnalysisSource::WordList(WordList::from_text(
+            Normalization::Exact,
+            &text,
+        )));
+    }
+    for path in compiled_paths {
+        sources.push(AnalysisSource::Artifact(load_artifact(path)?));
+    }
+    for aff_path in hunspell_affix_paths {
+        sources.push(AnalysisSource::Hunspell(Box::new(
+            load_installed_hunspell_dictionary(aff_path)?,
+        )));
+    }
+    Ok(AnalysisDictionary { sources })
+}
+
 /// A standalone `--compiled` artifact, independent of its source-pair files.
 enum ArtifactDictionary {
     Exact(CompiledDictionary),
@@ -354,6 +479,25 @@ impl CandidateSource for ArtifactDictionary {
         match self {
             Self::Exact(dictionary) => dictionary.frequency(candidate),
             Self::Hunspell(dictionary) => dictionary.candidate_frequency(candidate),
+        }
+    }
+
+    fn is_suggestion_candidate(&self, candidate: &str) -> bool {
+        match self {
+            Self::Exact(_) => true,
+            Self::Hunspell(dictionary) => dictionary.is_suggestion_candidate(candidate),
+        }
+    }
+
+    fn visit_related_candidates(
+        &self,
+        query: &str,
+        seed: &str,
+        max_edit_distance: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        if let Self::Hunspell(dictionary) = self {
+            dictionary.visit_related_candidates(query, seed, max_edit_distance, visitor);
         }
     }
 }
@@ -431,7 +575,7 @@ fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
 }
 
 fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
-    let checker = load_checker(
+    let dictionary = load_analysis_dictionary(
         &command.dictionary_paths,
         &command.compiled_paths,
         &command.hunspell_affix_paths,
@@ -444,7 +588,7 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
         Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
         None => Document::new(&source),
     };
-    let mut builder = Analyzer::builder(&checker);
+    let mut builder = Analyzer::builder(&dictionary);
     if let Some(config_path) = &command.config_path {
         let text =
             fs::read_to_string(config_path).map_err(|source| CliError::ReadProjectConfig {
@@ -473,6 +617,9 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
             finding.range().start,
             finding.word(),
         );
+        if command.suggest {
+            print_analysis_suggestions(&command.path, &source, finding, &dictionary);
+        }
         has_diagnostic = true;
     }
     for diagnostic in analysis.directive_diagnostics() {
@@ -490,6 +637,32 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     } else {
         RunOutcome::Success
     })
+}
+
+fn print_analysis_suggestions(
+    path: &Path,
+    source: &str,
+    finding: &ferrolex_code::Finding<'_>,
+    dictionary: &AnalysisDictionary,
+) {
+    let (line, column) = line_and_column(source, finding.range().start);
+    let config = SuggestConfig {
+        max_results: 3,
+        ..SuggestConfig::default()
+    };
+    for suggestion in Suggester::new(dictionary, config)
+        .suggest(finding.word())
+        .suggestions()
+    {
+        let replacement = finding
+            .whole_identifier_suggestion(suggestion.word())
+            .unwrap_or_else(|| suggestion.word().to_owned());
+        println!(
+            "{}:{line}:{column}: suggestion: {replacement} (distance {})",
+            path.display(),
+            suggestion.distance()
+        );
+    }
 }
 
 fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
@@ -1081,6 +1254,7 @@ fn parse_analyze_arguments(
     let mut hunspell_affix_paths = Vec::new();
     let mut config_path = None;
     let mut comment_syntax = None;
+    let mut suggest = false;
     let mut path = None;
     let mut arguments = arguments.into_iter();
 
@@ -1095,59 +1269,24 @@ fn parse_analyze_arguments(
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
             "--config" => set_once_path(&mut config_path, &mut arguments, "--config")?,
+            "--suggest" => suggest = true,
             "--comment-prefix" => {
                 let prefix = arguments.next().ok_or_else(|| {
                     CliError::Usage("`--comment-prefix` requires a prefix".to_owned())
                 })?;
-                if prefix.is_empty() {
-                    return Err(CliError::Usage(
-                        "`--comment-prefix` requires a non-empty prefix".to_owned(),
-                    ));
-                }
-                if comment_syntax
-                    .replace(CommentSyntax::line(prefix))
-                    .is_some()
-                {
-                    return Err(CliError::Usage(
-                        "only one comment syntax may be supplied".to_owned(),
-                    ));
-                }
+                set_comment_prefix(&mut comment_syntax, prefix)?;
             }
             option if option.starts_with("--comment-prefix=") => {
                 let prefix = option
                     .strip_prefix("--comment-prefix=")
                     .expect("option was matched by its prefix");
-                if prefix.is_empty() {
-                    return Err(CliError::Usage(
-                        "`--comment-prefix` requires a non-empty prefix".to_owned(),
-                    ));
-                }
-                if comment_syntax
-                    .replace(CommentSyntax::line(prefix))
-                    .is_some()
-                {
-                    return Err(CliError::Usage(
-                        "only one comment syntax may be supplied".to_owned(),
-                    ));
-                }
+                set_comment_prefix(&mut comment_syntax, prefix)?;
             }
             "--comment-syntax" => {
                 let syntax = arguments.next().ok_or_else(|| {
                     CliError::Usage("`--comment-syntax` requires a syntax".to_owned())
                 })?;
-                let syntax = match syntax.as_str() {
-                    "html" => CommentSyntax::Html,
-                    _ => {
-                        return Err(CliError::Usage(
-                            "`--comment-syntax` supports only `html`".to_owned(),
-                        ));
-                    }
-                };
-                if comment_syntax.replace(syntax).is_some() {
-                    return Err(CliError::Usage(
-                        "only one comment syntax may be supplied".to_owned(),
-                    ));
-                }
+                set_comment_syntax(&mut comment_syntax, parse_comment_syntax(&syntax)?)?;
             }
             "--help" | "-h" => return Ok(Command::Help),
             option if option.starts_with('-') => {
@@ -1175,8 +1314,43 @@ fn parse_analyze_arguments(
         hunspell_affix_paths,
         config_path,
         comment_syntax,
+        suggest,
         path,
     }))
+}
+
+fn set_comment_prefix(
+    slot: &mut Option<CommentSyntax>,
+    prefix: impl Into<String>,
+) -> Result<(), CliError> {
+    let prefix = prefix.into();
+    if prefix.is_empty() {
+        return Err(CliError::Usage(
+            "`--comment-prefix` requires a non-empty prefix".to_owned(),
+        ));
+    }
+    set_comment_syntax(slot, CommentSyntax::line(prefix))
+}
+
+fn parse_comment_syntax(syntax: &str) -> Result<CommentSyntax, CliError> {
+    match syntax {
+        "html" => Ok(CommentSyntax::Html),
+        _ => Err(CliError::Usage(
+            "`--comment-syntax` supports only `html`".to_owned(),
+        )),
+    }
+}
+
+fn set_comment_syntax(
+    slot: &mut Option<CommentSyntax>,
+    syntax: CommentSyntax,
+) -> Result<(), CliError> {
+    if slot.replace(syntax).is_some() {
+        return Err(CliError::Usage(
+            "only one comment syntax may be supplied".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Command, CliError> {
@@ -1333,6 +1507,7 @@ struct AnalyzeCommand {
     hunspell_affix_paths: Vec<PathBuf>,
     config_path: Option<PathBuf>,
     comment_syntax: Option<CommentSyntax>,
+    suggest: bool,
     path: PathBuf,
 }
 
@@ -1664,6 +1839,7 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::line("//")),
+                suggest: false,
                 path: PathBuf::from("lib.rs"),
             })
         );
@@ -1692,6 +1868,7 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::line("--")),
+                suggest: false,
                 path: PathBuf::from("query.sql"),
             })
         );
@@ -1705,6 +1882,7 @@ mod tests {
                 "analyze",
                 "--dictionary",
                 "words.txt",
+                "--suggest",
                 "--comment-syntax",
                 "html",
                 "README.md",
@@ -1721,6 +1899,7 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::Html),
+                suggest: true,
                 path: PathBuf::from("README.md"),
             })
         );
@@ -1750,6 +1929,7 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: Some(PathBuf::from(".ferrolex/config")),
                 comment_syntax: None,
+                suggest: false,
                 path: PathBuf::from("src/lib.rs"),
             })
         );
@@ -1792,6 +1972,7 @@ mod tests {
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
                 config_path: None,
                 comment_syntax: None,
+                suggest: false,
                 path: PathBuf::from("src/lib.rs"),
             })
         );
@@ -2069,6 +2250,7 @@ mod tests {
             "analyze".to_owned(),
             "--dictionary".to_owned(),
             dictionary.path.to_string_lossy().into_owned(),
+            "--suggest".to_owned(),
             "--comment-syntax".to_owned(),
             "html".to_owned(),
             source.path.to_string_lossy().into_owned(),
