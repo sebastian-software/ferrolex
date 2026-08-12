@@ -60,6 +60,11 @@ comparison lowercases Unicode scalar values deterministically, while non-empty
 input preserves lower, title, or upper style requested by the query. An empty
 query does not imply an uppercase display style.
 
+For repeated requests, use `Suggester::suggest_into` with a retained output
+`Vec<Suggestion>` and `SuggestScratch`. The convenience `suggest` method owns
+those buffers for one call; the buffer API reuses character, transformation,
+dynamic-programming, and presentation workspaces without changing results.
+
 When a candidate source carries frequency metadata, higher frequency breaks a
 tie after both distances and before lexical spelling. Sources without frequency
 metadata use the exact same ordering as before.

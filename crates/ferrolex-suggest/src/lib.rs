@@ -206,6 +206,25 @@ pub struct SuggestionResult {
     completeness: Completeness,
 }
 
+/// Reusable allocation workspace for [`Suggester::suggest_into`].
+///
+/// Retain one workspace for repeated requests against the same or different
+/// sources. Its contents are implementation details and are cleared before
+/// reuse; callers only own its capacity.
+#[derive(Default)]
+pub struct SuggestScratch {
+    query_chars: Vec<char>,
+    candidate_chars: Vec<char>,
+    transformed_chars: Vec<char>,
+    replacement_from_chars: Vec<char>,
+    replacement_to_chars: Vec<char>,
+    related_candidate_chars: Vec<char>,
+    previous_previous: Vec<usize>,
+    previous: Vec<usize>,
+    current: Vec<usize>,
+    presented: BTreeSet<String>,
+}
+
 impl SuggestionResult {
     /// Returns suggestions in deterministic rank order.
     #[must_use]
@@ -258,13 +277,44 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
     /// Generates ranked suggestions for `query`.
     #[must_use]
     pub fn suggest(&self, query: &str) -> SuggestionResult {
-        let Some(query_chars) = lowercase_chars_bounded(query, self.config.max_word_scalars) else {
-            return SuggestionResult {
-                suggestions: Vec::new(),
-                completeness: Completeness::QueryTooLong,
-            };
-        };
         let mut suggestions = Vec::new();
+        let mut scratch = SuggestScratch::default();
+        let completeness = self.suggest_into(query, &mut suggestions, &mut scratch);
+        SuggestionResult {
+            suggestions,
+            completeness,
+        }
+    }
+
+    /// Writes deterministic suggestions into caller-owned storage.
+    ///
+    /// Existing output is cleared. Reusing both `suggestions` and `scratch`
+    /// amortizes all hot-loop allocations while preserving [`Self::suggest`]'s
+    /// ordering and completeness contract.
+    pub fn suggest_into(
+        &self,
+        query: &str,
+        suggestions: &mut Vec<Suggestion>,
+        scratch: &mut SuggestScratch,
+    ) -> Completeness {
+        suggestions.clear();
+        let SuggestScratch {
+            query_chars,
+            candidate_chars,
+            transformed_chars,
+            replacement_from_chars,
+            replacement_to_chars,
+            related_candidate_chars,
+            previous_previous,
+            previous,
+            current,
+            presented,
+        } = scratch;
+        let Some(query_chars) =
+            lowercase_chars_bounded_into(query, self.config.max_word_scalars, query_chars)
+        else {
+            return Completeness::QueryTooLong;
+        };
         let mut examined = 0;
         let mut cells = 0_usize;
         let mut completeness = Completeness::Complete;
@@ -273,18 +323,30 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                 self.source,
                 candidate,
                 query,
-                &query_chars,
+                query_chars,
                 self.config,
                 self.replacements,
                 self.ranking_signals,
-                &mut suggestions,
+                suggestions,
+                candidate_chars,
+                transformed_chars,
+                replacement_from_chars,
+                replacement_to_chars,
+                previous_previous,
+                previous,
+                current,
                 &mut examined,
                 &mut cells,
                 &mut completeness,
             ) {
                 return false;
             }
-            if is_related_seed(query, candidate, self.config.max_edit_distance) {
+            if is_related_seed(
+                query_chars,
+                candidate,
+                self.config.max_edit_distance,
+                related_candidate_chars,
+            ) {
                 self.source.visit_related_candidates(
                     query,
                     candidate,
@@ -294,11 +356,18 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                             self.source,
                             derived,
                             query,
-                            &query_chars,
+                            query_chars,
                             self.config,
                             self.replacements,
                             self.ranking_signals,
-                            &mut suggestions,
+                            suggestions,
+                            candidate_chars,
+                            transformed_chars,
+                            replacement_from_chars,
+                            replacement_to_chars,
+                            previous_previous,
+                            previous,
+                            current,
                             &mut examined,
                             &mut cells,
                             &mut completeness,
@@ -308,14 +377,11 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             }
             matches!(completeness, Completeness::Complete)
         });
-        rank_suggestions(&mut suggestions);
-        let mut presented = BTreeSet::new();
+        rank_suggestions(suggestions);
+        presented.clear();
         suggestions.retain(|suggestion| presented.insert(suggestion.word.clone()));
         suggestions.truncate(self.config.max_results);
-        SuggestionResult {
-            suggestions,
-            completeness,
-        }
+        completeness
     }
 }
 
@@ -332,6 +398,13 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     replacements: &[ReplacementRule],
     ranking_signals: RankingSignals<'_>,
     suggestions: &mut Vec<Suggestion>,
+    candidate_chars: &mut Vec<char>,
+    transformed_chars: &mut Vec<char>,
+    replacement_from_chars: &mut Vec<char>,
+    replacement_to_chars: &mut Vec<char>,
+    previous_previous: &mut Vec<usize>,
+    previous: &mut Vec<usize>,
+    current: &mut Vec<usize>,
     examined: &mut usize,
     cells: &mut usize,
     completeness: &mut Completeness,
@@ -344,34 +417,49 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     if !source.is_suggestion_candidate(candidate) {
         return true;
     }
-    let Some(candidate_chars) = lowercase_chars_bounded(candidate, config.max_word_scalars) else {
+    let Some(candidate_chars) =
+        lowercase_chars_bounded_into(candidate, config.max_word_scalars, candidate_chars)
+    else {
         return true;
     };
-    let distance =
-        if let Some(distance) = replacement_distance(query_chars, &candidate_chars, replacements) {
-            Some(distance)
-        } else {
-            // A length difference beyond the permitted distance cannot reach the
-            // dynamic-programming matrix. It must not spend the edit-cell budget
-            // merely because it appeared early in lexical candidate order.
-            if query_chars.len().abs_diff(candidate_chars.len()) > config.max_edit_distance {
-                return true;
-            }
-            let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
-            if cells.saturating_add(required) > config.max_edit_cells {
-                *completeness = Completeness::EditBudgetReached;
-                return false;
-            }
-            *cells += required;
-            osa_distance(query_chars, &candidate_chars, config.max_edit_distance)
-        };
+    let distance = if let Some(distance) = replacement_distance(
+        query_chars,
+        candidate_chars,
+        replacements,
+        transformed_chars,
+        replacement_from_chars,
+        replacement_to_chars,
+    ) {
+        Some(distance)
+    } else {
+        // A length difference beyond the permitted distance cannot reach the
+        // dynamic-programming matrix. It must not spend the edit-cell budget
+        // merely because it appeared early in lexical candidate order.
+        if query_chars.len().abs_diff(candidate_chars.len()) > config.max_edit_distance {
+            return true;
+        }
+        let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
+        if cells.saturating_add(required) > config.max_edit_cells {
+            *completeness = Completeness::EditBudgetReached;
+            return false;
+        }
+        *cells += required;
+        osa_distance(
+            query_chars,
+            candidate_chars,
+            config.max_edit_distance,
+            previous_previous,
+            previous,
+            current,
+        )
+    };
     if let Some(distance) = distance {
         suggestions.push(Suggestion {
             word: present(candidate, query),
             distance,
             ranking_distance: ranking_distance(
                 query_chars,
-                &candidate_chars,
+                candidate_chars,
                 distance,
                 ranking_signals,
             ),
@@ -381,16 +469,23 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     true
 }
 
-fn is_related_seed(query: &str, candidate: &str, maximum: usize) -> bool {
-    let query = query.chars().collect::<Vec<_>>();
-    let candidate = candidate.chars().collect::<Vec<_>>();
+fn is_related_seed(
+    query: &[char],
+    candidate: &str,
+    maximum: usize,
+    candidate_chars: &mut Vec<char>,
+) -> bool {
+    let Some(candidate) = lowercase_chars_bounded_into(candidate, usize::MAX, candidate_chars)
+    else {
+        return false;
+    };
     let required_common = query
         .len()
         .min(candidate.len())
         .saturating_sub(maximum.saturating_mul(2));
     let common_prefix = query
         .iter()
-        .zip(&candidate)
+        .zip(candidate)
         .take_while(|(left, right)| left == right)
         .count();
     let common_suffix = query
@@ -455,10 +550,13 @@ fn replacement_distance(
     query: &[char],
     candidate: &[char],
     replacements: &[ReplacementRule],
+    transformed: &mut Vec<char>,
+    from_chars: &mut Vec<char>,
+    to_chars: &mut Vec<char>,
 ) -> Option<usize> {
     replacements.iter().find_map(|rule| {
-        let from = lowercase_chars_bounded(&rule.from, query.len())?;
-        let to = lowercase_chars_bounded(&rule.to, candidate.len())?;
+        let from = lowercase_chars_bounded_into(&rule.from, query.len(), from_chars)?;
+        let to = lowercase_chars_bounded_into(&rule.to, candidate.len(), to_chars)?;
         if from.is_empty() || to.is_empty() || query.len() < from.len() {
             return None;
         }
@@ -468,12 +566,12 @@ fn replacement_distance(
             {
                 return None;
             }
-            if query[start..start + from.len()] != from {
+            if query[start..start + from.len()] != *from {
                 return None;
             }
-            let mut transformed = Vec::with_capacity(query.len() - from.len() + to.len());
+            transformed.clear();
             transformed.extend_from_slice(&query[..start]);
-            transformed.extend_from_slice(&to);
+            transformed.extend_from_slice(to);
             transformed.extend_from_slice(&query[start + from.len()..]);
             (transformed == candidate).then_some(0)
         })
@@ -506,8 +604,12 @@ fn present(candidate: &str, query: &str) -> String {
     }
 }
 
-fn lowercase_chars_bounded(word: &str, maximum: usize) -> Option<Vec<char>> {
-    let mut lowercase = Vec::new();
+fn lowercase_chars_bounded_into<'scratch>(
+    word: &str,
+    maximum: usize,
+    lowercase: &'scratch mut Vec<char>,
+) -> Option<&'scratch [char]> {
+    lowercase.clear();
     for character in word.chars() {
         for lowercase_character in character.to_lowercase() {
             if lowercase.len() == maximum {
@@ -519,14 +621,24 @@ fn lowercase_chars_bounded(word: &str, maximum: usize) -> Option<Vec<char>> {
     Some(lowercase)
 }
 
-fn osa_distance(left: &[char], right: &[char], maximum: usize) -> Option<usize> {
+fn osa_distance(
+    left: &[char],
+    right: &[char],
+    maximum: usize,
+    previous_previous: &mut Vec<usize>,
+    previous: &mut Vec<usize>,
+    current: &mut Vec<usize>,
+) -> Option<usize> {
     if left.len().abs_diff(right.len()) > maximum {
         return None;
     }
-    let mut previous_previous = vec![0; right.len() + 1];
-    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    previous_previous.clear();
+    previous_previous.resize(right.len() + 1, 0);
+    previous.clear();
+    previous.extend(0..=right.len());
     for (left_index, left_char) in left.iter().enumerate() {
-        let mut current = vec![left_index + 1; right.len() + 1];
+        current.clear();
+        current.resize(right.len() + 1, left_index + 1);
         for (right_index, right_char) in right.iter().enumerate() {
             let cost = usize::from(left_char != right_char);
             current[right_index + 1] = (previous[right_index + 1] + 1)
@@ -541,8 +653,8 @@ fn osa_distance(left: &[char], right: &[char], maximum: usize) -> Option<usize> 
                     current[right_index + 1].min(previous_previous[right_index - 1] + 1);
             }
         }
-        previous_previous = previous;
-        previous = current;
+        std::mem::swap(previous_previous, previous);
+        std::mem::swap(previous, current);
     }
     (previous[right.len()] <= maximum).then_some(previous[right.len()])
 }
@@ -553,7 +665,7 @@ mod tests {
 
     use super::{
         replacement_distance, CandidateSource, Completeness, RankingSignals, ReplacementRule,
-        SuggestConfig, Suggester, Suggestion,
+        SuggestConfig, SuggestScratch, Suggester, Suggestion,
     };
     use ferrolex_core::{Normalization, UserDictionary, WordList};
 
@@ -676,6 +788,39 @@ mod tests {
     }
 
     #[test]
+    fn caller_owned_output_and_scratch_reuse_preserve_results() {
+        let words = WordList::new(["cat", "cut"]).expect("valid words");
+        let suggester = Suggester::new(&words, SuggestConfig::default());
+        let mut output = Vec::new();
+        let mut scratch = SuggestScratch::default();
+
+        let first = suggester.suggest_into("cot", &mut output, &mut scratch);
+        let capacities = (
+            output.capacity(),
+            scratch.query_chars.capacity(),
+            scratch.candidate_chars.capacity(),
+            scratch.previous.capacity(),
+        );
+        let second = suggester.suggest_into("cot", &mut output, &mut scratch);
+
+        assert_eq!(first, Completeness::Complete);
+        assert_eq!(second, Completeness::Complete);
+        assert_eq!(
+            output.iter().map(Suggestion::word).collect::<Vec<_>>(),
+            ["cat", "cut"]
+        );
+        assert_eq!(
+            capacities,
+            (
+                output.capacity(),
+                scratch.query_chars.capacity(),
+                scratch.candidate_chars.capacity(),
+                scratch.previous.capacity(),
+            )
+        );
+    }
+
+    #[test]
     fn respects_replacement_word_boundaries() {
         let replacements = [ReplacementRule::with_boundaries("teh", "the", true, true)
             .expect("bounded replacement")];
@@ -686,6 +831,9 @@ mod tests {
         let result = Suggester::new(&source, SuggestConfig::default())
             .with_replacement_rules(&replacements)
             .suggest("teh");
+        let mut transformed = Vec::new();
+        let mut from = Vec::new();
+        let mut to = Vec::new();
 
         assert_eq!(result.suggestions()[0].word(), "the");
         assert_ne!(
@@ -693,6 +841,9 @@ mod tests {
                 &"ateh".chars().collect::<Vec<_>>(),
                 &"athe".chars().collect::<Vec<_>>(),
                 &replacements,
+                &mut transformed,
+                &mut from,
+                &mut to,
             ),
             Some(0)
         );
