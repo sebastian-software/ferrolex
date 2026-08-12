@@ -27,10 +27,20 @@ whitespace-free literal spellings; unsupported variants produce a warning and
 never affect word recognition.
 
 All work is bounded by explicit candidate, word-length, and edit-cell limits.
-The result reports whether it is complete or stopped by a configured budget, so
-partial output is never presented as exhaustive. Case is used only for display:
-comparison lowercases Unicode scalar values deterministically, while output
-preserves lower, title, or upper style requested by the query.
+The edit-cell budget is charged only when the candidate can reach the
+dynamic-programming calculation: candidates whose length difference already
+exceeds `max_edit_distance` are rejected without consuming it. Replacement-rule
+matches likewise do not use edit-distance cells. The result reports whether it
+is complete or stopped by a configured budget, so partial output is never
+presented as exhaustive.
+
+Suggestions are ordered by `(distance, byte-lexical display spelling)`. If two
+source candidates render to the same requested display spelling, only the
+first result in that order is returned, even when other ranked entries fall
+between the duplicates. Case is used only for display: comparison lowercases
+Unicode scalar values deterministically, while non-empty input preserves lower,
+title, or upper style requested by the query. An empty query does not imply an
+uppercase display style.
 
 The `ferrolex suggest` command exposes `--max-results`,
 `--max-edit-distance`, `--max-candidates`, and `--max-edit-cells`. The latter

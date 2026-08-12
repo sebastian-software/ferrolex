@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 use ferrolex_core::{UserDictionary, WordList};
 
@@ -221,20 +222,31 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             else {
                 return true;
             };
-            let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
-            if cells.saturating_add(required) > self.config.max_edit_cells {
-                completeness = Completeness::EditBudgetReached;
-                return false;
-            }
-            cells += required;
-            let distance = replacement_distance(&query_chars, &candidate_chars, self.replacements)
-                .or_else(|| {
-                    osa_distance(
-                        &query_chars,
-                        &candidate_chars,
-                        self.config.max_edit_distance,
-                    )
-                });
+            let distance = if let Some(distance) =
+                replacement_distance(&query_chars, &candidate_chars, self.replacements)
+            {
+                Some(distance)
+            } else {
+                // A length difference beyond the permitted distance cannot
+                // reach the dynamic-programming matrix. It must not spend the
+                // edit-cell budget merely because it appeared early in lexical
+                // candidate order.
+                if query_chars.len().abs_diff(candidate_chars.len()) > self.config.max_edit_distance
+                {
+                    return true;
+                }
+                let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
+                if cells.saturating_add(required) > self.config.max_edit_cells {
+                    completeness = Completeness::EditBudgetReached;
+                    return false;
+                }
+                cells += required;
+                osa_distance(
+                    &query_chars,
+                    &candidate_chars,
+                    self.config.max_edit_distance,
+                )
+            };
             if let Some(distance) = distance {
                 suggestions.push(Suggestion {
                     word: present(candidate, query),
@@ -244,7 +256,8 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             true
         });
         suggestions.sort_unstable_by(compare_suggestions);
-        suggestions.dedup_by(|left, right| left.word == right.word);
+        let mut presented = BTreeSet::new();
+        suggestions.retain(|suggestion| presented.insert(suggestion.word.clone()));
         suggestions.truncate(self.config.max_results);
         SuggestionResult {
             suggestions,
@@ -289,7 +302,7 @@ fn compare_suggestions(left: &Suggestion, right: &Suggestion) -> Ordering {
 }
 
 fn present(candidate: &str, query: &str) -> String {
-    if query.chars().all(char::is_uppercase) {
+    if !query.is_empty() && query.chars().all(char::is_uppercase) {
         candidate.to_uppercase()
     } else if query.chars().next().is_some_and(char::is_uppercase)
         && query.chars().skip(1).all(char::is_lowercase)
@@ -353,7 +366,7 @@ mod tests {
 
     use super::{
         replacement_distance, CandidateSource, Completeness, ReplacementRule, SuggestConfig,
-        Suggester,
+        Suggester, Suggestion,
     };
     use ferrolex_core::{Normalization, UserDictionary, WordList};
 
@@ -398,6 +411,50 @@ mod tests {
                 .completeness(),
             Completeness::QueryTooLong
         );
+    }
+
+    #[test]
+    fn does_not_spend_edit_budget_on_length_impossible_candidates() {
+        let candidates = ["aaaaaaaaaaaaaaaaaaaa", "zzword"];
+        let source = TestSource {
+            candidates: &candidates,
+        };
+        let config = SuggestConfig {
+            max_edit_distance: 1,
+            max_edit_cells: 42,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&source, config).suggest("zword");
+
+        assert_eq!(result.completeness(), Completeness::Complete);
+        assert_eq!(result.suggestions()[0].word(), "zzword");
+    }
+
+    #[test]
+    fn deduplicates_non_adjacent_equal_display_spellings() {
+        let candidates = ["ss", "s", "ß"];
+        let source = TestSource {
+            candidates: &candidates,
+        };
+
+        let result = Suggester::new(&source, SuggestConfig::default()).suggest("SS");
+        let spellings = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert_eq!(spellings, ["SS", "S"]);
+    }
+
+    #[test]
+    fn empty_queries_preserve_candidate_casing() {
+        let words = WordList::new(["a"]).expect("valid words");
+
+        let result = Suggester::new(&words, SuggestConfig::default()).suggest("");
+
+        assert_eq!(result.suggestions()[0].word(), "a");
     }
 
     #[test]
