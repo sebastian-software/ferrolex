@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ferrolex_code::{Analyzer, Document};
 use ferrolex_core::Dictionary;
@@ -50,20 +52,32 @@ fn morphology_lookup(c: &mut Criterion) {
 }
 
 fn synthetic_repository_workloads() -> [(String, bool); 4] {
-    let markdown = (0..512)
-        .map(|index| format!("# Ferrolex Markdown {index}\n\nHouse RailWay Housen misspelling\n"))
-        .collect();
-    let typescript = (0..512)
-        .map(|index| {
-            format!("export const ferrolexHouse{index} = 'RailWay'; // Markdown misspelling\n")
-        })
-        .collect();
-    let rust = (0..512)
-        .map(|index| format!("pub fn ferrolex_house_{index}() {{ /* RailWay Housen */ }}\n"))
-        .collect();
-    let mixed = (0..512)
-        .map(|index| format!("# Release {index}\n`ferrolexHouse{index}` uses RailWay.\n"))
-        .collect();
+    let mut markdown = String::new();
+    let mut typescript = String::new();
+    let mut rust = String::new();
+    let mut mixed = String::new();
+    for index in 0..512 {
+        writeln!(
+            markdown,
+            "# Ferrolex Markdown {index}\n\nHouse RailWay Housen misspelling"
+        )
+        .expect("writing to String does not fail");
+        writeln!(
+            typescript,
+            "export const ferrolexHouse{index} = 'RailWay'; // Markdown misspelling"
+        )
+        .expect("writing to String does not fail");
+        writeln!(
+            rust,
+            "pub fn ferrolex_house_{index}() {{ /* RailWay Housen */ }}"
+        )
+        .expect("writing to String does not fail");
+        writeln!(
+            mixed,
+            "# Release {index}\n`ferrolexHouse{index}` uses RailWay."
+        )
+        .expect("writing to String does not fail");
+    }
     [
         (markdown, false),
         (typescript, true),

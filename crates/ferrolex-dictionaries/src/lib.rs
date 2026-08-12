@@ -4,6 +4,12 @@
 //! dictionary data. Callers choose the cache directory and select a reviewed
 //! [`VerifiedDictionary`] manifest. Bytes are accepted only from HTTPS URLs,
 //! checked against the manifest's SHA-256 digests, and atomically installed.
+//!
+//! ```
+//! use ferrolex_dictionaries::find_locale;
+//!
+//! assert_eq!(find_locale("en_US").expect("catalogued locale").locale(), "en_US");
+//! ```
 
 #![forbid(unsafe_code)]
 

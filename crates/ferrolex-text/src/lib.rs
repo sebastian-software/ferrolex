@@ -3,6 +3,15 @@
 //! This crate is deliberately independent from source-code tokenization. It
 //! extracts natural-language words and delegates recognition to a core
 //! [`Dictionary`].
+//!
+//! ```
+//! use ferrolex_core::WordList;
+//! use ferrolex_text::check_text;
+//!
+//! let dictionary = WordList::new(["known"])?;
+//! assert_eq!(check_text(&dictionary, "known typo").count(), 1);
+//! # Ok::<(), ferrolex_core::WordListError>(())
+//! ```
 
 #![forbid(unsafe_code)]
 

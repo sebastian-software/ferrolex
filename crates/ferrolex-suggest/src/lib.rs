@@ -1,4 +1,14 @@
 //! Deterministic, bounded spelling suggestions.
+//!
+//! ```
+//! use ferrolex_core::WordList;
+//! use ferrolex_suggest::{SuggestConfig, Suggester};
+//!
+//! let dictionary = WordList::new(["ferrolex"])?;
+//! let suggestions = Suggester::new(&dictionary, SuggestConfig::default()).suggest("ferolex");
+//! assert_eq!(suggestions.suggestions()[0].word(), "ferrolex");
+//! # Ok::<(), ferrolex_core::WordListError>(())
+//! ```
 
 #![forbid(unsafe_code)]
 

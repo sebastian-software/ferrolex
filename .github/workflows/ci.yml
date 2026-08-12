@@ -11,19 +11,25 @@ permissions:
 
 jobs:
   test:
-    name: Test (Rust 1.81)
+    name: Test (Rust ${{ matrix.toolchain }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.81", stable]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.81
+          toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo bench -p ferrolex-core --no-run
+      - run: cargo bench -p ferrolex-compiler --no-run
       - run: cargo bench -p ferrolex-suggest --no-run
+      - run: cargo bench -p ferrolex-hunspell --no-run
 
   dependency-policy:
     name: Dependency policy

@@ -5,6 +5,16 @@
 //! eight-byte aligned, and lookup performs no allocation.  This initial
 //! version only represents exact words. Metadata and morphology are separate
 //! future format features rather than implicit, unstable payloads.
+//!
+//! ```
+//! use ferrolex_compiler::{compile_words, CompiledDictionary};
+//! use ferrolex_core::Dictionary;
+//!
+//! let bytes = compile_words(["ferrolex"])?;
+//! let dictionary = CompiledDictionary::load(bytes)?;
+//! assert!(dictionary.contains("ferrolex"));
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 #![forbid(unsafe_code)]
 

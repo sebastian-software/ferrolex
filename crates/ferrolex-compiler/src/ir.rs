@@ -1,3 +1,8 @@
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "public IR types carry the Ir suffix to distinguish them from runtime domain types"
+)]
+
 //! Source-neutral linguistic dictionary intermediate representation.
 //!
 //! The IR owns only declared dictionary semantics. Runtime indexes and derived

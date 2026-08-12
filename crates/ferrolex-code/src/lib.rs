@@ -3,6 +3,16 @@
 //! The analyzer classifies generic tokens and splits identifiers without
 //! depending on a programming-language parser. Language-specific adapters can
 //! provide a [`Document`] with the appropriate [`CommentSyntax`].
+//!
+//! ```
+//! use ferrolex_code::{Analyzer, Document};
+//! use ferrolex_core::WordList;
+//!
+//! let dictionary = WordList::new(["ferrolex"])?;
+//! let analysis = Analyzer::builder(&dictionary).build().check(&Document::new("ferrolex typo"));
+//! assert_eq!(analysis.findings().len(), 1);
+//! # Ok::<(), ferrolex_core::WordListError>(())
+//! ```
 
 #![forbid(unsafe_code)]
 

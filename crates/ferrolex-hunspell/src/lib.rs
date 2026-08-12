@@ -3,6 +3,15 @@
 //! The importer accepts a deliberately documented subset of the textual
 //! Hunspell format and translates it into ferrolex-owned data structures. No
 //! runtime dependency on another spell checker is introduced.
+//!
+//! ```
+//! use ferrolex_core::Dictionary;
+//! use ferrolex_hunspell::{import, ImportMode};
+//!
+//! let result = import("example.aff", "SET UTF-8\n", "example.dic", "1\nferrolex\n", ImportMode::Strict)?;
+//! assert!(result.dictionary().contains("ferrolex"));
+//! # Ok::<(), ferrolex_hunspell::ImportError>(())
+//! ```
 
 #![forbid(unsafe_code)]
 
