@@ -303,6 +303,7 @@ dependencies = [
 name = "ferrolex-suggest"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "ferrolex-core",
 ]
 

@@ -23,6 +23,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo bench -p ferrolex-core --no-run
+      - run: cargo bench -p ferrolex-suggest --no-run
 
   license:
     name: Check license files

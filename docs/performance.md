@@ -10,6 +10,7 @@ release-profile checkout after the functional checks:
 cargo test --workspace
 cargo bench -p ferrolex-core
 cargo bench -p ferrolex-compiler
+cargo bench -p ferrolex-suggest
 ```
 
 Criterion retains raw estimates and confidence intervals beneath `target/` for
@@ -20,6 +21,24 @@ compare runs across machines or toolchains as if they were a single baseline.
 
 Neither command performs filesystem I/O, process startup measurement, memory
 measurement, nor a comparison with another spelling engine.
+
+## Suggestions
+
+`cargo bench -p ferrolex-suggest` measures the reused-buffer
+`Suggester::suggest_into` path against a deterministic 100,000-word corpus.
+The five lanes are `single-edit`, `transposition`, `long-word`,
+`compound-typo`, and `no-useful-suggestion`. Their target spellings are added
+to the same synthetic corpus so every lane has a stable intended outcome (or,
+for the last lane, intentionally does not).
+
+Corpus construction, sorting, `Suggester` construction, and initial buffer
+allocation happen outside Criterion's timed closure. Each measurement retains
+one output vector and one `SuggestScratch`, so it characterizes steady-state
+candidate traversal, ranking, and the amortized allocation behavior promised by
+the buffer API. Compare it with the default Criterion settings and the same
+machine/toolchain when deciding whether an allocation change is worthwhile.
+CI runs `cargo bench -p ferrolex-suggest --no-run`; it checks that the benchmark
+continues to compile without turning local measurements into a timing gate.
 
 The compiled format is deliberately mmap-ready, not mmap-backed today. Its
 loader reads a bounded byte slice and validates offsets without creating raw
