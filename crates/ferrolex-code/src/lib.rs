@@ -36,6 +36,12 @@ pub enum TokenClass {
     Path,
     /// A long ASCII token shaped like padded or unpadded Base64 data.
     Base64,
+    /// A conventional hyphen-separated UUID.
+    Uuid,
+    /// A bare DNS-like domain name.
+    Domain,
+    /// A conventionally delimited generated token.
+    GeneratedToken,
     /// A token without a more specific classification.
     Unknown,
 }
@@ -196,6 +202,9 @@ impl Default for AnalyzerConfig {
                 TokenClass::Hash,
                 TokenClass::Path,
                 TokenClass::Base64,
+                TokenClass::Uuid,
+                TokenClass::Domain,
+                TokenClass::GeneratedToken,
             ]
             .into_iter()
             .collect(),
@@ -424,7 +433,8 @@ impl<'dictionary> AnalyzerBuilder<'dictionary> {
     /// Returns [`AnalyzerConfigError::InvalidIgnorePattern`] when `pattern`
     /// cannot be compiled.
     pub fn ignore_pattern(mut self, pattern: &str) -> Result<Self, AnalyzerConfigError> {
-        let pattern = Regex::new(pattern).map_err(AnalyzerConfigError::InvalidIgnorePattern)?;
+        let pattern = Regex::new(&format!(r"\A(?:{pattern})\z"))
+            .map_err(AnalyzerConfigError::InvalidIgnorePattern)?;
         self.config.ignored_patterns.push(pattern);
         Ok(self)
     }
@@ -523,7 +533,13 @@ impl<'dictionary> Analyzer<'dictionary> {
         directive_ignored_words: &BTreeSet<Box<str>>,
         findings: &mut Vec<Finding<'source>>,
     ) {
-        let class = classify(raw_token.text);
+        let mut class = classify(raw_token.text);
+        // A project dictionary may deliberately contain an unprefixed
+        // alphanumeric term that otherwise resembles a hexadecimal hash.
+        // Recognition takes precedence over this lossy classifier heuristic.
+        if class == TokenClass::Hash && self.dictionary.contains(raw_token.text) {
+            class = TokenClass::NaturalWord;
+        }
         if self.config.ignored_classes.contains(&class)
             || self.matches_ignored_pattern(raw_token.text)
             || self.config.ignored_words.contains(raw_token.text)
@@ -856,7 +872,8 @@ fn push_raw_token<'source>(
 ) {
     let token = &line[start..end];
     let trimmed = token.trim_matches(|character: char| {
-        character.is_ascii_punctuation() && !matches!(character, '_' | '-' | '.' | '@' | ':' | '/')
+        character.is_ascii_punctuation()
+            && !matches!(character, '_' | '-' | '.' | '@' | ':' | '/' | '+' | '=')
     });
     if trimmed.is_empty() {
         return;
@@ -881,12 +898,18 @@ fn classify(token: &str) -> TokenClass {
             .is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.'))
     {
         TokenClass::Email
+    } else if is_uuid_token(token) {
+        TokenClass::Uuid
     } else if is_hex_token(token) {
         TokenClass::Hash
     } else if is_path_token(token) {
         TokenClass::Path
     } else if is_base64_token(token) {
         TokenClass::Base64
+    } else if is_domain_token(token) {
+        TokenClass::Domain
+    } else if is_generated_token(token) {
+        TokenClass::GeneratedToken
     } else if token.chars().all(char::is_numeric) {
         TokenClass::Number
     } else if split_identifier(token, IdentifierSplitConfig::default()).len() > 1 {
@@ -916,18 +939,51 @@ fn is_base64_token(token: &str) -> bool {
         && token
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
-        && (token.contains(['+', '/', '=']) || token.bytes().any(|byte| byte.is_ascii_digit()))
+        && token.contains(['+', '/', '='])
 }
 
 fn is_hex_token(token: &str) -> bool {
+    let prefixed = token.starts_with("0x") || token.starts_with("0X");
     let hexadecimal = token
         .strip_prefix("0x")
-        .or_else(|| token.strip_prefix("0X"))
-        .unwrap_or(token);
+        .or_else(|| token.strip_prefix("0X"));
+    let hexadecimal = hexadecimal.unwrap_or(token);
     hexadecimal.len() >= 7
         && hexadecimal
             .chars()
             .all(|character| character.is_ascii_hexdigit())
+        && (prefixed || hexadecimal.bytes().any(|byte| byte.is_ascii_digit()))
+}
+
+fn is_uuid_token(token: &str) -> bool {
+    let mut groups = token.split('-');
+    [8, 4, 4, 4, 12].into_iter().all(|length| {
+        groups.next().is_some_and(|group| {
+            group.len() == length && group.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+    }) && groups.next().is_none()
+}
+
+fn is_domain_token(token: &str) -> bool {
+    let mut labels = token.split('.');
+    let first = labels.next().unwrap_or_default();
+    !first.is_empty()
+        && labels.clone().next().is_some()
+        && labels.all(is_domain_label)
+        && is_domain_label(first)
+}
+
+fn is_domain_label(label: &str) -> bool {
+    !label.is_empty()
+        && !label.starts_with('-')
+        && !label.ends_with('-')
+        && label
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn is_generated_token(token: &str) -> bool {
+    token.len() > 4 && token.starts_with("__") && token.ends_with("__")
 }
 
 fn split_run<'source>(
@@ -1085,7 +1141,23 @@ mod tests {
             classify("QXV0aGVudGljYXRpb25Qcm92aWRlcg=="),
             TokenClass::Base64
         );
+        assert_eq!(
+            classify("6f1c2b3a-4d5e-6f70-8123-456789abcdef"),
+            TokenClass::Uuid
+        );
+        assert_eq!(classify("example.com"), TokenClass::Domain);
+        assert_eq!(classify("__generated_token__"), TokenClass::GeneratedToken);
         assert_eq!(classify("HTTP"), TokenClass::Acronym);
+    }
+
+    #[test]
+    fn keeps_words_and_identifiers_out_of_machine_token_classes() {
+        assert_eq!(classify("defaced"), TokenClass::NaturalWord);
+        assert_eq!(classify("acceded"), TokenClass::NaturalWord);
+        assert_eq!(
+            classify("sha256HexDigestValidatorTyop"),
+            TokenClass::Identifier
+        );
     }
 
     #[test]
@@ -1115,6 +1187,21 @@ mod tests {
         let source = "https://example.com maintainer@example.com 0xdeadbeef crates/ferrolex-code/src/lib.rs QXV0aGVudGljYXRpb25Qcm92aWRlcg== generated_value";
 
         assert!(analyzer.check(&Document::new(source)).findings().is_empty());
+    }
+
+    #[test]
+    fn anchors_ignore_patterns_before_compilation() {
+        let dictionary =
+            WordList::new(std::iter::empty::<&str>()).expect("empty dictionary is valid");
+        let analyzer = Analyzer::builder(&dictionary)
+            .ignore_pattern("foo|foobar")
+            .expect("pattern is valid")
+            .build();
+
+        assert!(analyzer
+            .check(&Document::new("foobar"))
+            .findings()
+            .is_empty());
     }
 
     #[test]

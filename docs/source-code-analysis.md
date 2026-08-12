@@ -29,13 +29,14 @@ casing, for example `OAuthAuthentcationProvider` becomes
 ## Classification and ignores
 
 The generic classifier identifies natural words, identifiers, acronyms, URLs,
-email addresses, numbers, hexadecimal hashes, local paths, and long
-Base64-shaped ASCII data. URLs, email addresses, numbers, hashes, paths, and
-Base64-shaped data are ignored by default but remain configurable categories.
-The path and Base64 heuristics are deliberately conservative: neither is a
-claim to parse every platform path or binary encoding. Exact ignored words and
-regular expressions are supported; an ignore expression must match the
-complete raw token, not merely a substring.
+email addresses, numbers, hexadecimal hashes, local paths, UUIDs, bare domains,
+conventionally delimited generated tokens, and long Base64-shaped ASCII data.
+These machine-shaped classes are ignored by default but remain configurable.
+The path and Base64 heuristics are deliberately conservative: Base64 requires
+one of `+`, `/`, or `=`, and a bare hexadecimal token needs a digit (unless it
+uses `0x`), so ordinary words and camel-case identifiers remain checked. Exact
+ignored words and regular expressions are supported; expressions are compiled
+as full-token matches, including alternations.
 
 Project and user vocabulary belongs in a layered `Dictionary`. `UserDictionary`
 is the mutable overlay: adding a word is immediately visible to concurrent
