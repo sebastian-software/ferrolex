@@ -1,8 +1,8 @@
-# ADR-0007: Dictionary distribution via companion repository and releases
+# ADR-0007: Verified upstream sources and local dictionary caches
 
 - Status: accepted
 - Date: 2026-08-10
-- Last updated: 2026-08-10
+- Last updated: 2026-08-12
 - Deciders: Sebastian Werner
 
 ## Context
@@ -14,16 +14,20 @@ separate from the engine's MIT OR Apache-2.0 licensing.
 
 ## Decision
 
-Dictionaries are distributed through a companion repository
-(`ferrolex-dictionaries`) that:
+Dictionaries are not redistributed by ferrolex. The optional `ferrolex
+dictionary fetch <locale>` command downloads the reviewed upstream `.aff` and
+`.dic` files directly into a caller-selected local cache. Every catalog entry
+pins an immutable upstream revision, paths, source-byte SHA-256 digests,
+encoding, license label, and the upstream license notice.
 
-- fetches upstream Hunspell dictionaries,
-- tracks and documents each dictionary's license,
-- compiles them deterministically in CI (byte-identical, ADR-0006),
-- publishes versioned compiled artifacts via releases.
+The installer verifies bytes before its cache write. It never downloads during
+normal checking, compilation, tests, or CI; it follows no redirects and
+performs no background updates. `dictionary install` may then produce a local
+provenance-bound runtime cache from the verified sources.
 
-A `ferrolex fetch <locale>` CLI command may build on this later. Compiled
-artifacts embed their source and license metadata (RFC §12).
+Compiled artifacts remain a downstream distribution choice. A product that
+redistributes one must retain and comply with that locale's recorded license
+notice; ferrolex does not publish a shared artifact registry.
 
 ## Considered options
 
@@ -37,23 +41,39 @@ friction directly against the project's goals.
 Convenient for Rust users, but mixes dictionary licenses into the crate
 graph and fights crates.io size limits permanently.
 
-### Companion repository with released artifacts (chosen)
+### Direct verified upstream sources with a local cache (chosen)
 
-Keeps the engine license-clean, makes dictionary licenses explicit per
-artifact, and reuses deterministic compilation for cacheable, versioned
-downloads.
+Keeps the engine license-clean without adding a second release pipeline or
+redistributing third-party content. The explicit cache and immutable catalog
+make source provenance inspectable while leaving each consuming product in
+control of its local data and distribution obligations.
+
+### Companion repository with released artifacts (deferred)
+
+Would improve offline bootstrap for products that need a curated artifact
+channel, but would also make ferrolex responsible for hosting, release
+operations, artifact provenance, and redistribution review. No such product
+requirement exists yet.
 
 ## Consequences
 
-- A second repository must be created and wired into CI once the compiler
-  (Phase 5) exists; until then this decision has no implementation cost.
-- License review becomes part of adding a dictionary to the companion repo.
+- The catalog is a reviewed source manifest, not a claim that all LibreOffice
+  dictionaries share one license.
+- Each install is an explicit network action and needs a caller-supplied cache
+  location; normal runtime behavior remains offline and deterministic.
+- Adding or updating a locale requires review of its immutable source revision,
+  digests, license identity, encoding, and license notice.
 
 ## Validation and review triggers
 
-- Reopen if artifact hosting via repository releases becomes a bottleneck
-  (bandwidth, discoverability) — a registry/CDN would be the next step.
+- Reopen when a consuming product needs ferrolex-maintained precompiled
+  artifacts, offline bootstrap from a shared channel, or a release cadence
+  independent of the CLI. That review must decide whether a companion
+  repository, registry, or CDN can carry the required per-locale provenance and
+  license evidence.
 
 ## References
 
+- [Dictionary fetching](../dictionary-fetching.md)
+- [Locale compatibility](../locale-compatibility.md)
 - [rfc.md](../../rfc.md) §4.3, §12, §42

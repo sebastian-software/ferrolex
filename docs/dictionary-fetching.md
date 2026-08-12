@@ -4,6 +4,13 @@ ferrolex can acquire a reviewed pair of LibreOffice Hunspell files, but it
 does not bundle dictionary content and it never downloads a dictionary during
 normal checking, validation, compilation, tests, or CI.
 
+This is source acquisition, not ferrolex dictionary distribution: the optional
+installer fetches raw upstream bytes only after an explicit user command and
+writes them into a caller-selected local cache. ferrolex does not operate a
+companion artifact repository or publish these dictionaries. A product that
+redistributes a resulting compiled artifact remains responsible for the
+locale-specific license evidence recorded in the catalog.
+
 The optional `ferrolex dictionary` command is an installer, not an updater:
 
 - no cache directory is inferred; the caller supplies `--cache`;

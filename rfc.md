@@ -236,7 +236,13 @@ Language dictionaries should be distributed separately so that:
 - individual dictionary licenses remain explicit
 - applications can select dictionaries appropriate to their licensing requirements
 
-Dictionary distribution happens through a companion repository (`ferrolex-dictionaries`) that fetches upstream dictionaries, tracks their licenses, compiles them deterministically in CI, and publishes versioned compiled artifacts via releases (ADR-0007). A fetch command in the CLI may build on this later.
+ferrolex does not redistribute language dictionaries. Its optional dictionary
+installer fetches catalogued upstream source pairs only on explicit request,
+verifies their immutable revision and SHA-256 digests, records per-locale
+license-notice evidence, and writes them to a caller-selected local cache
+(ADR-0007). Normal checking, compilation, tests, and CI remain offline;
+any downstream distribution of compiled artifacts retains the applicable
+dictionary-license obligations.
 
 ---
 

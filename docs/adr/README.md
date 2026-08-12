@@ -31,5 +31,5 @@ configuration, CI, and the RFC ([rfc.md](../../rfc.md)).
 | [0004](0004-conventional-commits-and-release-please.md) | Conventional Commits and Release Please | accepted |
 | [0005](0005-project-name-ferrolex.md) | Project, crates, and CLI binary are named ferrolex | accepted |
 | [0006](0006-compiled-format-safety-and-layout.md) | Compiled format: owned loading, little-endian, byte-identical | accepted |
-| [0007](0007-dictionary-distribution.md) | Dictionary distribution via companion repository | accepted |
+| [0007](0007-dictionary-distribution.md) | Verified upstream sources and local dictionary caches | accepted |
 | [0008](0008-no-cspell-compatibility.md) | Own directive format, no cspell compatibility | accepted |
