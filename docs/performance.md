@@ -10,6 +10,7 @@ release-profile checkout after the functional checks:
 cargo test --workspace
 cargo bench -p ferrolex-core
 cargo bench -p ferrolex-compiler
+cargo bench -p ferrolex-hunspell
 cargo bench -p ferrolex-suggest
 ```
 
@@ -21,6 +22,33 @@ compare runs across machines or toolchains as if they were a single baseline.
 
 Neither command performs filesystem I/O, process startup measurement, memory
 measurement, nor a comparison with another spelling engine.
+
+## Hunspell morphology and developer workloads
+
+`cargo bench -p ferrolex-hunspell` measures one strict, in-source synthetic
+Hunspell pair. Its lookup lanes are `hit`, `miss`, `affixed`, `compound`, and
+`mixed-case`; the fixture asserts each lane's recognition result before timing.
+The same benchmark checks four pinned synthetic repository-shaped workloads:
+large Markdown, TypeScript, Rust, and mixed documentation/code. Corpus text,
+dictionary construction, and analyzer construction are outside the timed
+closures. The results characterize tokenization plus recognition, not disk I/O
+or a claim about any external repository.
+
+There is intentionally no `ferrolex benchmark` CLI command. Criterion benches
+are the supported developer measurement path because they make the exact
+workload, toolchain, and statistical output explicit without expanding the
+runtime CLI surface.
+
+### External Hunspell comparison
+
+To investigate the RFC §41 high-volume-lookup goal, install Hunspell outside
+this repository, use a digest-verified fixture from the compatibility suite,
+and compare only the same preloaded word sequence on one quiet machine. Record
+the Ferrolex and Hunspell commands, dictionary digest, query mix, toolchain,
+OS/CPU/power mode, and raw Criterion output. Treat the external executable as
+a development-only black-box oracle: do not add it as a production dependency,
+do not report cross-machine ratios as a product guarantee, and investigate any
+recognition mismatch before interpreting timing results.
 
 ## Suggestions
 

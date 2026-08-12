@@ -332,10 +332,13 @@ dependencies = [
 name = "ferrolex-hunspell"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "encoding_rs",
+ "ferrolex-code",
  "ferrolex-compiler",
  "ferrolex-core",
  "ferrolex-suggest",
+ "ferrolex-text",
  "proptest",
  "sha2",
 ]

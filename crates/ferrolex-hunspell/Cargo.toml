@@ -18,7 +18,14 @@ ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.1.0" }
 sha2 = "=0.10.9"
 
 [dev-dependencies]
+criterion = "0.5.1"
+ferrolex-code = { path = "../ferrolex-code", version = "0.1.0" }
+ferrolex-text = { path = "../ferrolex-text", version = "0.1.0" }
 proptest = "1.6.0"
+
+[[bench]]
+name = "hunspell"
+harness = false
 
 [lints]
 workspace = true
