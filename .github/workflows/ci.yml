@@ -26,6 +26,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: cargo test -p ferrolex-ffi --features c-abi
       - run: cargo bench -p ferrolex-core --no-run
       - run: cargo bench -p ferrolex-compiler --no-run
       - run: cargo bench -p ferrolex-suggest --no-run
@@ -79,3 +80,17 @@ jobs:
         with:
           name: recognition-scorecard
           path: ${{ runner.temp }}/recognition-scorecard.tsv
+
+  binding-spikes:
+    name: Binding spikes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: bash scripts/bench-node-binding.sh
+      - run: bash scripts/bench-python-binding.sh

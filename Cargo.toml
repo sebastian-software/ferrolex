@@ -32,6 +32,8 @@ members = [
     "crates/ferrolex-compiler",
     "crates/ferrolex-cli",
     "crates/ferrolex-ffi",
+    "crates/ferrolex-node",
+    "crates/ferrolex-python",
 ]
 resolver = "2"
 

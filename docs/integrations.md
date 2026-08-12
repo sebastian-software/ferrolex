@@ -8,8 +8,10 @@ RFC §48 marks an LSP as a desirable later-stage deliverable, not a requirement
 for the initial core. The experimental [C ABI spike](ffi.md) now records a
 narrow ownership, threading, error, and distribution contract for a
 plain-word-list checker. It is feature-gated, unpublished, and has no
-stability promise yet. Node.js, Python, and editor extensions remain deferred
-until a consumer defines their corresponding contracts.
+stability promise yet. The [Node.js and Python binding spikes](bindings.md)
+likewise remain unpublished while their packaging and compatibility contracts
+are evaluated. Editor extensions remain deferred until a consumer defines the
+corresponding contract.
 
 The present integration boundary is therefore the Rust workspace and the
 `ferrolex` CLI. Both expose structured failures and deterministic output so an

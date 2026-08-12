@@ -1,0 +1,29 @@
+[package]
+name = "ferrolex-node"
+version = "0.1.0"
+description = "Experimental Node.js binding spike for ferrolex"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+build = "build.rs"
+publish = false
+
+[lib]
+name = "ferrolex_node"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
+ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.1.0" }
+napi = { version = "=3.12.1", default-features = false, features = ["napi8"] }
+napi-derive = "=3.6.0"
+
+[build-dependencies]
+napi-build = "=2.4.1"
+
+[lints]
+workspace = true

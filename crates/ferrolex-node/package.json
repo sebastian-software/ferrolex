@@ -1,0 +1,11 @@
+{
+  "name": "@ferrolex/node-spike",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "napi": {
+    "binaryName": "ferrolex_node"
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "ferrolex-python"
+version = "0.1.0"
+description = "Experimental Python binding spike for ferrolex"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[lib]
+name = "ferrolex_python"
+crate-type = ["cdylib", "rlib"]
+test = false
+
+[dependencies]
+ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
+ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.1.0" }
+pyo3 = "=0.29.2"
+
+[lints]
+workspace = true
