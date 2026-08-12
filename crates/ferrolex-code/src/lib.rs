@@ -281,6 +281,7 @@ pub struct ProjectConfig {
     dictionary_paths: BTreeSet<Box<str>>,
     compiled_dictionary_paths: BTreeSet<Box<str>>,
     hunspell_paths: BTreeSet<Box<str>>,
+    comment_syntax: Option<CommentSyntax>,
 }
 
 impl ProjectConfig {
@@ -369,6 +370,16 @@ impl ProjectConfig {
                 "hunspell" => {
                     config.hunspell_paths.insert(Box::from(value));
                 }
+                "comment-syntax" => {
+                    config.comment_syntax =
+                        Some(parse_config_comment_syntax(value).ok_or_else(|| {
+                            ProjectConfigError::InvalidLine {
+                                line: line_number,
+                                message: "comment-syntax must be `html` or `line:<prefix>`"
+                                    .to_owned(),
+                            }
+                        })?);
+                }
                 _ => {
                     return Err(ProjectConfigError::InvalidLine {
                         line: line_number,
@@ -442,6 +453,18 @@ impl ProjectConfig {
             text.push_str(path);
             text.push('\n');
         }
+        if let Some(syntax) = &self.comment_syntax {
+            text.push_str("comment-syntax = ");
+            match syntax {
+                CommentSyntax::None => text.push_str("none"),
+                CommentSyntax::Html => text.push_str("html"),
+                CommentSyntax::Line(prefix) => {
+                    text.push_str("line:");
+                    text.push_str(prefix);
+                }
+            }
+            text.push('\n');
+        }
         text
     }
 
@@ -468,6 +491,23 @@ impl ProjectConfig {
     /// Returns configured Hunspell affix paths in deterministic order.
     pub fn hunspell_paths(&self) -> impl Iterator<Item = &str> {
         self.hunspell_paths.iter().map(AsRef::as_ref)
+    }
+
+    /// Returns an optional file-comment syntax override for one analysis invocation.
+    #[must_use]
+    pub fn comment_syntax(&self) -> Option<CommentSyntax> {
+        self.comment_syntax.clone()
+    }
+}
+
+fn parse_config_comment_syntax(value: &str) -> Option<CommentSyntax> {
+    match value {
+        "none" => Some(CommentSyntax::None),
+        "html" => Some(CommentSyntax::Html),
+        _ => value
+            .strip_prefix("line:")
+            .filter(|prefix| !prefix.is_empty())
+            .map(CommentSyntax::line),
     }
 }
 

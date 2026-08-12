@@ -662,6 +662,7 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     let mut builder = Analyzer::builder(&dictionary);
     let mut include_patterns = command.include_patterns.clone();
     let mut exclude_patterns = command.exclude_patterns.clone();
+    let project_comment_syntax = project.as_ref().and_then(ProjectConfig::comment_syntax);
     if let Some(config) = &project {
         builder =
             builder
@@ -685,9 +686,13 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
             path: path.clone(),
             source,
         })?;
-        let document = match &command.comment_syntax {
+        let document = match command
+            .comment_syntax
+            .as_ref()
+            .or(project_comment_syntax.as_ref())
+        {
             Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
-            None => Document::new(&source),
+            None => Document::new(&source).with_comment_syntax(comment_syntax_for_path(&path)),
         };
         let analysis = analyzer.check(&document);
         for finding in analysis.findings() {
@@ -713,6 +718,21 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     } else {
         RunOutcome::Success
     })
+}
+
+fn comment_syntax_for_path(path: &Path) -> CommentSyntax {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some(
+            "rs" | "c" | "cc" | "cpp" | "h" | "hpp" | "java" | "js" | "jsx" | "ts" | "tsx" | "go"
+            | "swift" | "kt",
+        ) => CommentSyntax::line("//"),
+        Some("py" | "rb" | "sh" | "bash" | "zsh" | "yaml" | "yml" | "toml") => {
+            CommentSyntax::line("#")
+        }
+        Some("sql" | "lua" | "hs") => CommentSyntax::line("--"),
+        Some("md" | "markdown" | "html" | "htm" | "xml") => CommentSyntax::Html,
+        _ => CommentSyntax::None,
+    }
 }
 
 fn analysis_paths(
@@ -2032,7 +2052,7 @@ impl Error for CliError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
@@ -2040,11 +2060,11 @@ mod tests {
     use ferrolex_hunspell::{load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests};
 
     use super::{
-        catalog_import_encodings, glob_matches, install_hunspell_runtime_cache, line_and_column,
-        parse_arguments, read_compiled_artifact, run, runtime_cache_path, validate_hunspell,
-        AnalyzeCommand, CheckCommand, CheckTarget, CliError, Command, CommentSyntax,
-        CompileCommand, CompileInput, DictionaryCommand, RunOutcome, SourceEncoding,
-        SuggestCommand, ValidateCommand,
+        catalog_import_encodings, comment_syntax_for_path, glob_matches,
+        install_hunspell_runtime_cache, line_and_column, parse_arguments, read_compiled_artifact,
+        run, runtime_cache_path, validate_hunspell, AnalyzeCommand, CheckCommand, CheckTarget,
+        CliError, Command, CommentSyntax, CompileCommand, CompileInput, DictionaryCommand,
+        RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -2251,6 +2271,26 @@ mod tests {
         assert!(glob_matches("**/*.rs", "lib.rs"));
         assert!(glob_matches("target/**", "target/debug/ferrolex"));
         assert!(!glob_matches("*.rs", "src/lib.rs"));
+    }
+
+    #[test]
+    fn chooses_comment_presets_from_file_extensions() {
+        assert_eq!(
+            comment_syntax_for_path(Path::new("lib.rs")),
+            CommentSyntax::line("//")
+        );
+        assert_eq!(
+            comment_syntax_for_path(Path::new("query.sql")),
+            CommentSyntax::line("--")
+        );
+        assert_eq!(
+            comment_syntax_for_path(Path::new("README.md")),
+            CommentSyntax::Html
+        );
+        assert_eq!(
+            comment_syntax_for_path(Path::new("words.txt")),
+            CommentSyntax::None
+        );
     }
 
     #[test]

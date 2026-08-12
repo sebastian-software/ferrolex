@@ -133,6 +133,14 @@ Directives are only interpreted in the comment syntax supplied with a
 `Document`; text that merely resembles a directive has no special meaning.
 The CLI accepts a line prefix with `--comment-prefix` (including dash prefixes
 such as `--comment-prefix=--`) or HTML comments with `--comment-syntax html`.
+Without an explicit option, Level-2 presets select `//` for common C-family
+files, `#` for shell/Python/config files, `--` for SQL/Lua/Haskell, and HTML
+comments for Markdown, HTML, and XML. Markdown prose and fenced code remain in
+the same generic, parser-independent analysis pass; a language parser is
+deliberately outside this level's scope.
+Set `comment-syntax = html`, `comment-syntax = none`, or
+`comment-syntax = line://` in the project configuration to override those
+presets; an explicit CLI option takes precedence.
 
 ```text
 // ferrolex:ignore OAuthAuthentcationProvider
