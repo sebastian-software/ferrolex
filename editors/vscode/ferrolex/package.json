@@ -1,0 +1,86 @@
+{
+  "name": "ferrolex",
+  "displayName": "Ferrolex",
+  "description": "Spell checking through the ferrolex language server.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "sebastian-software",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sebastian-software/ferrolex.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "README.md"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ferrolex.restartLanguageServer",
+        "title": "Ferrolex: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Ferrolex",
+      "properties": {
+        "ferrolex.lsp.command": {
+          "type": "string",
+          "default": "ferrolex-lsp",
+          "scope": "window",
+          "description": "Command used to launch the ferrolex language server."
+        },
+        "ferrolex.dictionary.words": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "ferrolex"
+          ],
+          "scope": "resource",
+          "description": "Words accepted by ferrolex in addition to its configured dictionary."
+        },
+        "ferrolex.ignoredWords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Words ignored by ferrolex without modifying the user dictionary."
+        },
+        "ferrolex.commentPrefix": {
+          "type": "string",
+          "default": "//",
+          "scope": "resource",
+          "description": "Comment prefix used by ferrolex's inline ignore quick fix."
+        },
+        "ferrolex.userDictionaryPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional absolute path to the plain-word-list user dictionary persisted by ferrolex."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "pack:check": "npm pack --dry-run"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

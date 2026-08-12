@@ -95,3 +95,15 @@ jobs:
           node-version: 20
       - run: bash scripts/bench-node-binding.sh
       - run: bash scripts/bench-python-binding.sh
+
+  vscode-extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm --prefix editors/vscode/ferrolex ci --ignore-scripts
+      - run: npm --prefix editors/vscode/ferrolex test
+      - run: npm --prefix editors/vscode/ferrolex run pack:check

@@ -1,2 +1,3 @@
 /target
 /.compat-fixtures
+/editors/vscode/ferrolex/node_modules

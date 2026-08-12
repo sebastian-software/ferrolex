@@ -10,9 +10,11 @@ narrow ownership, threading, error, and distribution contract for a
 plain-word-list checker. It is feature-gated, unpublished, and has no
 stability promise yet. The [Node.js and Python binding spikes](bindings.md)
 likewise remain unpublished while their packaging and compatibility contracts
-are evaluated. The generic [stdio language server](lsp.md) ships separately
-from editor packaging; editor extensions remain deferred until a consumer
-defines the corresponding contract.
+are evaluated. The generic [stdio language server](lsp.md) and its thin
+[Visual Studio Code client](vscode.md) ship separately from the core crates.
+The client launches a user-resolved server binary and maps workspace settings;
+Marketplace publication remains deferred until portable server distribution is
+defined.
 
 The present integration boundary is therefore the Rust workspace and the
 `ferrolex` CLI. Both expose structured failures and deterministic output so an
