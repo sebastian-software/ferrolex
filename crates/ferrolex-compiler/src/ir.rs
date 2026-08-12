@@ -160,6 +160,8 @@ pub struct SpecialFlagsIr {
     pub need_affix: Option<FlagIr>,
     /// Valid only in compounds marker.
     pub only_in_compound: Option<FlagIr>,
+    /// Suppresses a recognized spelling from suggestion output.
+    pub no_suggest: Option<FlagIr>,
     /// Enables sharp-S casing handling.
     pub check_sharps: bool,
 }

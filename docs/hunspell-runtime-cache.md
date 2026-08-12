@@ -25,6 +25,10 @@ compound configuration. The derived stem index is rebuilt during load. No
 affix forms are pre-expanded, so the artifact does not turn a bounded lazy
 derivation into an unbounded cache build.
 
+`NOSUGGEST` is also retained as a suggestion-policy flag. It does not change
+recognition, but it prevents the marked spelling from being returned by the
+suggestion API after the cache is loaded.
+
 It also preserves dictionary-entry and affix morphology as a private interned
 string table with compact references. Morphology has no public runtime API and
 does not change recognition, but retaining it makes the imported representation

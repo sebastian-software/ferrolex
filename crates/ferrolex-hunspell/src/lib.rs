@@ -448,6 +448,23 @@ impl HunspellDictionary {
         &self.replacement_rules
     }
 
+    /// Returns whether a stored stem is valid to offer as a suggestion.
+    ///
+    /// This excludes entries that recognition rejects directly and entries
+    /// explicitly marked `NOSUGGEST`, while leaving derived-form generation to
+    /// the suggestion layer.
+    #[must_use]
+    pub fn is_suggestable_stem(&self, stem: &str) -> bool {
+        self.contains(stem)
+            && self.lexemes_for_stem(stem).any(|lexeme| {
+                !self
+                    .special_flags
+                    .no_suggest
+                    .as_ref()
+                    .is_some_and(|flag| lexeme.flags.contains(flag))
+            })
+    }
+
     fn lexemes_for_stem(&self, stem: &str) -> impl Iterator<Item = &Lexeme> {
         self.stem_indices
             .get(stem)
@@ -1237,6 +1254,10 @@ impl CandidateSource for HunspellDictionary {
             }
         }
     }
+
+    fn is_suggestion_candidate(&self, candidate: &str) -> bool {
+        self.is_suggestable_stem(candidate)
+    }
 }
 
 fn sharp_uppercase_forms(lexemes: &[Lexeme], special_flags: &SpecialFlags) -> BTreeSet<Box<str>> {
@@ -1669,6 +1690,7 @@ struct SpecialFlags {
     keep_case: Option<Flag>,
     need_affix: Option<Flag>,
     only_in_compound: Option<Flag>,
+    no_suggest: Option<Flag>,
     check_sharps: bool,
 }
 
@@ -1879,6 +1901,7 @@ fn special_flags_to_ir(flags: &SpecialFlags) -> SpecialFlagsIr {
         keep_case: flags.keep_case.as_ref().map(flag_to_ir),
         need_affix: flags.need_affix.as_ref().map(flag_to_ir),
         only_in_compound: flags.only_in_compound.as_ref().map(flag_to_ir),
+        no_suggest: flags.no_suggest.as_ref().map(flag_to_ir),
         check_sharps: flags.check_sharps,
     }
 }
@@ -2555,6 +2578,15 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
                 &fields,
                 parsed.flag_mode,
                 &mut parsed.special_flags.only_in_compound,
+                &mut parsed.diagnostics,
+            ),
+            "NOSUGGEST" => parse_special_flag(
+                source,
+                line_number,
+                directive,
+                &fields,
+                parsed.flag_mode,
+                &mut parsed.special_flags.no_suggest,
                 &mut parsed.diagnostics,
             ),
             "COMPOUNDFLAG" => parse_special_flag(
@@ -4627,7 +4659,6 @@ fn is_suggestion_only_directive(directive: &str) -> bool {
             | "MAXNGRAMSUGS"
             | "NGRAMSUGS"
             | "NOSPLITSUGS"
-            | "NOSUGGEST"
             | "ONLYMAXDIFF"
             | "PHONE"
             | "SUGSWITHDOTS"
@@ -5002,6 +5033,42 @@ mod tests {
 
         assert_eq!(candidates, ["kind", "party"]);
         assert!(!candidates.contains(&"parties".to_owned()));
+    }
+
+    #[test]
+    fn suggestions_exclude_rejected_and_no_suggest_stems_after_cache_round_trip() {
+        let aff = "FORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nNOSUGGEST S\n";
+        let dic = "5\nforbidden/F\nneeds/N\ncompound/O\nprivate/S\npublic\n";
+        let imported = import(
+            "suggestions.aff",
+            aff,
+            "suggestions.dic",
+            dic,
+            ImportMode::Strict,
+        )
+        .expect("the fixture imports");
+        let source_digests = SourceDigests::from_source_bytes(aff.as_bytes(), dic.as_bytes());
+        let cache = compile_runtime_cache(imported.dictionary(), source_digests)
+            .expect("the cache compiles");
+        let dictionary = load_runtime_cache(&cache, source_digests).expect("the cache loads");
+
+        assert!(dictionary.contains("private"));
+        for word in ["forbidden", "needs", "compound", "private"] {
+            let result = Suggester::new(&dictionary, SuggestConfig::default()).suggest(word);
+            assert!(
+                !result
+                    .suggestions()
+                    .iter()
+                    .any(|suggestion| suggestion.word() == word),
+                "{word} must never be suggested"
+            );
+        }
+        assert!(Suggester::new(&dictionary, SuggestConfig::default())
+            .suggest("publi")
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "public"));
+        assert!(imported.ir().special_flags.no_suggest.is_some());
     }
 
     #[test]

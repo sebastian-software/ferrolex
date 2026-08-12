@@ -11,6 +11,15 @@ use ferrolex_core::{UserDictionary, WordList};
 pub trait CandidateSource: Send + Sync {
     /// Visits candidates in deterministic byte-lexicographic order.
     fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool);
+
+    /// Returns whether a stored candidate may be shown as a suggestion.
+    ///
+    /// Sources with richer recognition semantics can reject pseudo-stems or
+    /// policy-marked entries here. The default preserves plain word-list and
+    /// user-dictionary behavior.
+    fn is_suggestion_candidate(&self, _candidate: &str) -> bool {
+        true
+    }
 }
 
 impl CandidateSource for WordList {
@@ -217,6 +226,9 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                 return false;
             }
             examined += 1;
+            if !self.source.is_suggestion_candidate(candidate) {
+                return true;
+            }
             let Some(candidate_chars) =
                 lowercase_chars_bounded(candidate, self.config.max_word_scalars)
             else {

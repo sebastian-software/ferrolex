@@ -32,13 +32,13 @@ const HEADER_BYTES: usize = MAGIC.len() + 2 + 4 + (CHECKSUM_BYTES * 2);
 const MAX_RUNTIME_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 /// The on-disk layout version for a Hunspell runtime cache.
-pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 4;
+pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 5;
 
 /// The recognition semantics encoded by a Hunspell runtime cache.
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 26;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 27;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -693,6 +693,11 @@ fn validate_dictionary(
         error,
     )?;
     validate_optional_flag(
+        dictionary.special_flags.no_suggest.as_ref(),
+        dictionary.flag_mode,
+        error,
+    )?;
+    validate_optional_flag(
         dictionary.compound.flag.as_ref(),
         dictionary.flag_mode,
         error,
@@ -958,6 +963,7 @@ fn write_special_flags(
     write_optional_flag(output, special_flags.keep_case.as_ref(), flag_mode)?;
     write_optional_flag(output, special_flags.need_affix.as_ref(), flag_mode)?;
     write_optional_flag(output, special_flags.only_in_compound.as_ref(), flag_mode)?;
+    write_optional_flag(output, special_flags.no_suggest.as_ref(), flag_mode)?;
     output.push(u8::from(special_flags.check_sharps));
     Ok(())
 }
@@ -1553,6 +1559,7 @@ fn read_special_flags(
         keep_case: read_optional_flag(reader, flag_mode)?,
         need_affix: read_optional_flag(reader, flag_mode)?,
         only_in_compound: read_optional_flag(reader, flag_mode)?,
+        no_suggest: read_optional_flag(reader, flag_mode)?,
         check_sharps: match reader.byte()? {
             0 => false,
             1 => true,

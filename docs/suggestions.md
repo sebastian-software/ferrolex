@@ -13,6 +13,13 @@ Hunspell candidates are its stored stems in UTF-8 byte order; affix-derived and
 compound forms are deliberately not enumerated because a source can describe
 an unbounded form space.
 
+Before ranking, a Hunspell source filters stored stems through its recognition
+rules. `FORBIDDENWORD`, `NEEDAFFIX`, and `ONLYINCOMPOUND` pseudo-stems are not
+offered because the dictionary rejects them as standalone words. `NOSUGGEST`
+is retained as an explicit suggestion policy: it remains recognized when no
+other rule rejects it, but it is never returned as a suggestion. The policy is
+preserved in the versioned runtime artifact.
+
 Callers may supply explicit `ReplacementRule` values for known misspellings or
 organization-specific conventions. A rule that transforms the query directly
 into an enumerated candidate gives that candidate ranking distance zero; it
