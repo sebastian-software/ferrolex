@@ -71,6 +71,14 @@ without giving the analyzer a separate vocabulary format:
 ferrolex analyze --dictionary language.txt --dictionary technical.txt src/
 ```
 
+`analyze` accepts either one file or a directory. Directories are traversed
+recursively in deterministic path order. Use repeated `--include <GLOB>` and
+`--exclude <GLOB>` options to select relative paths; `*` stays within one
+directory, while `**` may cross directory boundaries. With no include glob,
+every regular file is analyzed. Excludes always win. The command returns zero
+only when every selected file is clean; any finding or malformed directive in
+any selected file returns the ordinary misspelling exit status.
+
 Keep the technical list separate from a project's mutable user overlay. Record
 its source revision and license before importing third-party data. ferrolex does
 not read `cspell.json` or cspell dictionary formats; an approved source must be
@@ -87,7 +95,13 @@ ignore-word = OAuth
 ignore-pattern = ^generated_[a-z]+$
 minimum-word-length = 3
 single-letter-prefix = separate
+include = **/*.rs
+exclude = target/**
 ```
+
+`include` and `exclude` use the same relative path glob rules as the CLI and
+combine with CLI patterns. They are selection policy only; comment syntax can
+still be chosen for one invocation with the CLI hook.
 
 Keys are strict and values are validated with their source line. The file is
 not a general TOML/YAML compatibility layer; keeping this contract small makes

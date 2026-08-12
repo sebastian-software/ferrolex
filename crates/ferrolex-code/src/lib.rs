@@ -227,13 +227,16 @@ impl Default for AnalyzerConfig {
 /// The text form is deliberately line-oriented so it can be stored as
 /// `.ferrolex/config` without introducing a generic configuration dependency:
 /// `ignore-word = value`, `ignore-pattern = regex`,
-/// `minimum-word-length = number`, and `single-letter-prefix = join|separate`.
+/// `minimum-word-length = number`, `single-letter-prefix = join|separate`,
+/// `include = glob`, and `exclude = glob`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectConfig {
     ignored_words: BTreeSet<Box<str>>,
     ignored_patterns: BTreeSet<Box<str>>,
     minimum_word_length: Option<usize>,
     single_letter_prefix: Option<SingleLetterPrefix>,
+    include_patterns: BTreeSet<Box<str>>,
+    exclude_patterns: BTreeSet<Box<str>>,
 }
 
 impl ProjectConfig {
@@ -293,6 +296,12 @@ impl ProjectConfig {
                     };
                     config.single_letter_prefix = Some(value);
                 }
+                "include" => {
+                    config.include_patterns.insert(Box::from(value));
+                }
+                "exclude" => {
+                    config.exclude_patterns.insert(Box::from(value));
+                }
                 _ => {
                     return Err(ProjectConfigError::InvalidLine {
                         line: line_number,
@@ -331,7 +340,27 @@ impl ProjectConfig {
             });
             text.push('\n');
         }
+        for pattern in &self.include_patterns {
+            text.push_str("include = ");
+            text.push_str(pattern);
+            text.push('\n');
+        }
+        for pattern in &self.exclude_patterns {
+            text.push_str("exclude = ");
+            text.push_str(pattern);
+            text.push('\n');
+        }
         text
+    }
+
+    /// Returns configured file-selection include globs in deterministic order.
+    pub fn include_patterns(&self) -> impl Iterator<Item = &str> {
+        self.include_patterns.iter().map(AsRef::as_ref)
+    }
+
+    /// Returns configured file-selection exclude globs in deterministic order.
+    pub fn exclude_patterns(&self) -> impl Iterator<Item = &str> {
+        self.exclude_patterns.iter().map(AsRef::as_ref)
     }
 }
 
@@ -1128,7 +1157,7 @@ mod tests {
     #[test]
     fn project_configuration_round_trips_and_changes_analysis() {
         let config = ProjectConfig::from_text(
-            "# project policy\nignore-word = Ferrolex\nignore-pattern = ^generated_[a-z]+$\nminimum-word-length = 3\nsingle-letter-prefix = separate\n",
+            "# project policy\nignore-word = Ferrolex\nignore-pattern = ^generated_[a-z]+$\nminimum-word-length = 3\nsingle-letter-prefix = separate\ninclude = **/*.rs\nexclude = target/**\n",
         )
         .expect("configuration is valid");
         assert_eq!(
@@ -1144,6 +1173,8 @@ mod tests {
         let analysis = analyzer.check(&Document::new("Ferrolex generated_token OAuth"));
 
         assert!(analysis.findings().is_empty());
+        assert_eq!(config.include_patterns().collect::<Vec<_>>(), ["**/*.rs"]);
+        assert_eq!(config.exclude_patterns().collect::<Vec<_>>(), ["target/**"]);
     }
 
     #[test]

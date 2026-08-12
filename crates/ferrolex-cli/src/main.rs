@@ -35,7 +35,7 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
+const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -580,15 +580,9 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
         &command.compiled_paths,
         &command.hunspell_affix_paths,
     )?;
-    let source = fs::read_to_string(&command.path).map_err(|source| CliError::ReadInput {
-        path: command.path.clone(),
-        source,
-    })?;
-    let document = match &command.comment_syntax {
-        Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
-        None => Document::new(&source),
-    };
     let mut builder = Analyzer::builder(&dictionary);
+    let mut include_patterns = command.include_patterns.clone();
+    let mut exclude_patterns = command.exclude_patterns.clone();
     if let Some(config_path) = &command.config_path {
         let text =
             fs::read_to_string(config_path).map_err(|source| CliError::ReadProjectConfig {
@@ -606,30 +600,39 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
                     path: config_path.clone(),
                     source,
                 })?;
+        include_patterns.extend(config.include_patterns().map(str::to_owned));
+        exclude_patterns.extend(config.exclude_patterns().map(str::to_owned));
     }
-    let analysis = builder.build().check(&document);
+    let analyzer = builder.build();
+    let paths = analysis_paths(&command.path, &include_patterns, &exclude_patterns)?;
     let mut has_diagnostic = false;
 
-    for finding in analysis.findings() {
-        print_finding(
-            &command.path,
-            &source,
-            finding.range().start,
-            finding.word(),
-        );
-        if command.suggest {
-            print_analysis_suggestions(&command.path, &source, finding, &dictionary);
+    for path in paths {
+        let source = fs::read_to_string(&path).map_err(|source| CliError::ReadInput {
+            path: path.clone(),
+            source,
+        })?;
+        let document = match &command.comment_syntax {
+            Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
+            None => Document::new(&source),
+        };
+        let analysis = analyzer.check(&document);
+        for finding in analysis.findings() {
+            print_finding(&path, &source, finding.range().start, finding.word());
+            if command.suggest {
+                print_analysis_suggestions(&path, &source, finding, &dictionary);
+            }
+            has_diagnostic = true;
         }
-        has_diagnostic = true;
-    }
-    for diagnostic in analysis.directive_diagnostics() {
-        let (line, column) = line_and_column(&source, diagnostic.range().start);
-        println!(
-            "{}:{line}:{column}: malformed directive: {:?}",
-            command.path.display(),
-            diagnostic.problem()
-        );
-        has_diagnostic = true;
+        for diagnostic in analysis.directive_diagnostics() {
+            let (line, column) = line_and_column(&source, diagnostic.range().start);
+            println!(
+                "{}:{line}:{column}: malformed directive: {:?}",
+                path.display(),
+                diagnostic.problem()
+            );
+            has_diagnostic = true;
+        }
     }
 
     Ok(if has_diagnostic {
@@ -637,6 +640,109 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     } else {
         RunOutcome::Success
     })
+}
+
+fn analysis_paths(
+    path: &Path,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+) -> Result<Vec<PathBuf>, CliError> {
+    let metadata = fs::metadata(path).map_err(|source| CliError::ReadInput {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let mut paths = Vec::new();
+    collect_analysis_paths(path, path, include_patterns, exclude_patterns, &mut paths)?;
+    paths.sort();
+    Ok(paths)
+}
+
+fn collect_analysis_paths(
+    root: &Path,
+    directory: &Path,
+    includes: &[String],
+    excludes: &[String],
+    paths: &mut Vec<PathBuf>,
+) -> Result<(), CliError> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|source| CliError::ReadInput {
+            path: directory.to_path_buf(),
+            source,
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| CliError::ReadInput {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+    entries.sort_by_key(fs::DirEntry::path);
+    for entry in entries {
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if matches_any(&relative, excludes) {
+            continue;
+        }
+        if entry
+            .file_type()
+            .map_err(|source| CliError::ReadInput {
+                path: path.clone(),
+                source,
+            })?
+            .is_dir()
+        {
+            collect_analysis_paths(root, &path, includes, excludes, paths)?;
+        } else if entry
+            .file_type()
+            .map_err(|source| CliError::ReadInput {
+                path: path.clone(),
+                source,
+            })?
+            .is_file()
+            && (includes.is_empty() || matches_any(&relative, includes))
+        {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn matches_any(path: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| glob_matches(pattern, path))
+}
+
+fn glob_matches(pattern: &str, path: &str) -> bool {
+    glob_matches_bytes(pattern.as_bytes(), path.as_bytes())
+}
+
+fn glob_matches_bytes(pattern: &[u8], path: &[u8]) -> bool {
+    match (pattern, path) {
+        ([], []) => true,
+        ([b'*', b'*', b'/', rest @ ..], _) => glob_starstar_directory(pattern, rest, path),
+        ([b'*', b'*', rest @ ..], _) => glob_starstar(pattern, rest, path),
+        ([b'*', rest @ ..], _) => {
+            glob_matches_bytes(rest, path)
+                || (!path.is_empty() && path[0] != b'/' && glob_matches_bytes(pattern, &path[1..]))
+        }
+        ([b'?', rest @ ..], [_, path_rest @ ..]) => glob_matches_bytes(rest, path_rest),
+        ([first, rest @ ..], [candidate, path_rest @ ..]) if first == candidate => {
+            glob_matches_bytes(rest, path_rest)
+        }
+        _ => false,
+    }
+}
+
+fn glob_starstar(pattern: &[u8], rest: &[u8], path: &[u8]) -> bool {
+    glob_matches_bytes(rest, path) || (!path.is_empty() && glob_matches_bytes(pattern, &path[1..]))
+}
+
+fn glob_starstar_directory(pattern: &[u8], rest: &[u8], path: &[u8]) -> bool {
+    glob_starstar(pattern, rest, path)
 }
 
 fn print_analysis_suggestions(
@@ -1254,6 +1360,8 @@ fn parse_analyze_arguments(
     let mut hunspell_affix_paths = Vec::new();
     let mut config_path = None;
     let mut comment_syntax = None;
+    let mut include_patterns = Vec::new();
+    let mut exclude_patterns = Vec::new();
     let mut suggest = false;
     let mut path = None;
     let mut arguments = arguments.into_iter();
@@ -1269,6 +1377,8 @@ fn parse_analyze_arguments(
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
             "--config" => set_once_path(&mut config_path, &mut arguments, "--config")?,
+            "--include" => include_patterns.push(required_string(&mut arguments, "--include")?),
+            "--exclude" => exclude_patterns.push(required_string(&mut arguments, "--exclude")?),
             "--suggest" => suggest = true,
             "--comment-prefix" => {
                 let prefix = arguments.next().ok_or_else(|| {
@@ -1314,6 +1424,8 @@ fn parse_analyze_arguments(
         hunspell_affix_paths,
         config_path,
         comment_syntax,
+        include_patterns,
+        exclude_patterns,
         suggest,
         path,
     }))
@@ -1413,6 +1525,19 @@ fn required_path(
     Ok(PathBuf::from(path))
 }
 
+fn required_string(
+    arguments: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<String, CliError> {
+    let value = arguments
+        .next()
+        .ok_or_else(|| CliError::Usage(format!("`{option}` requires a value")))?;
+    if value.is_empty() || value.starts_with('-') {
+        return Err(CliError::Usage(format!("`{option}` requires a value")));
+    }
+    Ok(value)
+}
+
 fn set_once_path(
     destination: &mut Option<PathBuf>,
     arguments: &mut impl Iterator<Item = String>,
@@ -1507,6 +1632,8 @@ struct AnalyzeCommand {
     hunspell_affix_paths: Vec<PathBuf>,
     config_path: Option<PathBuf>,
     comment_syntax: Option<CommentSyntax>,
+    include_patterns: Vec<String>,
+    exclude_patterns: Vec<String>,
     suggest: bool,
     path: PathBuf,
 }
@@ -1764,10 +1891,11 @@ mod tests {
     use ferrolex_hunspell::{load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests};
 
     use super::{
-        catalog_import_encodings, install_hunspell_runtime_cache, line_and_column, parse_arguments,
-        read_compiled_artifact, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
-        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
-        DictionaryCommand, RunOutcome, SourceEncoding, SuggestCommand, ValidateCommand,
+        catalog_import_encodings, glob_matches, install_hunspell_runtime_cache, line_and_column,
+        parse_arguments, read_compiled_artifact, run, runtime_cache_path, validate_hunspell,
+        AnalyzeCommand, CheckCommand, CheckTarget, CliError, Command, CommentSyntax,
+        CompileCommand, CompileInput, DictionaryCommand, RunOutcome, SourceEncoding,
+        SuggestCommand, ValidateCommand,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -1839,6 +1967,8 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::line("//")),
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
                 suggest: false,
                 path: PathBuf::from("lib.rs"),
             })
@@ -1868,6 +1998,8 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::line("--")),
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
                 suggest: false,
                 path: PathBuf::from("query.sql"),
             })
@@ -1899,6 +2031,8 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::Html),
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
                 suggest: true,
                 path: PathBuf::from("README.md"),
             })
@@ -1929,10 +2063,45 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: Some(PathBuf::from(".ferrolex/config")),
                 comment_syntax: None,
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
                 suggest: false,
                 path: PathBuf::from("src/lib.rs"),
             })
         );
+    }
+
+    #[test]
+    fn parses_analyze_file_selection_patterns() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "analyze",
+                "--dictionary",
+                "words.txt",
+                "--include",
+                "**/*.rs",
+                "--exclude",
+                "target/**",
+                "src",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert!(matches!(
+            command,
+            Command::Analyze(AnalyzeCommand { include_patterns, exclude_patterns, .. })
+                if include_patterns == ["**/*.rs"] && exclude_patterns == ["target/**"]
+        ));
+    }
+
+    #[test]
+    fn matches_path_globs_without_matching_one_directory_star_across_slashes() {
+        assert!(glob_matches("**/*.rs", "src/lib.rs"));
+        assert!(glob_matches("**/*.rs", "lib.rs"));
+        assert!(glob_matches("target/**", "target/debug/ferrolex"));
+        assert!(!glob_matches("*.rs", "src/lib.rs"));
     }
 
     #[test]
@@ -1972,6 +2141,8 @@ mod tests {
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
                 config_path: None,
                 comment_syntax: None,
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
                 suggest: false,
                 path: PathBuf::from("src/lib.rs"),
             })
