@@ -3,7 +3,7 @@
 Dictionary files and suggestion input are treated as untrusted. The regular
 test suite therefore includes deterministic adversarial regression corpora;
 they require no separate fuzzer installation and run on the project's Rust
-1.81 MSRV in CI.
+1.88 MSRV in CI.
 
 Property tests use `proptest` with its default persisted regression seeds. They
 exercise normalization idempotence, deterministic compiled-dictionary output,
@@ -41,13 +41,13 @@ fixture entries keep license evidence separately from engine code.
 Run the focused suite with:
 
 ```sh
-cargo +1.81 test -p ferrolex-hunspell -p ferrolex-compiler -p ferrolex-suggest
+cargo +1.88 test -p ferrolex-hunspell -p ferrolex-compiler -p ferrolex-suggest
 ```
 
 ## Coverage-guided fuzzing
 
 The nightly-only `fuzz/` workspace deliberately sits outside the shipped
-workspace and its Rust 1.81 MSRV contract. Its targets cover raw Hunspell
+workspace and its Rust 1.88 MSRV contract. Its targets cover raw Hunspell
 import in every supported byte encoding, the FLXHSP runtime-cache loader, the
 FLEXDIC loader, suggestion queries, and compound evaluation. Their initial
 corpus consists of the deterministic robustness cases above; minimize and add
@@ -70,7 +70,7 @@ builds and executes, not a substitute for a sustained local campaign.
 Run the complete repository gate with the commands in CI:
 
 ```sh
-cargo +1.81 fmt --all -- --check
-cargo +1.81 clippy --workspace --all-targets -- -D warnings
-cargo +1.81 test --workspace
+cargo +1.88 fmt --all -- --check
+cargo +1.88 clippy --workspace --all-targets -- -D warnings
+cargo +1.88 test --workspace
 ```

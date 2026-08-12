@@ -156,7 +156,7 @@ untrusted throughout the supported import and loading paths.
 
 ## MSRV
 
-ferrolex supports Rust 1.81 and later.
+ferrolex supports Rust 1.88 and later.
 
 ## License
 
