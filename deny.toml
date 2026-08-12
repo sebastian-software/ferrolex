@@ -1,0 +1,44 @@
+# Dependency policy for the dual-licensed ferrolex distribution.
+#
+# Keep this deliberately small: every addition is a reviewed exception documented
+# in CONTRIBUTING.md under "Dependency policy exceptions".
+
+[graph]
+all-features = true
+
+[advisories]
+# A yanked package may still build from Cargo.lock, but must not ship unnoticed.
+yanked = "deny"
+ignore = []
+
+[licenses]
+# All licenses are permissive and compatible with MIT OR Apache-2.0 distribution.
+# CDLA-Permissive-2.0 is required by webpki-roots, a transitive ureq dependency.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[bans]
+# Duplicates are surfaced for maintenance review without blocking a safe build.
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = [
+    # The HTTP client is intentionally configured for the portable rustls stack.
+    { crate = "native-tls", reason = "Use rustls rather than platform TLS backends." },
+    { crate = "openssl", reason = "Use rustls rather than an OpenSSL dependency chain." },
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

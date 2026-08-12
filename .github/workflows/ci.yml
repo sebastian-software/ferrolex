@@ -25,13 +25,19 @@ jobs:
       - run: cargo bench -p ferrolex-core --no-run
       - run: cargo bench -p ferrolex-suggest --no-run
 
-  license:
-    name: Check license files
+  dependency-policy:
+    name: Dependency policy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: test -s LICENSE-APACHE
       - run: test -s LICENSE-MIT
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          # Feature coverage is configured in deny.toml; avoid action defaults
+          # that are not accepted by current cargo-deny versions.
+          arguments: ""
 
   compatibility:
     name: Compatibility fixtures
