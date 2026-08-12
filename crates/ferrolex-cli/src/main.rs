@@ -575,29 +575,56 @@ fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
 }
 
 fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
-    let dictionary = load_analysis_dictionary(
-        &command.dictionary_paths,
-        &command.compiled_paths,
-        &command.hunspell_affix_paths,
-    )?;
+    let project = command
+        .config_path
+        .as_ref()
+        .map(|config_path| {
+            let text =
+                fs::read_to_string(config_path).map_err(|source| CliError::ReadProjectConfig {
+                    path: config_path.clone(),
+                    source,
+                })?;
+            ProjectConfig::from_text(&text).map_err(|source| CliError::ProjectConfig {
+                path: config_path.clone(),
+                source,
+            })
+        })
+        .transpose()?;
+    let mut dictionary_paths = command.dictionary_paths.clone();
+    let mut compiled_paths = command.compiled_paths.clone();
+    let mut hunspell_paths = command.hunspell_affix_paths.clone();
+    if let Some(project) = &project {
+        let base = command
+            .config_path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .unwrap_or(Path::new("."));
+        dictionary_paths.extend(project.dictionary_paths().map(|path| base.join(path)));
+        compiled_paths.extend(
+            project
+                .compiled_dictionary_paths()
+                .map(|path| base.join(path)),
+        );
+        hunspell_paths.extend(project.hunspell_paths().map(|path| base.join(path)));
+    }
+    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_paths.is_empty() {
+        return Err(CliError::Usage(
+            "analyze requires a dictionary option or configured dictionary source".to_owned(),
+        ));
+    }
+    let dictionary = load_analysis_dictionary(&dictionary_paths, &compiled_paths, &hunspell_paths)?;
     let mut builder = Analyzer::builder(&dictionary);
     let mut include_patterns = command.include_patterns.clone();
     let mut exclude_patterns = command.exclude_patterns.clone();
-    if let Some(config_path) = &command.config_path {
-        let text =
-            fs::read_to_string(config_path).map_err(|source| CliError::ReadProjectConfig {
-                path: config_path.clone(),
-                source,
-            })?;
-        let config = ProjectConfig::from_text(&text).map_err(|source| CliError::ProjectConfig {
-            path: config_path.clone(),
-            source,
-        })?;
+    if let Some(config) = &project {
         builder =
             builder
-                .project_config(&config)
+                .project_config(config)
                 .map_err(|source| CliError::ApplyProjectConfig {
-                    path: config_path.clone(),
+                    path: command
+                        .config_path
+                        .clone()
+                        .expect("project has a config path"),
                     source,
                 })?;
         include_patterns.extend(config.include_patterns().map(str::to_owned));
@@ -1411,9 +1438,13 @@ fn parse_analyze_arguments(
         }
     }
 
-    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
+    if dictionary_paths.is_empty()
+        && compiled_paths.is_empty()
+        && hunspell_affix_paths.is_empty()
+        && config_path.is_none()
+    {
         return Err(CliError::Usage(
-            "analyze requires at least one `--dictionary` or `--hunspell` path".to_owned(),
+            "analyze requires a dictionary option or `--config`".to_owned(),
         ));
     }
     let path = path.ok_or_else(|| CliError::Usage("analyze requires a path".to_owned()))?;

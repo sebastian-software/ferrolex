@@ -47,6 +47,45 @@ pub enum TokenClass {
     Unknown,
 }
 
+impl TokenClass {
+    fn from_config_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "natural-word" => Self::NaturalWord,
+            "identifier" => Self::Identifier,
+            "acronym" => Self::Acronym,
+            "url" => Self::Url,
+            "email" => Self::Email,
+            "number" => Self::Number,
+            "hash" => Self::Hash,
+            "path" => Self::Path,
+            "base64" => Self::Base64,
+            "uuid" => Self::Uuid,
+            "domain" => Self::Domain,
+            "generated-token" => Self::GeneratedToken,
+            "unknown" => Self::Unknown,
+            _ => return None,
+        })
+    }
+
+    fn config_name(self) -> &'static str {
+        match self {
+            Self::NaturalWord => "natural-word",
+            Self::Identifier => "identifier",
+            Self::Acronym => "acronym",
+            Self::Url => "url",
+            Self::Email => "email",
+            Self::Number => "number",
+            Self::Hash => "hash",
+            Self::Path => "path",
+            Self::Base64 => "base64",
+            Self::Uuid => "uuid",
+            Self::Domain => "domain",
+            Self::GeneratedToken => "generated-token",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// The comment syntax used to recognize ferrolex inline directives.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommentSyntax {
@@ -237,6 +276,11 @@ pub struct ProjectConfig {
     single_letter_prefix: Option<SingleLetterPrefix>,
     include_patterns: BTreeSet<Box<str>>,
     exclude_patterns: BTreeSet<Box<str>>,
+    ignored_classes: BTreeSet<TokenClass>,
+    checked_classes: BTreeSet<TokenClass>,
+    dictionary_paths: BTreeSet<Box<str>>,
+    compiled_dictionary_paths: BTreeSet<Box<str>>,
+    hunspell_paths: BTreeSet<Box<str>>,
 }
 
 impl ProjectConfig {
@@ -302,6 +346,29 @@ impl ProjectConfig {
                 "exclude" => {
                     config.exclude_patterns.insert(Box::from(value));
                 }
+                "ignore-class" | "check-class" => {
+                    let class = TokenClass::from_config_name(value).ok_or_else(|| {
+                        ProjectConfigError::InvalidLine {
+                            line: line_number,
+                            message: format!("unknown token class `{value}`"),
+                        }
+                    })?;
+                    let destination = if key == "ignore-class" {
+                        &mut config.ignored_classes
+                    } else {
+                        &mut config.checked_classes
+                    };
+                    destination.insert(class);
+                }
+                "dictionary" => {
+                    config.dictionary_paths.insert(Box::from(value));
+                }
+                "compiled-dictionary" => {
+                    config.compiled_dictionary_paths.insert(Box::from(value));
+                }
+                "hunspell" => {
+                    config.hunspell_paths.insert(Box::from(value));
+                }
                 _ => {
                     return Err(ProjectConfigError::InvalidLine {
                         line: line_number,
@@ -350,6 +417,31 @@ impl ProjectConfig {
             text.push_str(pattern);
             text.push('\n');
         }
+        for class in &self.ignored_classes {
+            text.push_str("ignore-class = ");
+            text.push_str(class.config_name());
+            text.push('\n');
+        }
+        for class in &self.checked_classes {
+            text.push_str("check-class = ");
+            text.push_str(class.config_name());
+            text.push('\n');
+        }
+        for path in &self.dictionary_paths {
+            text.push_str("dictionary = ");
+            text.push_str(path);
+            text.push('\n');
+        }
+        for path in &self.compiled_dictionary_paths {
+            text.push_str("compiled-dictionary = ");
+            text.push_str(path);
+            text.push('\n');
+        }
+        for path in &self.hunspell_paths {
+            text.push_str("hunspell = ");
+            text.push_str(path);
+            text.push('\n');
+        }
         text
     }
 
@@ -361,6 +453,21 @@ impl ProjectConfig {
     /// Returns configured file-selection exclude globs in deterministic order.
     pub fn exclude_patterns(&self) -> impl Iterator<Item = &str> {
         self.exclude_patterns.iter().map(AsRef::as_ref)
+    }
+
+    /// Returns configured plain word-list dictionaries in deterministic order.
+    pub fn dictionary_paths(&self) -> impl Iterator<Item = &str> {
+        self.dictionary_paths.iter().map(AsRef::as_ref)
+    }
+
+    /// Returns configured compiled dictionaries in deterministic order.
+    pub fn compiled_dictionary_paths(&self) -> impl Iterator<Item = &str> {
+        self.compiled_dictionary_paths.iter().map(AsRef::as_ref)
+    }
+
+    /// Returns configured Hunspell affix paths in deterministic order.
+    pub fn hunspell_paths(&self) -> impl Iterator<Item = &str> {
+        self.hunspell_paths.iter().map(AsRef::as_ref)
     }
 }
 
@@ -432,6 +539,12 @@ impl<'dictionary> AnalyzerBuilder<'dictionary> {
         }
         for pattern in &project.ignored_patterns {
             self = self.ignore_pattern(pattern)?;
+        }
+        for class in &project.ignored_classes {
+            self = self.ignore_class(*class);
+        }
+        for class in &project.checked_classes {
+            self = self.check_class(*class);
         }
         if let Some(minimum) = project.minimum_word_length {
             self = self.minimum_word_length(minimum);

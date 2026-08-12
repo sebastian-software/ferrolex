@@ -103,6 +103,15 @@ exclude = target/**
 combine with CLI patterns. They are selection policy only; comment syntax can
 still be chosen for one invocation with the CLI hook.
 
+Project configuration can also declare the analysis dictionary sources, relative
+to the configuration file: `dictionary = words.txt`,
+`compiled-dictionary = words.flex`, and `hunspell = en_US.aff`. This permits
+`ferrolex analyze --config .ferrolex/config src/` without repeating a
+dictionary flag. `ignore-class = url` adds a token class to the ignore policy;
+`check-class = domain` removes one of the default ignores. Supported names are
+`natural-word`, `identifier`, `acronym`, `url`, `email`, `number`, `hash`,
+`path`, `base64`, `uuid`, `domain`, `generated-token`, and `unknown`.
+
 Keys are strict and values are validated with their source line. The file is
 not a general TOML/YAML compatibility layer; keeping this contract small makes
 the library, CLI, and future editor integrations share the same policy without
