@@ -17,5 +17,8 @@ ferrolex-compiler = { path = "../ferrolex-compiler", version = "0.1.0" }
 ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.1.0" }
 sha2 = "=0.10.9"
 
+[dev-dependencies]
+proptest = "1.6.0"
+
 [lints]
 workspace = true

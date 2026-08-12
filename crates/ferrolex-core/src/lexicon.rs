@@ -191,7 +191,19 @@ impl Dictionary for WordList {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::{Dictionary, Normalization, WordList, WordListError};
+
+    proptest! {
+        #[test]
+        fn normalization_is_idempotent(word in any::<String>()) {
+            for normalization in [Normalization::Exact, Normalization::Nfc, Normalization::Nfkc] {
+                let once = normalization.normalize(&word);
+                prop_assert_eq!(normalization.normalize(once.as_ref()).into_owned(), once.into_owned());
+            }
+        }
+    }
 
     #[test]
     fn recognizes_exact_utf8_entries() {

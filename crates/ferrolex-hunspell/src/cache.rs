@@ -1875,6 +1875,7 @@ mod tests {
     use std::panic::catch_unwind;
 
     use ferrolex_core::Dictionary;
+    use proptest::prelude::*;
     use sha2::Digest as _;
 
     use super::{
@@ -1897,6 +1898,24 @@ mod tests {
             .expect("fixture imports")
             .dictionary()
             .clone()
+    }
+
+    proptest! {
+        #[test]
+        fn cache_round_trip_preserves_generated_queries(query in "[A-Za-z]{0,24}") {
+            let original = dictionary();
+            let cache = compile_runtime_cache(&original, sources()).expect("cache compiles");
+            let loaded = load_runtime_cache(&cache, sources()).expect("cache loads");
+            prop_assert_eq!(loaded.contains(&query), original.contains(&query));
+        }
+
+        #[test]
+        fn cache_loader_never_panics_for_generated_bytes(bytes in proptest::collection::vec(any::<u8>(), 0..1024)) {
+            let outcome = catch_unwind(|| {
+                let _ = load_runtime_cache(&bytes, sources());
+            });
+            prop_assert!(outcome.is_ok());
+        }
     }
 
     #[test]

@@ -668,6 +668,21 @@ mod tests {
         SuggestConfig, SuggestScratch, Suggester, Suggestion,
     };
     use ferrolex_core::{Normalization, UserDictionary, WordList};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn generated_suggestions_are_valid_utf8_and_bounded(
+            words in proptest::collection::vec("[a-z]{1,12}", 1..24),
+            query in "[a-z]{0,12}",
+        ) {
+            let dictionary = WordList::new(words.iter().map(String::as_str)).expect("generated words are valid");
+            let config = SuggestConfig { max_results: 4, ..SuggestConfig::default() };
+            let result = Suggester::new(&dictionary, config).suggest(&query);
+            prop_assert!(result.suggestions().len() <= config.max_results);
+            prop_assert!(result.suggestions().iter().all(|suggestion| std::str::from_utf8(suggestion.word().as_bytes()).is_ok()));
+        }
+    }
 
     struct TestSource<'candidate> {
         candidates: &'candidate [&'candidate str],

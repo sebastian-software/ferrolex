@@ -1039,6 +1039,19 @@ mod tests {
     };
     use ferrolex_core::Dictionary;
     use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn compilation_is_deterministic_for_generated_word_sets(words in proptest::collection::vec("[a-z]{1,12}", 1..32)) {
+            let forward = compile_words(words.iter().map(String::as_str)).expect("generated words are valid");
+            let reverse = compile_words(words.iter().rev().map(String::as_str)).expect("generated words are valid");
+            prop_assert_eq!(&forward, &reverse);
+            let dictionary = CompiledDictionary::load(forward).expect("generated artifact loads");
+            prop_assert!(dictionary.validate().is_ok());
+            for word in words { prop_assert!(dictionary.contains(&word)); }
+        }
+    }
 
     #[test]
     fn compilation_is_byte_identical_across_input_order_and_duplicates() {

@@ -5,6 +5,12 @@ test suite therefore includes deterministic adversarial regression corpora;
 they require no separate fuzzer installation and run on the project's Rust
 1.81 MSRV in CI.
 
+Property tests use `proptest` with its default persisted regression seeds. They
+exercise normalization idempotence, deterministic compiled-dictionary output,
+bounded UTF-8 suggestion output, Hunspell cache recognition round-trips, and
+cache-loader behavior on arbitrary byte input. The strategies are deliberately
+bounded so the ordinary CI test lane remains predictable.
+
 The corpus tests cover these boundaries:
 
 - Hunspell import: malformed headers, oversized numeric fields, incomplete
