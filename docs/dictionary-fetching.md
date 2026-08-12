@@ -17,13 +17,16 @@ The optional `ferrolex dictionary` command is an installer, not an updater:
 - only absolute `https://` source URLs are accepted;
 - every `.aff` and `.dic` response is checked against a catalogued SHA-256
   digest at an immutable upstream revision;
-- the bytes are verified before an atomic write to
+- the bytes are verified before an atomic, non-replacing write to
   `<cache>/<locale>/<file-name>`;
 - a cache file with different bytes is preserved and causes an error;
 - a cache file whose bytes match the pinned digest is reused without a network
   request;
 - redirects are refused; the command has no implicit retries, telemetry, or
   background updates.
+- requests time out after 10 seconds while connecting, 15 seconds while
+  awaiting response headers, 60 seconds while receiving a response body, or
+  75 seconds end-to-end; timeout failures identify the URL and stage.
 
 This separation ensures the spell-checking runtime remains deterministic and
 offline after installation. The command never follows a branch, learns a new

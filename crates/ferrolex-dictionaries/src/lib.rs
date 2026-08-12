@@ -20,6 +20,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use sha2::{Digest as _, Sha256};
 
@@ -28,6 +29,10 @@ pub const LIBREOFFICE_REVISION: &str = "f2ff99058268502bdcf4cad25c1ca2935ad8aa7d
 
 const LIBREOFFICE_RAW_BASE: &str = "https://raw.githubusercontent.com/LibreOffice/dictionaries";
 const DEFAULT_MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(15);
+const RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(60);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(75);
 static TEMPORARY_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Text encoding of the upstream Hunspell pair.
@@ -517,24 +522,36 @@ pub trait Fetcher {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UreqFetcher;
 
+impl UreqFetcher {
+    fn agent() -> ureq::Agent {
+        ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .timeout_connect(Some(CONNECT_TIMEOUT))
+                .timeout_recv_response(Some(RESPONSE_HEADER_TIMEOUT))
+                .timeout_recv_body(Some(RESPONSE_BODY_TIMEOUT))
+                .timeout_global(Some(REQUEST_TIMEOUT))
+                .build(),
+        )
+    }
+}
+
 impl Fetcher for UreqFetcher {
     fn fetch(&self, url: &str) -> Result<Vec<u8>, FetchError> {
         if !is_https_url(url) {
             return Err(FetchError::InsecureUrl(url.to_owned()));
         }
-        let agent =
-            ureq::Agent::new_with_config(ureq::Agent::config_builder().max_redirects(0).build());
-        let response = agent
+        let response = Self::agent()
             .get(url)
             .call()
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
+            .map_err(|error| map_ureq_error(url, error))?;
         let mut reader = response.into_body().into_reader();
         let mut bytes = Vec::new();
         reader
             .by_ref()
             .take(u64::try_from(DEFAULT_MAX_FILE_BYTES + 1).expect("constant fits in u64"))
             .read_to_end(&mut bytes)
-            .map_err(FetchError::Read)?;
+            .map_err(|source| map_response_read_error(url, source))?;
         if bytes.len() > DEFAULT_MAX_FILE_BYTES {
             return Err(FetchError::FileTooLarge {
                 url: url.to_owned(),
@@ -627,7 +644,7 @@ impl<F: Fetcher> DictionaryInstaller<F> {
             });
         }
 
-        atomic_write(&destination, &bytes)?;
+        atomic_write_new(&destination, &bytes)?;
         Ok(destination)
     }
 }
@@ -686,6 +703,8 @@ pub enum FetchError {
     InsecureUrl(String),
     /// The HTTP client rejected or could not complete the request.
     Transport(String),
+    /// The HTTP client exceeded a configured timeout while fetching a source.
+    Timeout { url: String, stage: String },
     /// The response body could not be read.
     Read(io::Error),
     /// Response exceeded the caller's per-file bound.
@@ -704,7 +723,7 @@ pub enum FetchError {
     CreateCache { path: PathBuf, source: io::Error },
     /// Existing cache data could not be read for conflict detection.
     ReadCache { path: PathBuf, source: io::Error },
-    /// A valid but different cache file already occupied the target path.
+    /// A cache file already occupied the target path and was left untouched.
     CacheConflict(PathBuf),
     /// Temporary cache file could not be created, written, or atomically moved.
     WriteCache { path: PathBuf, source: io::Error },
@@ -715,27 +734,52 @@ impl fmt::Display for FetchError {
         match self {
             Self::InsecureUrl(url) => write!(formatter, "refusing non-HTTPS URL `{url}`"),
             Self::Transport(message) => write!(formatter, "dictionary download failed: {message}"),
+            Self::Timeout { url, stage } => {
+                write!(
+                    formatter,
+                    "dictionary download timed out while {stage} for `{url}`"
+                )
+            }
             Self::Read(source) => write!(formatter, "could not read dictionary response: {source}"),
             Self::FileTooLarge { url, limit, actual } => {
-                write!(formatter, "dictionary response `{url}` is {actual} bytes, above {limit} byte limit")
+                write!(
+                    formatter,
+                    "dictionary response `{url}` is {actual} bytes, above {limit} byte limit"
+                )
             }
-            Self::ChecksumMismatch { url, expected, actual } => write!(
+            Self::ChecksumMismatch {
+                url,
+                expected,
+                actual,
+            } => write!(
                 formatter,
                 "SHA-256 mismatch for `{url}` (expected {expected}, got {actual})"
             ),
             Self::CreateCache { path, source } => {
-                write!(formatter, "could not create cache directory `{}`: {source}", path.display())
+                write!(
+                    formatter,
+                    "could not create cache directory `{}`: {source}",
+                    path.display()
+                )
             }
             Self::ReadCache { path, source } => {
-                write!(formatter, "could not read cache file `{}`: {source}", path.display())
+                write!(
+                    formatter,
+                    "could not read cache file `{}`: {source}",
+                    path.display()
+                )
             }
             Self::CacheConflict(path) => write!(
                 formatter,
-                "cache file `{}` differs from reviewed manifest; remove it explicitly before retrying",
+                "cache file `{}` is already occupied; its bytes were not replaced",
                 path.display()
             ),
             Self::WriteCache { path, source } => {
-                write!(formatter, "could not atomically write cache file `{}`: {source}", path.display())
+                write!(
+                    formatter,
+                    "could not atomically write cache file `{}`: {source}",
+                    path.display()
+                )
             }
         }
     }
@@ -750,6 +794,7 @@ impl Error for FetchError {
             | Self::WriteCache { source, .. } => Some(source),
             Self::InsecureUrl(_)
             | Self::Transport(_)
+            | Self::Timeout { .. }
             | Self::FileTooLarge { .. }
             | Self::ChecksumMismatch { .. }
             | Self::CacheConflict(_) => None,
@@ -812,7 +857,35 @@ fn hex_digest(digest: &[u8; 32]) -> String {
     value
 }
 
-fn atomic_write(destination: &Path, bytes: &[u8]) -> Result<(), FetchError> {
+fn map_ureq_error(url: &str, error: ureq::Error) -> FetchError {
+    match error {
+        ureq::Error::Timeout(timeout) => timeout_error(url, timeout),
+        other => FetchError::Transport(other.to_string()),
+    }
+}
+
+fn map_response_read_error(url: &str, source: io::Error) -> FetchError {
+    let timeout = source
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<ureq::Error>())
+        .and_then(|error| match error {
+            ureq::Error::Timeout(timeout) => Some(*timeout),
+            _ => None,
+        });
+    match timeout {
+        Some(timeout) => timeout_error(url, timeout),
+        None => FetchError::Read(source),
+    }
+}
+
+fn timeout_error(url: &str, timeout: ureq::Timeout) -> FetchError {
+    FetchError::Timeout {
+        url: url.to_owned(),
+        stage: timeout.to_string(),
+    }
+}
+
+fn atomic_write_new(destination: &Path, bytes: &[u8]) -> Result<(), FetchError> {
     let temporary = destination.with_extension(format!(
         "tmp-{}-{}",
         std::process::id(),
@@ -838,10 +911,19 @@ fn atomic_write(destination: &Path, bytes: &[u8]) -> Result<(), FetchError> {
             path: temporary.clone(),
             source,
         })?;
-        fs::rename(&temporary, destination).map_err(|source| FetchError::WriteCache {
-            path: destination.to_path_buf(),
-            source,
-        })
+        match fs::hard_link(&temporary, destination) {
+            Ok(()) => fs::remove_file(&temporary).map_err(|source| FetchError::WriteCache {
+                path: temporary.clone(),
+                source,
+            }),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                Err(FetchError::CacheConflict(destination.to_path_buf()))
+            }
+            Err(source) => Err(FetchError::WriteCache {
+                path: destination.to_path_buf(),
+                source,
+            }),
+        }
     })();
     if result.is_err() && created {
         let _ = fs::remove_file(&temporary);
@@ -855,11 +937,13 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use super::{
-        find_locale, DictionaryInstaller, FetchError, Fetcher, LibreOfficeDictionary,
-        ManifestError, SourceEncoding, VerifiedDictionary, VerifiedFile, LIBREOFFICE_CATALOG,
-        LIBREOFFICE_REVISION,
+        find_locale, map_response_read_error, map_ureq_error, DictionaryInstaller, FetchError,
+        Fetcher, LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher,
+        VerifiedDictionary, VerifiedFile, CONNECT_TIMEOUT, LIBREOFFICE_CATALOG,
+        LIBREOFFICE_REVISION, REQUEST_TIMEOUT, RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT,
     };
 
     const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -978,6 +1062,53 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_cache_creation_returns_conflict_without_replacing_bytes() {
+        let manifest = manifest();
+        let cache = Cache::new();
+        let directory = cache.path().join("en_US");
+        let destination = directory.join("sample.aff");
+
+        let error = DictionaryInstaller::new(RacingFetcher {
+            destination: destination.clone(),
+        })
+        .install(&manifest, cache.path())
+        .expect_err("a file created after the cache check is not overwritten");
+
+        assert!(matches!(error, FetchError::CacheConflict(path) if path == destination));
+        assert_eq!(
+            fs::read(destination).expect("concurrent cache bytes remain"),
+            b"different"
+        );
+    }
+
+    #[test]
+    fn ureq_fetcher_uses_documented_timeouts_and_reports_the_timeout_stage() {
+        let timeouts = UreqFetcher::agent().config().timeouts();
+        assert_eq!(timeouts.connect, Some(CONNECT_TIMEOUT));
+        assert_eq!(timeouts.recv_response, Some(RESPONSE_HEADER_TIMEOUT));
+        assert_eq!(timeouts.recv_body, Some(RESPONSE_BODY_TIMEOUT));
+        assert_eq!(timeouts.global, Some(REQUEST_TIMEOUT));
+        assert!(CONNECT_TIMEOUT < RESPONSE_BODY_TIMEOUT);
+        assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(75));
+
+        let url = "https://example.test/source.dic";
+        let connect_error = map_ureq_error(url, ureq::Error::Timeout(ureq::Timeout::Connect));
+        assert!(matches!(
+            connect_error,
+            FetchError::Timeout { url: timeout_url, stage }
+                if timeout_url == url && stage == "connect"
+        ));
+
+        let read_error =
+            map_response_read_error(url, ureq::Error::Timeout(ureq::Timeout::RecvBody).into_io());
+        assert!(matches!(
+            read_error,
+            FetchError::Timeout { url: timeout_url, stage }
+                if timeout_url == url && stage == "receive body"
+        ));
+    }
+
+    #[test]
     fn verified_cache_entries_are_reused_without_a_fetch() {
         let manifest = manifest();
         let cache = Cache::new();
@@ -1071,6 +1202,22 @@ mod tests {
                 .ok_or_else(|| FetchError::Transport(format!("no fixture for {url}")))?
                 .clone()
                 .map_err(FetchError::Transport)
+        }
+    }
+
+    struct RacingFetcher {
+        destination: PathBuf,
+    }
+
+    impl Fetcher for RacingFetcher {
+        fn fetch(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
+            fs::write(&self.destination, b"different").map_err(|source| {
+                FetchError::WriteCache {
+                    path: self.destination.clone(),
+                    source,
+                }
+            })?;
+            Ok(b"abc".to_vec())
         }
     }
 
