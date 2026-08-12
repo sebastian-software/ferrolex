@@ -11,8 +11,12 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+ffi = ["dep:ferrolex-ffi", "ferrolex-ffi/c-abi"]
+
 [dependencies]
 ferrolex-core = { path = "crates/ferrolex-core", version = "0.1.0" }
+ferrolex-ffi = { path = "crates/ferrolex-ffi", version = "0.1.0", optional = true }
 
 [lints]
 workspace = true
@@ -27,6 +31,7 @@ members = [
     "crates/ferrolex-dictionaries",
     "crates/ferrolex-compiler",
     "crates/ferrolex-cli",
+    "crates/ferrolex-ffi",
 ]
 resolver = "2"
 

@@ -1,0 +1,11 @@
+language = "C"
+include_guard = "FERROLEX_H"
+pragma_once = true
+no_includes = true
+documentation = true
+documentation_style = "c99"
+usize_is_size_t = true
+sys_includes = ["stddef.h", "stdint.h"]
+
+[export]
+include = ["FerrolexChecker", "FerrolexStatus"]
