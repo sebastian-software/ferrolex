@@ -21,6 +21,11 @@ pub trait CandidateSource: Send + Sync {
         true
     }
 
+    /// Returns optional corpus frequency used only as a ranking tiebreaker.
+    fn candidate_frequency(&self, _candidate: &str) -> Option<u64> {
+        None
+    }
+
     /// Visits bounded query-related forms for one stored candidate.
     ///
     /// The default has no derived forms. Sources that model morphology can use
@@ -92,6 +97,7 @@ pub struct Suggestion {
     word: String,
     distance: usize,
     ranking_distance: usize,
+    frequency: Option<u64>,
 }
 
 /// An explicit spelling replacement preferred during suggestion ranking.
@@ -369,6 +375,7 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
                 distance,
                 ranking_signals,
             ),
+            frequency: source.candidate_frequency(candidate),
         });
     }
     true
@@ -477,6 +484,7 @@ fn compare_suggestions(left: &Suggestion, right: &Suggestion) -> Ordering {
     left.ranking_distance
         .cmp(&right.ranking_distance)
         .then_with(|| left.distance.cmp(&right.distance))
+        .then_with(|| right.frequency.cmp(&left.frequency))
         .then_with(|| left.word.cmp(&right.word))
 }
 

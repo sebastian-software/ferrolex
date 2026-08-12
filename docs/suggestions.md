@@ -60,6 +60,10 @@ comparison lowercases Unicode scalar values deterministically, while non-empty
 input preserves lower, title, or upper style requested by the query. An empty
 query does not imply an uppercase display style.
 
+When a candidate source carries frequency metadata, higher frequency breaks a
+tie after both distances and before lexical spelling. Sources without frequency
+metadata use the exact same ordering as before.
+
 The `ferrolex suggest` command exposes `--max-results`,
 `--max-edit-distance`, `--max-candidates`, and `--max-edit-cells`. The latter
 two are useful when deliberately spending a larger, still explicit work budget

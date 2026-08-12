@@ -67,9 +67,21 @@ contents, following [ADR-0006](adr/0006-compiled-format-safety-and-layout.md).
 
 ## Compatibility
 
-Version 1 readers reject a nonzero feature-bit field and any version other than
-one. This fails closed when a future compiler emits semantics that an older
-runtime cannot recognize.
+Version 1 reserves feature bit `0` for a frequency table. When set, an aligned
+`u64` frequency record follows the word-data section for every indexed word;
+zero means no supplied frequency. The table affects suggestion ranking only.
+Older readers reject the nonzero feature bit, so they fail closed rather than
+silently changing ranking behavior. All other feature bits and versions remain
+unsupported.
+
+## Frequency word lists
+
+`ferrolex compile` treats a tab-separated source as a frequency word list:
+each data row is `word<TAB>unsigned-frequency`. Empty lines and `#` comments
+are ignored. Duplicate words retain their highest frequency, making the native
+artifact reproducible regardless of source order. Compile it, then use the
+result with `ferrolex suggest --compiled …`; plain word lists retain the
+frequency-free format and behavior.
 
 ## Inspection
 

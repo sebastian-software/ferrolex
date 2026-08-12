@@ -15,8 +15,9 @@ use ferrolex_code::{
     Analyzer, AnalyzerConfigError, CommentSyntax, Document, ProjectConfig, ProjectConfigError,
 };
 use ferrolex_compiler::{
-    compile_words, inspect_compiled_artifact, CompileError, CompiledDictionary, LoadError,
-    ValidationError, MAX_COMPILED_ARTIFACT_BYTES,
+    compile_frequency_word_list, compile_words, inspect_compiled_artifact, CompileError,
+    CompiledDictionary, FrequencyListError, LoadError, ValidationError,
+    MAX_COMPILED_ARTIFACT_BYTES,
 };
 use ferrolex_core::{Checker, Dictionary, Normalization, WordList};
 use ferrolex_dictionaries::{
@@ -227,11 +228,18 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
                 path: path.clone(),
                 source,
             })?;
-            let dictionary = WordList::from_text(Normalization::Exact, &text);
-            (
-                compile_words(dictionary.words()).map_err(CliError::CompileDictionary)?,
-                format!("{} words", dictionary.len()),
-            )
+            if text.lines().any(|line| line.contains('\t')) {
+                (
+                    compile_frequency_word_list(&text).map_err(CliError::CompileFrequencyList)?,
+                    "frequency-annotated words".to_owned(),
+                )
+            } else {
+                let dictionary = WordList::from_text(Normalization::Exact, &text);
+                (
+                    compile_words(dictionary.words()).map_err(CliError::CompileDictionary)?,
+                    format!("{} words", dictionary.len()),
+                )
+            }
         }
         CompileInput::Hunspell { aff_path, dic_path } => {
             let (import, sources) = import_hunspell_files(aff_path, dic_path, None, true)?;
@@ -339,6 +347,13 @@ impl CandidateSource for ArtifactDictionary {
         match self {
             Self::Exact(dictionary) => dictionary.visit_candidates(visitor),
             Self::Hunspell(dictionary) => dictionary.visit_candidates(visitor),
+        }
+    }
+
+    fn candidate_frequency(&self, candidate: &str) -> Option<u64> {
+        match self {
+            Self::Exact(dictionary) => dictionary.frequency(candidate),
+            Self::Hunspell(dictionary) => dictionary.candidate_frequency(candidate),
         }
     }
 }
@@ -1340,6 +1355,7 @@ enum CliError {
         source: io::Error,
     },
     CompileDictionary(CompileError),
+    CompileFrequencyList(FrequencyListError),
     LoadArtifact {
         path: PathBuf,
         source: LoadError,
@@ -1421,6 +1437,9 @@ impl fmt::Display for CliError {
             }
             Self::CompileDictionary(source) => {
                 write!(formatter, "could not compile dictionary: {source}")
+            }
+            Self::CompileFrequencyList(source) => {
+                write!(formatter, "could not compile frequency word list: {source}")
             }
             Self::LoadArtifact { path, source } => {
                 write!(
@@ -1505,6 +1524,7 @@ impl Error for CliError {
             | Self::WriteHunspellCache { source, .. }
             | Self::ReadProjectConfig { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
+            Self::CompileFrequencyList(source) => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
             Self::LoadHunspellArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),

@@ -37,6 +37,7 @@ const INDEX_OFFSET: usize = 32;
 const DATA_OFFSET: usize = 40;
 const DATA_LEN_OFFSET: usize = 48;
 const FILE_LEN_OFFSET: usize = 56;
+const FEATURE_FREQUENCIES: u32 = 1;
 
 /// Self-describing metadata available without decoding dictionary words.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,6 +109,44 @@ pub enum CompileError {
     DictionaryTooLarge,
 }
 
+/// A malformed line in the tab-separated frequency word-list format.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FrequencyListError {
+    /// A non-comment row was not exactly `word<TAB>unsigned-frequency`.
+    InvalidEntry { line: usize },
+    /// The frequency field was not an unsigned decimal integer.
+    InvalidFrequency { line: usize },
+    /// The parsed entries cannot fit into the native artifact.
+    Compile(CompileError),
+}
+
+impl fmt::Display for FrequencyListError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEntry { line } => write!(
+                formatter,
+                "frequency word list line {line} must be `word<TAB>unsigned-frequency`"
+            ),
+            Self::InvalidFrequency { line } => {
+                write!(
+                    formatter,
+                    "frequency word list line {line} has an invalid frequency"
+                )
+            }
+            Self::Compile(source) => source.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for FrequencyListError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Compile(source) => Some(source),
+            Self::InvalidEntry { .. } | Self::InvalidFrequency { .. } => None,
+        }
+    }
+}
+
 /// A format-neutral exact-word dictionary input for the native compiler.
 ///
 /// This deliberately represents only semantics supported by the version-1
@@ -118,6 +157,7 @@ pub enum CompileError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExactDictionaryIr {
     words: Vec<Box<str>>,
+    frequencies: Vec<Option<u64>>,
 }
 
 impl ExactDictionaryIr {
@@ -131,7 +171,7 @@ impl ExactDictionaryIr {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let mut words = Vec::<Box<str>>::new();
+        let mut entries = Vec::<(Box<str>, Option<u64>)>::new();
         for (index, word) in input.into_iter().enumerate() {
             let word = word.as_ref();
             if word.is_empty() {
@@ -139,11 +179,35 @@ impl ExactDictionaryIr {
                     position: index + 1,
                 });
             }
-            words.push(Box::from(word));
+            entries.push((Box::from(word), None));
         }
-        words.sort_unstable();
-        words.dedup();
-        Ok(Self { words })
+        Ok(Self::from_entries(entries))
+    }
+
+    /// Builds an exact-word IR with optional frequency metadata for ranking.
+    ///
+    /// Repeated spellings retain their highest supplied frequency so the
+    /// resulting artifact does not depend on input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CompileError::EmptyWord`] for an empty spelling.
+    pub fn with_frequencies<I, S>(input: I) -> Result<Self, CompileError>
+    where
+        I: IntoIterator<Item = (S, u64)>,
+        S: AsRef<str>,
+    {
+        let mut entries = Vec::<(Box<str>, Option<u64>)>::new();
+        for (index, (word, frequency)) in input.into_iter().enumerate() {
+            let word = word.as_ref();
+            if word.is_empty() {
+                return Err(CompileError::EmptyWord {
+                    position: index + 1,
+                });
+            }
+            entries.push((Box::from(word), Some(frequency)));
+        }
+        Ok(Self::from_entries(entries))
     }
 
     /// Visits normalized IR words in deterministic UTF-8 byte order.
@@ -163,12 +227,41 @@ impl ExactDictionaryIr {
                 .iter()
                 .map(|word| LexemeIr {
                     stem: word.to_string(),
+                    frequency: self.frequency_for(word),
                     flags: std::collections::BTreeSet::new(),
                     morphology: Vec::new(),
                 })
                 .collect(),
             ..DictionaryIr::default()
         }
+    }
+
+    fn from_entries(mut entries: Vec<(Box<str>, Option<u64>)>) -> Self {
+        entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut words: Vec<Box<str>> = Vec::with_capacity(entries.len());
+        let mut frequencies: Vec<Option<u64>> = Vec::with_capacity(entries.len());
+        for (word, frequency) in entries {
+            if words
+                .last()
+                .map(<Box<str> as AsRef<str>>::as_ref)
+                .is_some_and(|previous: &str| previous == word.as_ref())
+            {
+                if frequency > *frequencies.last().expect("frequency follows word") {
+                    *frequencies.last_mut().expect("frequency follows word") = frequency;
+                }
+                continue;
+            }
+            words.push(word);
+            frequencies.push(frequency);
+        }
+        Self { words, frequencies }
+    }
+
+    fn frequency_for(&self, word: &str) -> Option<u64> {
+        self.words
+            .binary_search_by(|candidate| candidate.as_ref().cmp(word))
+            .ok()
+            .and_then(|index| self.frequencies[index])
     }
 }
 
@@ -380,12 +473,53 @@ where
     compile_exact_ir(&ir)
 }
 
+/// Compiles a tab-separated `word<TAB>unsigned-frequency` list.
+///
+/// Empty lines and `#` comments are ignored. Repeated words retain their
+/// highest frequency, making the result independent of input order. Frequency
+/// influences suggestions only; exact dictionary recognition is unchanged.
+///
+/// # Errors
+///
+/// Returns [`FrequencyListError`] when a data line is malformed or the
+/// resulting artifact exceeds native bounds.
+pub fn compile_frequency_word_list(text: &str) -> Result<Vec<u8>, FrequencyListError> {
+    let mut entries = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = if index == 0 {
+            line.strip_prefix('\u{feff}').unwrap_or(line)
+        } else {
+            line
+        }
+        .trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((word, frequency)) = line.split_once('\t') else {
+            return Err(FrequencyListError::InvalidEntry { line: index + 1 });
+        };
+        if word.is_empty() || frequency.is_empty() || frequency.contains('\t') {
+            return Err(FrequencyListError::InvalidEntry { line: index + 1 });
+        }
+        let frequency = frequency
+            .parse::<u64>()
+            .map_err(|_| FrequencyListError::InvalidFrequency { line: index + 1 })?;
+        entries.push((word, frequency));
+    }
+    let ir = ExactDictionaryIr::with_frequencies(entries).map_err(FrequencyListError::Compile)?;
+    compile_exact_ir(&ir).map_err(FrequencyListError::Compile)
+}
+
 /// Compiles a format-neutral exact-word IR into `FLEXDIC` version 1.
 ///
 /// # Errors
 ///
 /// Returns [`CompileError::DictionaryTooLarge`] if the output cannot be
 /// represented by the version-1 layout.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the compact artifact writer keeps every checked layout calculation auditable"
+)]
 pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError> {
     let sorted_words = &ir.words;
 
@@ -407,15 +541,36 @@ pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError>
             .ok_or(CompileError::DictionaryTooLarge)?,
     )
     .ok_or(CompileError::DictionaryTooLarge)?;
-    let file_len = data_offset
+    let data_end = data_offset
         .checked_add(data_len)
+        .ok_or(CompileError::DictionaryTooLarge)?;
+    let has_frequencies = ir.frequencies.iter().any(Option::is_some);
+    let frequency_offset = has_frequencies.then(|| align_to_eight(data_end)).flatten();
+    let frequency_len = if has_frequencies {
+        sorted_words
+            .len()
+            .checked_mul(std::mem::size_of::<u64>())
+            .ok_or(CompileError::DictionaryTooLarge)?
+    } else {
+        0
+    };
+    let file_len = frequency_offset
+        .map_or(Some(data_end), |offset| offset.checked_add(frequency_len))
         .ok_or(CompileError::DictionaryTooLarge)?;
 
     let mut bytes = vec![0_u8; file_len];
     bytes[..MAGIC.len()].copy_from_slice(&MAGIC);
     put_u16(&mut bytes, VERSION_OFFSET, FORMAT_VERSION);
     put_u16(&mut bytes, HEADER_SIZE_OFFSET, HEADER_SIZE_U16);
-    put_u32(&mut bytes, FLAGS_OFFSET, 0);
+    put_u32(
+        &mut bytes,
+        FLAGS_OFFSET,
+        if has_frequencies {
+            FEATURE_FREQUENCIES
+        } else {
+            0
+        },
+    );
     put_u64(&mut bytes, WORD_COUNT_OFFSET, word_count);
     put_u64(
         &mut bytes,
@@ -463,6 +618,15 @@ pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError>
         );
         bytes[data_offset + start..data_offset + data_cursor].copy_from_slice(word.as_bytes());
     }
+    if let Some(frequency_offset) = frequency_offset {
+        for (entry, frequency) in ir.frequencies.iter().enumerate() {
+            put_u64(
+                &mut bytes,
+                frequency_offset + entry * std::mem::size_of::<u64>(),
+                frequency.unwrap_or(0),
+            );
+        }
+    }
 
     let calculated_checksum = checksum(&bytes);
     put_u64(&mut bytes, CHECKSUM_OFFSET, calculated_checksum);
@@ -481,6 +645,7 @@ pub struct CompiledDictionary {
     index_offset: usize,
     data_offset: usize,
     data_len: usize,
+    frequency_offset: Option<usize>,
 }
 
 impl CompiledDictionary {
@@ -525,6 +690,8 @@ impl CompiledDictionary {
         let data_len = usize::try_from(data_len).map_err(|_| LoadError::InvalidLayout {
             reason: LayoutError::OffsetDoesNotFit,
         })?;
+        let has_frequencies =
+            read_u32(&bytes, FLAGS_OFFSET).is_some_and(|flags| flags & FEATURE_FREQUENCIES != 0);
         if index_offset % 8 != 0 || data_offset % 8 != 0 {
             return Err(LoadError::InvalidLayout {
                 reason: LayoutError::UnalignedSection,
@@ -555,6 +722,34 @@ impl CompiledDictionary {
                 reason: LayoutError::DataOutsideFile,
             });
         }
+        let frequency_offset = if has_frequencies {
+            let offset = align_to_eight(data_offset.checked_add(data_len).ok_or(
+                LoadError::InvalidLayout {
+                    reason: LayoutError::DataOutsideFile,
+                },
+            )?)
+            .ok_or(LoadError::InvalidLayout {
+                reason: LayoutError::DataOutsideFile,
+            })?;
+            let length = word_count.checked_mul(std::mem::size_of::<u64>()).ok_or(
+                LoadError::InvalidLayout {
+                    reason: LayoutError::DataOutsideFile,
+                },
+            )?;
+            if offset.checked_add(length) != Some(bytes.len()) {
+                return Err(LoadError::InvalidLayout {
+                    reason: LayoutError::DataOutsideFile,
+                });
+            }
+            Some(offset)
+        } else {
+            if data_offset.checked_add(data_len) != Some(bytes.len()) {
+                return Err(LoadError::InvalidLayout {
+                    reason: LayoutError::DataOutsideFile,
+                });
+            }
+            None
+        };
 
         Ok(Self {
             bytes,
@@ -562,6 +757,7 @@ impl CompiledDictionary {
             index_offset,
             data_offset,
             data_len,
+            frequency_offset,
         })
     }
 
@@ -626,6 +822,18 @@ impl CompiledDictionary {
         })
     }
 
+    /// Returns an optional ranking frequency for an exact stored word.
+    #[must_use]
+    pub fn frequency(&self, word: &str) -> Option<u64> {
+        self.word_index(word)
+            .and_then(|entry| self.frequency_at(entry))
+    }
+
+    fn frequency_at(&self, entry: usize) -> Option<u64> {
+        let offset = self.frequency_offset?.checked_add(entry.checked_mul(8)?)?;
+        read_u64(&self.bytes, offset).filter(|frequency| *frequency != 0)
+    }
+
     fn word_bytes(&self, entry: usize) -> Option<&[u8]> {
         let (start, end) = self.word_offsets(entry)?;
         if start > end || end > self.data_len {
@@ -664,6 +872,21 @@ impl CompiledDictionary {
         let end = usize::try_from(read_u64(&self.bytes, index_entry.checked_add(8)?)?).ok()?;
         Some((start, end))
     }
+
+    fn word_index(&self, word: &str) -> Option<usize> {
+        let mut left = 0_usize;
+        let mut right = self.word_count;
+        while left < right {
+            let middle = left + (right - left) / 2;
+            let candidate = self.word_bytes(middle)?;
+            match candidate.cmp(word.as_bytes()) {
+                std::cmp::Ordering::Less => left = middle + 1,
+                std::cmp::Ordering::Equal => return Some(middle),
+                std::cmp::Ordering::Greater => right = middle,
+            }
+        }
+        None
+    }
 }
 
 impl CandidateSource for CompiledDictionary {
@@ -673,6 +896,10 @@ impl CandidateSource for CompiledDictionary {
                 break;
             }
         }
+    }
+
+    fn candidate_frequency(&self, candidate: &str) -> Option<u64> {
+        self.frequency(candidate)
     }
 }
 
@@ -693,7 +920,7 @@ fn validate_header(bytes: &[u8]) -> Result<(), LoadError> {
         return Err(LoadError::InvalidHeaderSize { found: header_size });
     }
     let flags = required_u32(bytes, FLAGS_OFFSET)?;
-    if flags != 0 {
+    if flags & !FEATURE_FREQUENCIES != 0 {
         return Err(LoadError::UnsupportedFeatures { found: flags });
     }
 
@@ -735,22 +962,7 @@ fn required_u64(bytes: &[u8], offset: usize) -> Result<u64, LoadError> {
 
 impl Dictionary for CompiledDictionary {
     fn contains(&self, word: &str) -> bool {
-        let mut left = 0_usize;
-        let mut right = self.word_count;
-        let query = word.as_bytes();
-
-        while left < right {
-            let middle = left + (right - left) / 2;
-            let Some(candidate) = self.word_bytes(middle) else {
-                return false;
-            };
-            match candidate.cmp(query) {
-                std::cmp::Ordering::Less => left = middle + 1,
-                std::cmp::Ordering::Equal => return true,
-                std::cmp::Ordering::Greater => right = middle,
-            }
-        }
-        false
+        self.word_index(word).is_some()
     }
 }
 
@@ -821,12 +1033,12 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use super::{
-        checksum, compile_exact_ir, compile_words, inspect_compiled_artifact, put_u64,
-        CompileError, CompiledDictionary, ExactDictionaryIr, LoadError, ValidationError,
-        CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
+        checksum, compile_exact_ir, compile_frequency_word_list, compile_words,
+        inspect_compiled_artifact, put_u64, CompileError, CompiledDictionary, ExactDictionaryIr,
+        FrequencyListError, LoadError, ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
-    use ferrolex_suggest::CandidateSource;
+    use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
 
     #[test]
     fn compilation_is_byte_identical_across_input_order_and_duplicates() {
@@ -835,6 +1047,47 @@ mod tests {
         let second = compile_words(["東京", "apple", "zebra"]).expect("valid words compile");
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn frequency_word_lists_round_trip_and_rank_equally_close_candidates() {
+        let bytes =
+            compile_frequency_word_list("cat\t1\ncut\t9\n").expect("frequency list compiles");
+        let metadata = inspect_compiled_artifact(&bytes).expect("artifact metadata is valid");
+        let dictionary = CompiledDictionary::load(bytes).expect("artifact loads");
+
+        assert_eq!(metadata.feature_bits(), 1);
+        assert_eq!(dictionary.frequency("cat"), Some(1));
+        assert_eq!(dictionary.frequency("cut"), Some(9));
+        assert_eq!(
+            ExactDictionaryIr::with_frequencies([("cat", 1), ("cut", 9)])
+                .expect("frequency IR is valid")
+                .as_dictionary_ir()
+                .lexemes
+                .iter()
+                .map(|lexeme| (lexeme.stem.as_str(), lexeme.frequency))
+                .collect::<Vec<_>>(),
+            [("cat", Some(1)), ("cut", Some(9))]
+        );
+        assert_eq!(
+            Suggester::new(&dictionary, SuggestConfig::default())
+                .suggest("cot")
+                .suggestions()[0]
+                .word(),
+            "cut"
+        );
+    }
+
+    #[test]
+    fn frequency_word_lists_reject_malformed_rows() {
+        assert_eq!(
+            compile_frequency_word_list("word 1\n"),
+            Err(FrequencyListError::InvalidEntry { line: 1 })
+        );
+        assert_eq!(
+            compile_frequency_word_list("word\tfrequent\n"),
+            Err(FrequencyListError::InvalidFrequency { line: 1 })
+        );
     }
 
     #[test]

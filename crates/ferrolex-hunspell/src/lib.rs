@@ -2006,6 +2006,7 @@ fn morphology_to_ir(morphology: &Morphology) -> Vec<u32> {
 fn lexeme_to_ir(lexeme: &Lexeme) -> LexemeIr {
     LexemeIr {
         stem: lexeme.stem.to_string(),
+        frequency: None,
         flags: flags_to_ir(&lexeme.flags),
         morphology: morphology_to_ir(&lexeme.morphology),
     }

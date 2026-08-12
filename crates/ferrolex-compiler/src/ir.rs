@@ -55,6 +55,8 @@ pub struct DictionaryIr {
 pub struct LexemeIr {
     /// UTF-8 stem spelling.
     pub stem: String,
+    /// Optional corpus frequency used only for suggestion ranking.
+    pub frequency: Option<u64>,
     /// Flags attached to the stored stem.
     pub flags: BTreeSet<FlagIr>,
     /// Zero-based references into [`DictionaryIr::morphology`].

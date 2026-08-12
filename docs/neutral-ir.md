@@ -16,7 +16,8 @@ and leave the richer fields at their documented defaults.
 prefix/suffix rules with conditions and continuation flags, casing behavior,
 special flags, compound configuration, break patterns, tokenizer metadata,
 replacement rules, character removal, conversions, and `FULLSTRIP`/
-`COMPLEXPREFIXES`. This is the input contract for a future standalone
+`COMPLEXPREFIXES`. A lexeme may additionally carry optional corpus frequency;
+it is ranking metadata only and never changes recognition. This is the input contract for a future standalone
 artifact; it must not silently project a rich dictionary to a word list.
 
 ## hu_HU and ar expressiveness spike
