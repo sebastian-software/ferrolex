@@ -82,6 +82,7 @@ pub struct LibreOfficeDictionary {
     aff_path: &'static str,
     dic_path: &'static str,
     license_notice_path: &'static str,
+    license_spdx_expression: &'static str,
     license_label: &'static str,
     encoding: SourceEncoding,
     aff_sha256: &'static str,
@@ -105,6 +106,12 @@ impl LibreOfficeDictionary {
     #[must_use]
     pub const fn license_notice_path(self) -> &'static str {
         self.license_notice_path
+    }
+
+    /// Reviewed SPDX license identifier or expression for this source pair.
+    #[must_use]
+    pub const fn license_spdx_expression(self) -> &'static str {
+        self.license_spdx_expression
     }
 
     /// License label recorded by the source catalog.
@@ -155,6 +162,7 @@ impl LibreOfficeDictionary {
         Ok(VerifiedDictionary {
             locale: self.locale.to_owned(),
             revision: LIBREOFFICE_REVISION.to_owned(),
+            license_spdx_expression: self.license_spdx_expression.to_owned(),
             license_label: self.license_label.to_owned(),
             license_notice_url: self.license_notice_url(),
             aff: VerifiedFile::new(file_name(self.aff_path)?, self.aff_url(), aff_sha256)?,
@@ -185,6 +193,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "en/en_US.aff",
         dic_path: "en/en_US.dic",
         license_notice_path: "en/license.txt",
+        license_spdx_expression: "GPL-2.0-only",
         license_label: "Locale-specific notice in LibreOffice/en/license.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e",
@@ -195,6 +204,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "de/de_DE_frami.aff",
         dic_path: "de/de_DE_frami.dic",
         license_notice_path: "de/README_de_DE_frami.txt",
+        license_spdx_expression: "GPL-2.0-only OR GPL-3.0-only",
         license_label: "Locale-specific notice in LibreOffice/de/README_de_DE_frami.txt",
         encoding: SourceEncoding::Iso8859_1,
         aff_sha256: "646bf3333ac69c23e9d794533ee5241d6f755c359e8fe10a648f87613743d594",
@@ -205,6 +215,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "hu_HU/hu_HU.aff",
         dic_path: "hu_HU/hu_HU.dic",
         license_notice_path: "hu_HU/README_hu_HU.txt",
+        license_spdx_expression: "MPL-2.0-or-later OR LGPL-3.0-or-later",
         license_label: "MPL-2.0-or-later OR LGPL-3.0-or-later (LibreOffice/hu_HU/README_hu_HU.txt)",
         encoding: SourceEncoding::MixedUtf8AndIso8859_2Fallback,
         aff_sha256: "f3a2748dd535cfde2142ab17d0f7f8e4787b03fb25a60829c69ac8d493db4802",
@@ -215,6 +226,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "es/es_ES.aff",
         dic_path: "es/es_ES.dic",
         license_notice_path: "es/LICENSE.md",
+        license_spdx_expression: "GPL-3.0-or-later OR LGPL-3.0-or-later OR MPL-1.1",
         license_label: "Locale-specific notice in LibreOffice/es/LICENSE.md",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "e73a9bf8e1383f4986a5dc9e2fbed49371c0c61f511c626d15586bd433c1cad9",
@@ -225,6 +237,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "fr_FR/dictionaries/fr.aff",
         dic_path: "fr_FR/dictionaries/fr.dic",
         license_notice_path: "fr_FR/dictionaries/README_dict_fr.txt",
+        license_spdx_expression: "MPL-2.0",
         license_label:
             "Locale-specific notice in LibreOffice/fr_FR/dictionaries/README_dict_fr.txt",
         encoding: SourceEncoding::Utf8,
@@ -236,6 +249,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "it_IT/it_IT.aff",
         dic_path: "it_IT/it_IT.dic",
         license_notice_path: "it_IT/README_it_IT.txt",
+        license_spdx_expression: "GPL-3.0-only",
         license_label: "Locale-specific notice in LibreOffice/it_IT/README_it_IT.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "951afaa19272f13555b8823e8bcf9ccf78f8fe1a07835bdfb912ab3e4d537c2b",
@@ -246,6 +260,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "pt_BR/pt_BR.aff",
         dic_path: "pt_BR/pt_BR.dic",
         license_notice_path: "pt_BR/README_pt_BR.txt",
+        license_spdx_expression: "LGPL-3.0-only OR MPL-1.1",
         license_label: "Locale-specific notice in LibreOffice/pt_BR/README_pt_BR.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865",
@@ -256,6 +271,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "pt_PT/pt_PT.aff",
         dic_path: "pt_PT/pt_PT.dic",
         license_notice_path: "pt_PT/LICENSES.txt",
+        license_spdx_expression: "GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1",
         license_label: "Locale-specific notice in LibreOffice/pt_PT/LICENSES.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "975a209fcc892cb382fa5f34a28c391a39668661ce373ae071287809c5fcae24",
@@ -266,6 +282,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "nl_NL/nl_NL.aff",
         dic_path: "nl_NL/nl_NL.dic",
         license_notice_path: "nl_NL/LICENSE.txt",
+        license_spdx_expression: "BSD-3-Clause OR CC-BY-3.0",
         license_label: "Locale-specific notice in LibreOffice/nl_NL/LICENSE.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "f0233d4f721f4661cf5f4d05ed2739549322bf3b6b66764b55a38257e1e16e6f",
@@ -276,6 +293,8 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "pl_PL/pl_PL.aff",
         dic_path: "pl_PL/pl_PL.dic",
         license_notice_path: "pl_PL/README_pl_PL.txt",
+        license_spdx_expression:
+            "GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1 OR Apache-2.0 OR CC-BY-4.0",
         license_label: "Locale-specific notice in LibreOffice/pl_PL/README_pl_PL.txt",
         encoding: SourceEncoding::Iso8859_2,
         aff_sha256: "82973651651aa930335c865b339b98db376ca3dbf3a661b70b9eeb71fdf41dca",
@@ -286,6 +305,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "ru_RU/ru_RU.aff",
         dic_path: "ru_RU/ru_RU.dic",
         license_notice_path: "ru_RU/README_ru_RU.txt",
+        license_spdx_expression: "BSD-3-Clause",
         license_label: "Locale-specific notice in LibreOffice/ru_RU/README_ru_RU.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7",
@@ -296,6 +316,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "tr_TR/tr_TR.aff",
         dic_path: "tr_TR/tr_TR.dic",
         license_notice_path: "tr_TR/LICENSE",
+        license_spdx_expression: "MPL-2.0",
         license_label: "Locale-specific notice in LibreOffice/tr_TR/LICENSE",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "a04a227b2ee45574000b876a1afa982e3436d49ebb97a7a796ddc5ec0cc8191b",
@@ -306,6 +327,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "ar/ar.aff",
         dic_path: "ar/ar.dic",
         license_notice_path: "ar/COPYING.txt",
+        license_spdx_expression: "GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1",
         license_label: "Locale-specific notice in LibreOffice/ar/COPYING.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "cec30b8621001e49618feb05aec1984c5fcfbf7d2ec309901d5cbf66585217a3",
@@ -316,6 +338,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "uk_UA/uk_UA.aff",
         dic_path: "uk_UA/uk_UA.dic",
         license_notice_path: "uk_UA/README_uk_UA.txt",
+        license_spdx_expression: "MPL-1.1",
         license_label: "Locale-specific notice in LibreOffice/uk_UA/README_uk_UA.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "2219dd15e9802adebc45722c60943b1472640260491af38dd3e43b07e75585e6",
@@ -326,6 +349,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "sv_SE/dictionaries/sv_SE.aff",
         dic_path: "sv_SE/dictionaries/sv_SE.dic",
         license_notice_path: "sv_SE/LICENSE_sv_SE.txt",
+        license_spdx_expression: "LGPL-3.0-only",
         license_label: "Locale-specific notice in LibreOffice/sv_SE/LICENSE_sv_SE.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "b721c9d44bee912feb182b601a1bc2ae3e7dffef660f4130cf2751867488a9dd",
@@ -336,6 +360,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "id/id_ID.aff",
         dic_path: "id/id_ID.dic",
         license_notice_path: "id/LICENSE-dict",
+        license_spdx_expression: "LGPL-3.0-only",
         license_label: "Locale-specific notice in LibreOffice/id/LICENSE-dict",
         encoding: SourceEncoding::MixedUtf8AndIso8859_1,
         aff_sha256: "c625d5b237a489c452cf1f9c666600103e8093667dff89e7030a24217995dc79",
@@ -346,6 +371,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "hi_IN/hi_IN.aff",
         dic_path: "hi_IN/hi_IN.dic",
         license_notice_path: "hi_IN/COPYING",
+        license_spdx_expression: "GPL-2.0-only",
         license_label: "Locale-specific notice in LibreOffice/hi_IN/COPYING",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "3ab96772dc3d1cdbec4141798efb8b7a091b92c9acbeb5dfd3c4998a5c508302",
@@ -356,6 +382,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "bn_BD/bn_BD.aff",
         dic_path: "bn_BD/bn_BD.dic",
         license_notice_path: "bn_BD/COPYING",
+        license_spdx_expression: "GPL-2.0-only",
         license_label: "Locale-specific notice in LibreOffice/bn_BD/COPYING",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "6beeacefab0f691cb415c9ab8de227091a3be65510c3d8c0479513b261e61b97",
@@ -377,6 +404,7 @@ pub fn find_locale(locale: &str) -> Option<LibreOfficeDictionary> {
 pub struct VerifiedDictionary {
     locale: String,
     revision: String,
+    license_spdx_expression: String,
     license_label: String,
     license_notice_url: String,
     aff: VerifiedFile,
@@ -384,15 +412,17 @@ pub struct VerifiedDictionary {
 }
 
 impl VerifiedDictionary {
-    /// Creates a custom reviewed manifest, useful for a companion registry.
+    /// Creates a custom reviewed manifest, useful for a source registry.
     ///
     /// # Errors
     ///
-    /// Returns an error when the locale would escape a cache directory or the
-    /// license notice is not an absolute HTTPS URL.
+    /// Returns an error when the locale would escape a cache directory, the
+    /// SPDX expression is empty, or the license notice is not an absolute HTTPS
+    /// URL.
     pub fn new(
         locale: impl Into<String>,
         revision: impl Into<String>,
+        license_spdx_expression: impl Into<String>,
         license_label: impl Into<String>,
         license_notice_url: impl Into<String>,
         aff: VerifiedFile,
@@ -402,6 +432,10 @@ impl VerifiedDictionary {
         if !is_safe_locale(&locale) {
             return Err(ManifestError::UnsafeLocale(locale));
         }
+        let license_spdx_expression = license_spdx_expression.into();
+        if license_spdx_expression.trim().is_empty() {
+            return Err(ManifestError::MissingLicenseExpression);
+        }
         let license_notice_url = license_notice_url.into();
         if !is_https_url(&license_notice_url) {
             return Err(ManifestError::InsecureUrl);
@@ -409,6 +443,7 @@ impl VerifiedDictionary {
         Ok(Self {
             locale,
             revision: revision.into(),
+            license_spdx_expression,
             license_label: license_label.into(),
             license_notice_url,
             aff,
@@ -426,6 +461,12 @@ impl VerifiedDictionary {
     #[must_use]
     pub fn revision(&self) -> &str {
         &self.revision
+    }
+
+    /// Reviewed SPDX license identifier or expression for the source pair.
+    #[must_use]
+    pub fn license_spdx_expression(&self) -> &str {
+        &self.license_spdx_expression
     }
 
     /// Source's locale-specific license label.
@@ -679,6 +720,8 @@ pub enum ManifestError {
     UnsafeFileName(String),
     /// Source URL was not absolute HTTPS.
     InsecureUrl,
+    /// SPDX license identity was missing from the manifest.
+    MissingLicenseExpression,
     /// SHA-256 value was malformed.
     InvalidSha256(String),
 }
@@ -689,6 +732,9 @@ impl fmt::Display for ManifestError {
             Self::UnsafeLocale(locale) => write!(formatter, "unsafe locale `{locale}`"),
             Self::UnsafeFileName(name) => write!(formatter, "unsafe cache file name `{name}`"),
             Self::InsecureUrl => formatter.write_str("dictionary sources must use HTTPS"),
+            Self::MissingLicenseExpression => {
+                formatter.write_str("dictionary manifest requires an SPDX license expression")
+            }
             Self::InvalidSha256(value) => write!(formatter, "invalid SHA-256 digest `{value}`"),
         }
     }
@@ -961,10 +1007,15 @@ mod tests {
             assert!(dictionary.aff_url().starts_with("https://"));
             assert!(dictionary.dic_url().starts_with("https://"));
             assert!(dictionary.license_notice_url().starts_with("https://"));
+            assert!(!dictionary.license_spdx_expression().is_empty());
             assert!(!dictionary.license_label().is_empty());
             let manifest = dictionary.manifest().expect("catalog digest is valid");
             assert_eq!(manifest.locale(), locale);
             assert_eq!(manifest.revision(), LIBREOFFICE_REVISION);
+            assert_eq!(
+                manifest.license_spdx_expression(),
+                dictionary.license_spdx_expression()
+            );
             assert_eq!(manifest.aff().sha256_hex().len(), 64);
             assert_eq!(manifest.dic().sha256_hex().len(), 64);
         }
@@ -985,6 +1036,40 @@ mod tests {
             find_locale("hu_HU").expect("Hungarian exists").encoding(),
             SourceEncoding::MixedUtf8AndIso8859_2Fallback
         );
+    }
+
+    #[test]
+    fn catalog_exposes_reviewed_spdx_expressions_for_each_locale() {
+        for (locale, expected) in [
+            ("en_US", "GPL-2.0-only"),
+            ("de_DE", "GPL-2.0-only OR GPL-3.0-only"),
+            ("hu_HU", "MPL-2.0-or-later OR LGPL-3.0-or-later"),
+            ("es_ES", "GPL-3.0-or-later OR LGPL-3.0-or-later OR MPL-1.1"),
+            ("fr_FR", "MPL-2.0"),
+            ("it_IT", "GPL-3.0-only"),
+            ("pt_BR", "LGPL-3.0-only OR MPL-1.1"),
+            ("pt_PT", "GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1"),
+            ("nl_NL", "BSD-3-Clause OR CC-BY-3.0"),
+            (
+                "pl_PL",
+                "GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1 OR Apache-2.0 OR CC-BY-4.0",
+            ),
+            ("ru_RU", "BSD-3-Clause"),
+            ("tr_TR", "MPL-2.0"),
+            ("ar", "GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1"),
+            ("uk_UA", "MPL-1.1"),
+            ("sv_SE", "LGPL-3.0-only"),
+            ("id_ID", "LGPL-3.0-only"),
+            ("hi_IN", "GPL-2.0-only"),
+            ("bn_BD", "GPL-2.0-only"),
+        ] {
+            assert_eq!(
+                find_locale(locale)
+                    .expect("catalogued locale")
+                    .license_spdx_expression(),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -1141,12 +1226,25 @@ mod tests {
             VerifiedDictionary::new(
                 "../en_US",
                 "revision",
+                "GPL-2.0-only",
+                "notice",
+                "https://example.test/license",
+                file.clone(),
+                file.clone(),
+            ),
+            Err(ManifestError::UnsafeLocale(_))
+        ));
+        assert!(matches!(
+            VerifiedDictionary::new(
+                "en_US",
+                "revision",
+                " ",
                 "notice",
                 "https://example.test/license",
                 file.clone(),
                 file,
             ),
-            Err(ManifestError::UnsafeLocale(_))
+            Err(ManifestError::MissingLicenseExpression)
         ));
     }
 
@@ -1174,6 +1272,7 @@ mod tests {
         VerifiedDictionary::new(
             "en_US",
             "fixture-revision",
+            "GPL-2.0-only",
             "fixture license",
             "https://example.test/license",
             aff,

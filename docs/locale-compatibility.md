@@ -12,6 +12,11 @@ license notice and it does not validate a dictionary as part of fetching. See
 [Dictionary fetching](dictionary-fetching.md) for the acquisition contract and
 [Hunspell import contract](hunspell-format.md) for the import subset.
 
+Each catalogued pair also has a reviewed SPDX expression and a link to its
+immutable upstream notice in [license evidence](#license-evidence). This is
+provenance for the exact source pair, not legal advice or a blanket statement
+about the LibreOffice collection.
+
 ## How to read the status
 
 The columns deliberately use different kinds of evidence:
@@ -65,6 +70,33 @@ For example, strict mode also checks malformed affix rules, dictionary entries,
 declared encoding, size limits, and flags. Conversely, a blocked locale may
 still be useful in lenient mode for diagnostic exploration, but lenient output
 must never be presented as equivalent dictionary recognition.
+
+## License evidence
+
+These expressions are reviewed against the named notice at the pinned source
+revision. `OR` records an upstream license choice; consumers that redistribute
+a dictionary must select and comply with one permitted option.
+
+| Locale | Reviewed SPDX expression | Immutable upstream notice |
+| --- | --- | --- |
+| `en_US` | `GPL-2.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/en/license.txt) |
+| `de_DE` | `GPL-2.0-only OR GPL-3.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/de/README_de_DE_frami.txt) |
+| `hu_HU` | `MPL-2.0-or-later OR LGPL-3.0-or-later` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/hu_HU/README_hu_HU.txt) |
+| `es_ES` | `GPL-3.0-or-later OR LGPL-3.0-or-later OR MPL-1.1` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/es/LICENSE.md) |
+| `fr_FR` | `MPL-2.0` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/fr_FR/dictionaries/README_dict_fr.txt) |
+| `it_IT` | `GPL-3.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/it_IT/README_it_IT.txt) |
+| `pt_BR` | `LGPL-3.0-only OR MPL-1.1` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/pt_BR/README_pt_BR.txt) |
+| `pt_PT` | `GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/pt_PT/LICENSES.txt) |
+| `nl_NL` | `BSD-3-Clause OR CC-BY-3.0` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/nl_NL/LICENSE.txt) |
+| `pl_PL` | `GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1 OR Apache-2.0 OR CC-BY-4.0` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/pl_PL/README_pl_PL.txt) |
+| `ru_RU` | `BSD-3-Clause` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/ru_RU/README_ru_RU.txt) |
+| `tr_TR` | `MPL-2.0` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/tr_TR/LICENSE) |
+| `ar` | `GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/ar/COPYING.txt) |
+| `uk_UA` | `MPL-1.1` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/uk_UA/README_uk_UA.txt) |
+| `sv_SE` | `LGPL-3.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/sv_SE/LICENSE_sv_SE.txt) |
+| `id_ID` | `LGPL-3.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/id/LICENSE-dict) |
+| `hi_IN` | `GPL-2.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/hi_IN/COPYING) |
+| `bn_BD` | `GPL-2.0-only` | [Notice](https://raw.githubusercontent.com/LibreOffice/dictionaries/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d/bn_BD/COPYING) |
 
 ## Reproducing and advancing a row
 

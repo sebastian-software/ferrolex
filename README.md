@@ -103,8 +103,8 @@ The optional, digest-pinned LibreOffice installer is documented in
 [Dictionary fetching](docs/dictionary-fetching.md). It fetches reviewed
 upstream sources into a cache you select; ferrolex neither bundles nor
 redistributes dictionary content, and normal commands never download or update
-dictionaries implicitly. The catalog provides a per-locale license label and
-upstream notice for English, German, Spanish, French, Italian,
+dictionaries implicitly. The catalog provides a reviewed per-locale SPDX
+expression and upstream notice for English, German, Spanish, French, Italian,
 Portuguese, Dutch, Polish, Russian, Turkish, Arabic, Ukrainian, Swedish,
 Indonesian, Hindi, and Bengali.
 Urdu requires a separately reviewed source because it has no pair in the

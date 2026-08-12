@@ -157,11 +157,11 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
         DictionaryCommand::List => {
             for source in LIBREOFFICE_CATALOG {
                 println!(
-                    "{}\trevision={}\tencoding={}\tlicense={}\tnotice={}",
+                    "{}\trevision={}\tencoding={}\tspdx={}\tnotice={}",
                     source.locale(),
                     source.revision(),
                     source.encoding().label(),
-                    source.license_label(),
+                    source.license_spdx_expression(),
                     source.license_notice_url()
                 );
             }
@@ -171,7 +171,7 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
             let (source, installed) = fetch_catalog_dictionary(locale, cache_path)?;
             println!("installed: {}", installed.aff_path().display());
             println!("installed: {}", installed.dic_path().display());
-            println!("license: {}", source.license_label());
+            println!("license: {}", source.license_spdx_expression());
             println!("notice: {}", source.license_notice_url());
             Ok(RunOutcome::Success)
         }
@@ -179,7 +179,7 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
             let (source, installed) = fetch_catalog_dictionary(locale, cache_path)?;
             println!("installed: {}", installed.aff_path().display());
             println!("installed: {}", installed.dic_path().display());
-            println!("license: {}", source.license_label());
+            println!("license: {}", source.license_spdx_expression());
             println!("notice: {}", source.license_notice_url());
             install_hunspell_runtime_cache(
                 source.locale(),

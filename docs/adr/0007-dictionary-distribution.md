@@ -18,7 +18,7 @@ Dictionaries are not redistributed by ferrolex. The optional `ferrolex
 dictionary fetch <locale>` command downloads the reviewed upstream `.aff` and
 `.dic` files directly into a caller-selected local cache. Every catalog entry
 pins an immutable upstream revision, paths, source-byte SHA-256 digests,
-encoding, license label, and the upstream license notice.
+encoding, SPDX license expression, and the upstream license notice.
 
 The installer verifies bytes before its cache write. It never downloads during
 normal checking, compilation, tests, or CI; it follows no redirects and

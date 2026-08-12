@@ -37,31 +37,32 @@ normal reviewed ferrolex release change.
 
 `ferrolex dictionary list` exposes these reviewed sources:
 
-| Locale | Pinned upstream paths | Locale-specific notice |
-| --- | --- | --- |
-| `en_US` | `en/en_US.aff`, `en/en_US.dic` | `en/license.txt` |
-| `de_DE` | `de/de_DE_frami.aff`, `de/de_DE_frami.dic` | `de/README_de_DE_frami.txt` |
-| `es_ES` | `es/es_ES.aff`, `es/es_ES.dic` | `es/LICENSE.md` |
-| `fr_FR` | `fr_FR/dictionaries/fr.aff`, `fr_FR/dictionaries/fr.dic` | `fr_FR/dictionaries/README_dict_fr.txt` |
-| `it_IT` | `it_IT/it_IT.aff`, `it_IT/it_IT.dic` | `it_IT/README_it_IT.txt` |
-| `pt_BR` | `pt_BR/pt_BR.aff`, `pt_BR/pt_BR.dic` | `pt_BR/README_pt_BR.txt` |
-| `pt_PT` | `pt_PT/pt_PT.aff`, `pt_PT/pt_PT.dic` | `pt_PT/LICENSES.txt` |
-| `nl_NL` | `nl_NL/nl_NL.aff`, `nl_NL/nl_NL.dic` | `nl_NL/LICENSE.txt` |
-| `pl_PL` | `pl_PL/pl_PL.aff`, `pl_PL/pl_PL.dic` | `pl_PL/README_pl_PL.txt` |
-| `ru_RU` | `ru_RU/ru_RU.aff`, `ru_RU/ru_RU.dic` | `ru_RU/README_ru_RU.txt` |
-| `tr_TR` | `tr_TR/tr_TR.aff`, `tr_TR/tr_TR.dic` | `tr_TR/LICENSE` |
-| `ar` | `ar/ar.aff`, `ar/ar.dic` | `ar/COPYING.txt` |
-| `uk_UA` | `uk_UA/uk_UA.aff`, `uk_UA/uk_UA.dic` | `uk_UA/README_uk_UA.txt` |
-| `sv_SE` | `sv_SE/dictionaries/sv_SE.aff`, `sv_SE/dictionaries/sv_SE.dic` | `sv_SE/LICENSE_sv_SE.txt` |
-| `id_ID` | `id/id_ID.aff`, `id/id_ID.dic` | `id/LICENSE-dict` |
-| `hi_IN` | `hi_IN/hi_IN.aff`, `hi_IN/hi_IN.dic` | `hi_IN/COPYING` |
-| `bn_BD` | `bn_BD/bn_BD.aff`, `bn_BD/bn_BD.dic` | `bn_BD/COPYING` |
+| Locale | Pinned upstream paths | Reviewed SPDX expression | Locale-specific notice |
+| --- | --- | --- | --- |
+| `en_US` | `en/en_US.aff`, `en/en_US.dic` | `GPL-2.0-only` | `en/license.txt` |
+| `de_DE` | `de/de_DE_frami.aff`, `de/de_DE_frami.dic` | `GPL-2.0-only OR GPL-3.0-only` | `de/README_de_DE_frami.txt` |
+| `hu_HU` | `hu_HU/hu_HU.aff`, `hu_HU/hu_HU.dic` | `MPL-2.0-or-later OR LGPL-3.0-or-later` | `hu_HU/README_hu_HU.txt` |
+| `es_ES` | `es/es_ES.aff`, `es/es_ES.dic` | `GPL-3.0-or-later OR LGPL-3.0-or-later OR MPL-1.1` | `es/LICENSE.md` |
+| `fr_FR` | `fr_FR/dictionaries/fr.aff`, `fr_FR/dictionaries/fr.dic` | `MPL-2.0` | `fr_FR/dictionaries/README_dict_fr.txt` |
+| `it_IT` | `it_IT/it_IT.aff`, `it_IT/it_IT.dic` | `GPL-3.0-only` | `it_IT/README_it_IT.txt` |
+| `pt_BR` | `pt_BR/pt_BR.aff`, `pt_BR/pt_BR.dic` | `LGPL-3.0-only OR MPL-1.1` | `pt_BR/README_pt_BR.txt` |
+| `pt_PT` | `pt_PT/pt_PT.aff`, `pt_PT/pt_PT.dic` | `GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1` | `pt_PT/LICENSES.txt` |
+| `nl_NL` | `nl_NL/nl_NL.aff`, `nl_NL/nl_NL.dic` | `BSD-3-Clause OR CC-BY-3.0` | `nl_NL/LICENSE.txt` |
+| `pl_PL` | `pl_PL/pl_PL.aff`, `pl_PL/pl_PL.dic` | `GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1 OR Apache-2.0 OR CC-BY-4.0` | `pl_PL/README_pl_PL.txt` |
+| `ru_RU` | `ru_RU/ru_RU.aff`, `ru_RU/ru_RU.dic` | `BSD-3-Clause` | `ru_RU/README_ru_RU.txt` |
+| `tr_TR` | `tr_TR/tr_TR.aff`, `tr_TR/tr_TR.dic` | `MPL-2.0` | `tr_TR/LICENSE` |
+| `ar` | `ar/ar.aff`, `ar/ar.dic` | `GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1` | `ar/COPYING.txt` |
+| `uk_UA` | `uk_UA/uk_UA.aff`, `uk_UA/uk_UA.dic` | `MPL-1.1` | `uk_UA/README_uk_UA.txt` |
+| `sv_SE` | `sv_SE/dictionaries/sv_SE.aff`, `sv_SE/dictionaries/sv_SE.dic` | `LGPL-3.0-only` | `sv_SE/LICENSE_sv_SE.txt` |
+| `id_ID` | `id/id_ID.aff`, `id/id_ID.dic` | `LGPL-3.0-only` | `id/LICENSE-dict` |
+| `hi_IN` | `hi_IN/hi_IN.aff`, `hi_IN/hi_IN.dic` | `GPL-2.0-only` | `hi_IN/COPYING` |
+| `bn_BD` | `bn_BD/bn_BD.aff`, `bn_BD/bn_BD.dic` | `GPL-2.0-only` | `bn_BD/COPYING` |
 
 All paths and file digests are pinned to LibreOffice/dictionaries commit
-`f2ff99058268502bdcf4cad25c1ca2935ad8aa7d`. The catalog treats the linked
-locale notice as the source-specific licensing evidence, instead of assigning
-one license to the entire LibreOffice collection. It is a source catalog, *not*
-a claim that all dictionaries share one redistributable license. Consumers must
+`f2ff99058268502bdcf4cad25c1ca2935ad8aa7d`. Each reviewed SPDX expression is
+paired with its linked locale notice, rather than assigning one license to the
+entire LibreOffice collection. It is a source catalog, *not* legal advice or a
+claim that all dictionaries share one redistributable license. Consumers must
 review and accept the linked terms for every locale they distribute.
 
 `list` also prints the source encoding. Installation preserves upstream bytes:
@@ -96,7 +97,7 @@ ferrolex dictionary fetch pl_PL \
   --cache "$HOME/.cache/ferrolex/dictionaries"
 ```
 
-The command prints the installed paths plus the source license label and
+The command prints the installed paths plus the reviewed SPDX expression and
 notice URL. Validate the resulting files before using them:
 
 ```sh
