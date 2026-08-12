@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 mod cache;
+mod explanation;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,6 +35,10 @@ pub use cache::{
     compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, load_runtime_artifact,
     load_runtime_cache, CacheSource, RuntimeCacheError, RuntimeCacheMetadata, SourceDigests,
     HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+};
+pub use explanation::{
+    Acceptance, AcceptanceKind, AppliedAffix, AppliedAffixKind, CasingPath, CompoundComponent,
+    CompoundComponentRole, LookupExplanation, Rejection, RejectionReason,
 };
 
 const MAX_AFF_BYTES: usize = 32 * 1024 * 1024;
@@ -4969,7 +4974,8 @@ mod tests {
 
     use super::{
         compile_runtime_cache, import, import_bytes, import_bytes_with_encodings,
-        load_runtime_cache, ByteEncoding, ByteImportEncodings, ImportMode, Severity, SourceDigests,
+        load_runtime_cache, AcceptanceKind, AppliedAffixKind, ByteEncoding, ByteImportEncodings,
+        CasingPath, ImportMode, LookupExplanation, RejectionReason, Severity, SourceDigests,
         MAX_AFF_BYTES, MAX_COMPOUND_SCALARS, MAX_DERIVED_CANDIDATES_PER_LOOKUP, MAX_DIC_BYTES,
         MAX_FLAGS_PER_ENTRY,
     };
@@ -4995,6 +5001,110 @@ mod tests {
         assert!(!dictionary.contains("unkinds"));
         assert!(!dictionary.contains("partys"));
         assert!(!dictionary.contains("Strasse"));
+    }
+
+    #[test]
+    fn explains_plain_affixed_compound_and_rejected_words() {
+        let result = import(
+            "explain.aff",
+            "FORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nSFX A Y 1\nSFX A 0 s/B .\nSFX B Y 1\nSFX B 0 ed .\nCOMPOUNDFLAG C\nCOMPOUNDMIN 1\n",
+            "explain.dic",
+            "8\nplain\nroot/A\nhaus/C\ntür/C\nschlüssel/C\nbad/F\nneeds/N\ncomponent/O\n",
+            ImportMode::Strict,
+        )
+        .expect("explanation fixture imports");
+        let dictionary = result.dictionary();
+
+        let plain = dictionary.explain("plain");
+        let plain = plain.accepted().expect("plain word is accepted");
+        assert!(matches!(plain.kind(), AcceptanceKind::Stem { stem } if stem == "plain"));
+
+        let affixed = dictionary.explain("rootsed");
+        let affixed = affixed.accepted().expect("affixed word is accepted");
+        let AcceptanceKind::Affixed { stem, rules } = affixed.kind() else {
+            panic!("diagnostic path must retain affix rules");
+        };
+        assert_eq!(stem, "root");
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].kind(), AppliedAffixKind::Suffix);
+        assert_eq!(rules[0].add(), "s");
+        assert_eq!(rules[1].add(), "ed");
+
+        let compound = dictionary.explain("haustürschlüssel");
+        let compound = compound.accepted().expect("compound is accepted");
+        let AcceptanceKind::Compound { components } = compound.kind() else {
+            panic!("diagnostic path must retain compound components");
+        };
+        assert_eq!(
+            components
+                .iter()
+                .map(super::CompoundComponent::stem)
+                .collect::<Vec<_>>(),
+            ["haus", "tür", "schlüssel"]
+        );
+
+        for (word, expected) in [
+            (
+                "bad",
+                RejectionReason::ForbiddenStem {
+                    stem: "bad".to_owned(),
+                },
+            ),
+            (
+                "needs",
+                RejectionReason::NeedsAffix {
+                    stem: "needs".to_owned(),
+                },
+            ),
+            (
+                "component",
+                RejectionReason::OnlyInCompound {
+                    stem: "component".to_owned(),
+                },
+            ),
+            ("unknown", RejectionReason::NoDerivation),
+        ] {
+            let rejected = dictionary.explain(word);
+            assert_eq!(
+                rejected.rejected().expect("word is rejected").reason(),
+                &expected
+            );
+        }
+    }
+
+    #[test]
+    fn explanation_reports_case_fallback_without_changing_lookup() {
+        let dictionary = import("case.aff", "", "case.dic", "1\nhouse\n", ImportMode::Strict)
+            .expect("case fixture imports")
+            .dictionary()
+            .clone();
+
+        for word in ["house", "HOUSE", "missing"] {
+            assert_eq!(
+                dictionary.contains(word),
+                dictionary.explain(word).accepted().is_some(),
+                "diagnostic and hot lookup outcomes agree for {word}"
+            );
+        }
+        let accepted = dictionary
+            .explain("HOUSE")
+            .accepted()
+            .cloned()
+            .expect("fallback hit");
+        assert_eq!(
+            accepted.casing(),
+            &CasingPath::CaseFallback {
+                candidate: "house".to_owned()
+            }
+        );
+        assert!(matches!(
+            accepted.kind(),
+            AcceptanceKind::Stem { stem } if stem == "house"
+        ));
+        assert!(matches!(
+            dictionary.explain("missing"),
+            LookupExplanation::Rejected(_)
+        ));
     }
 
     #[test]

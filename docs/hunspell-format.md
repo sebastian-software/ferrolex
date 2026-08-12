@@ -139,6 +139,10 @@ from `HunspellDictionary::word_characters`. It does not alter
 `Dictionary::contains`, whose argument is already one caller-segmented word;
 the generic source analyzer keeps its own explicit tokenizer policy.
 
+For an owned diagnostic trace of an accepted or rejected lookup, see
+[Hunspell lookup explanations](explanations.md). The explanation API is kept
+separate from the allocation-free normal lookup path.
+
 Counted `REP` blocks are retained for suggestion ranking. A header has the
 form `REP count`, followed by exactly `count` lines shaped as `REP from to`.
 Both spellings are non-empty literal whitespace-delimited strings. A leading
