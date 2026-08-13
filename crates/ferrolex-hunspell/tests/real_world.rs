@@ -643,9 +643,11 @@ fn outcome_digest(corpus: &[String], decisions: &[(bool, bool)]) -> String {
         "every scorecard word has one pair of decisions"
     );
     let mut digest = Sha256::new();
-    for (index, (ferrolex, oracle)) in decisions.iter().enumerate() {
-        digest.update(index.to_be_bytes());
-        digest.update([u8::from(ferrolex == oracle)]);
+    for (word, (ferrolex, oracle)) in corpus.iter().zip(decisions) {
+        let word_length = u64::try_from(word.len()).expect("word length fits in u64");
+        digest.update(word_length.to_be_bytes());
+        digest.update(word.as_bytes());
+        digest.update([u8::from(*ferrolex), u8::from(*oracle)]);
     }
     format!("{:x}", digest.finalize())
 }
@@ -814,6 +816,32 @@ fn outcome_digest_changes_when_a_different_word_disagrees() {
         outcome_digest(&corpus, &[(true, true), (false, true)]),
         outcome_digest(&corpus, &[(false, true), (true, true)]),
         "a fixed disagreement count does not hide changed per-word outcomes"
+    );
+}
+
+#[test]
+fn outcome_digest_binds_same_length_corpus_words_and_decisions() {
+    let decisions = [(true, true), (false, true)];
+    let original_corpus = ["alpha".to_owned(), "bravo".to_owned()];
+    let substituted_corpus = ["gamma".to_owned(), "delta".to_owned()];
+
+    assert_eq!(
+        original_corpus.iter().map(String::len).collect::<Vec<_>>(),
+        substituted_corpus
+            .iter()
+            .map(String::len)
+            .collect::<Vec<_>>(),
+        "the regression uses different corpus words with the same lengths"
+    );
+    assert_ne!(
+        outcome_digest(&original_corpus, &decisions),
+        outcome_digest(&substituted_corpus, &decisions),
+        "same-length corpus substitutions do not hide behind an unchanged decision vector"
+    );
+    assert_ne!(
+        outcome_digest(&original_corpus, &decisions),
+        outcome_digest(&original_corpus, &[(true, true), (true, false)]),
+        "the digest also distinguishes the direction of a per-word divergence"
     );
 }
 

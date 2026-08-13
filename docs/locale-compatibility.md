@@ -155,7 +155,7 @@ Weekly, manual, and release compatibility runs invoke Hunspell for the seven
 scorecard fixtures and compare their deterministic rows with the checked-in
 baseline. Each artifact records the corpus recipe, oracle command, and oracle
 version as well as the per-locale agreements, disagreements, and a per-word
-outcome digest. The 150-minute job limit is based on the preceding 107m10s
+outcome digest that binds the UTF-8 corpus word and both engine decisions. The 150-minute job limit is based on the preceding 107m10s
 all-fixture measurement and leaves diagnostic/artifact headroom; it does not
 claim a faster seven-locale run. The scorecard is evidence for its recorded
 corpus, not a general Hunspell-parity assertion.
