@@ -7,7 +7,7 @@ set -euo pipefail
 fixture_root=${1:?usage: fetch-compat-fixtures.sh <fixture-root>}
 workspace_root=$(cd "$(dirname "$0")/.." && pwd)
 
-for locale in en_US de_DE fr_FR nl_NL ar tr_TR; do
+for locale in en_US de_DE es_ES fr_FR it_IT pt_BR pt_PT nl_NL pl_PL ar tr_TR; do
   cargo run --quiet -p ferrolex-cli -- dictionary fetch "$locale" --cache "$fixture_root"
 done
 

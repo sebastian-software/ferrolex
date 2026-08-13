@@ -45,13 +45,14 @@ source constructs have their project-owned semantics:
 This list is the explicit strict-import boundary for the locale. It is not an
 oracle-parity claim for unlisted Hungarian forms.
 
-The current reviewed LibreOffice fixtures are `en_US`, `de_DE`, `fr_FR`,
-`nl_NL`, `hu_HU`, `ar`, and `tr_TR`. Their source-specific license evidence is
-the final column of the manifest. Those terms govern the dictionary data, not
-ferrolex. They are acceptable for an opt-in test because no third-party content
-is distributed by this repository. Adding a fixture still requires a review of
-the exact source's embedded license or notice; a package-level or hosting-site
-license alone is insufficient.
+The current reviewed LibreOffice fixtures are `en_US`, `de_DE`, `es_ES`,
+`fr_FR`, `it_IT`, `pt_BR`, `pt_PT`, `nl_NL`, `pl_PL`, `hu_HU`, `ar`, and
+`tr_TR`. Their source-specific license evidence is the final column of the
+manifest. Those terms govern the dictionary data, not ferrolex. They are
+acceptable for an opt-in test because no third-party content is distributed by
+this repository. Adding a fixture still requires a review of the exact source's
+embedded license or notice; a package-level or hosting-site license alone is
+insufficient.
 
 ### Probe categories
 

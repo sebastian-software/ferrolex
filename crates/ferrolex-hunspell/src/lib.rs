@@ -4053,7 +4053,7 @@ fn parse_compound_rule_patterns(
     flag_mode: FlagMode,
 ) -> Result<Vec<Vec<Flag>>, &'static str> {
     if pattern.contains(['(', ')']) {
-        return Err("parenthesized COMPOUNDRULE groups are not supported");
+        return parse_parenthesized_compound_rule(pattern, flag_mode).map(|pattern| vec![pattern]);
     }
     if flag_mode != FlagMode::Unicode {
         return decode_flag_sequence(pattern, flag_mode)
@@ -4107,6 +4107,33 @@ fn parse_compound_rule_patterns(
     (!patterns.is_empty())
         .then_some(patterns)
         .ok_or("compound rules require two through sixteen components")
+}
+
+fn parse_parenthesized_compound_rule(
+    pattern: &str,
+    flag_mode: FlagMode,
+) -> Result<Vec<Flag>, &'static str> {
+    let mut flags = Vec::new();
+    let mut remaining = pattern;
+    while let Some(group) = remaining.strip_prefix('(') {
+        let Some((flag, rest)) = group.split_once(')') else {
+            return Err("parenthesized COMPOUNDRULE groups must be balanced");
+        };
+        if flag.is_empty() || flag.contains(['(', ')', '*', '+', '?']) {
+            return Err("parenthesized COMPOUNDRULE groups require one literal flag");
+        }
+        let mut decoded = decode_flag_sequence(flag, flag_mode)
+            .ok_or("parenthesized COMPOUNDRULE groups require one valid flag")?;
+        if decoded.len() != 1 {
+            return Err("parenthesized COMPOUNDRULE groups require one literal flag");
+        }
+        flags.push(decoded.pop().expect("one checked flag"));
+        remaining = rest;
+    }
+    if !remaining.is_empty() || !(2..=MAX_COMPOUND_RULE_COMPONENTS).contains(&flags.len()) {
+        return Err("parenthesized COMPOUNDRULE groups require two through sixteen literal flags");
+    }
+    Ok(flags)
 }
 
 fn parse_break_patterns(
@@ -4573,7 +4600,7 @@ fn parse_dic(
 
     for (index, original_line) in text.lines().enumerate() {
         let line = original_line.trim();
-        if is_ignored_line(line) {
+        if is_ignored_dictionary_line(line) {
             continue;
         }
         if line.len() > MAX_LINE_BYTES {
@@ -4606,10 +4633,8 @@ fn parse_dic(
         }
         let fields = line.split_whitespace().collect::<Vec<_>>();
         let field = fields.first().copied().unwrap_or_default();
-        let (stem, flags) = field
-            .split_once('/')
-            .map_or((field, None), |(stem, flags)| (stem, Some(flags)));
-        let stem = remove_ignored_characters(stem, ignored_characters);
+        let (stem, flags) = split_dictionary_entry(field);
+        let stem = remove_ignored_characters(&stem, ignored_characters);
         if stem.is_empty() {
             diagnostics.push(diagnostic(
                 source,
@@ -4622,6 +4647,10 @@ fn parse_dic(
         }
         let entry_flags = match flags {
             None => BTreeSet::new(),
+            // A handful of real-world dictionaries use `word/ morphology` to
+            // attach morphology without assigning flags. Retain that metadata
+            // while continuing to reject a bare trailing delimiter.
+            Some("") if fields.len() > 1 => BTreeSet::new(),
             Some("") => {
                 diagnostics.push(diagnostic(
                     source,
@@ -4854,7 +4883,7 @@ impl FlagMode {
             return unicode_flag_tokens(value).map(|tokens| tokens.len());
         }
         let count = value.chars().count();
-        (count % 2 == 0).then_some(count / 2)
+        count.is_multiple_of(2).then_some(count / 2)
     }
 }
 
@@ -4866,6 +4895,44 @@ fn aff_fields(line: &str) -> Vec<&str> {
 
 fn is_ignored_line(line: &str) -> bool {
     line.is_empty() || line.starts_with('#')
+}
+
+fn is_ignored_dictionary_line(line: &str) -> bool {
+    is_ignored_line(line) || line.starts_with('/')
+}
+
+fn split_dictionary_entry(field: &str) -> (String, Option<&str>) {
+    let mut escaped = false;
+    for (index, character) in field.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == '/' {
+            return (
+                unescape_dictionary_stem(&field[..index]),
+                Some(&field[index + 1..]),
+            );
+        }
+    }
+    (unescape_dictionary_stem(field), None)
+}
+
+fn unescape_dictionary_stem(value: &str) -> String {
+    let mut stem = String::with_capacity(value.len());
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character == '\\' && matches!(characters.clone().next(), Some('/' | '\\')) {
+            stem.push(characters.next().expect("checked escaped character"));
+        } else {
+            stem.push(character);
+        }
+    }
+    stem
 }
 
 fn enforce_input_limit(
@@ -6290,25 +6357,56 @@ mod tests {
     }
 
     #[test]
-    fn parenthesized_compound_rules_are_precise_strict_errors() {
-        for affixes in [
-            "FLAG UTF-8\nCOMPOUNDRULE 1\nCOMPOUNDRULE (A)(B)\n",
-            "FLAG long\nCOMPOUNDRULE 1\nCOMPOUNDRULE (aa)(bb)\n",
-            "FLAG num\nCOMPOUNDRULE 1\nCOMPOUNDRULE (1)(2)\n",
+    fn parenthesized_compound_rules_preserve_one_flag_per_group() {
+        for (affixes, entries, compound) in [
+            (
+                "FLAG UTF-8\nCOMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE (A)(B)\n",
+                "2\nleft/A\nright/B\n",
+                "leftright",
+            ),
+            (
+                "FLAG long\nCOMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE (aa)(bb)\n",
+                "2\nleft/aa\nright/bb\n",
+                "leftright",
+            ),
+            (
+                "FLAG num\nCOMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE (1)(2)\n",
+                "2\nleft/1\nright/2\n",
+                "leftright",
+            ),
         ] {
-            let error = import(
-                "test.aff",
-                affixes,
-                "test.dic",
-                "1\nword\n",
-                ImportMode::Strict,
-            )
-            .expect_err("unsupported groups must not silently change flag meaning");
-            assert!(error.diagnostics().iter().any(|diagnostic| {
-                diagnostic.directive() == "COMPOUNDRULE"
-                    && diagnostic.message().contains("parenthesized")
-            }));
+            let imported = import("test.aff", affixes, "test.dic", entries, ImportMode::Strict)
+                .expect("one grouped flag per component imports");
+            assert!(imported.dictionary().contains(compound));
         }
+
+        let error = import(
+            "test.aff",
+            "COMPOUNDRULE 1\nCOMPOUNDRULE (A)(B\n",
+            "test.dic",
+            "1\nword\n",
+            ImportMode::Strict,
+        )
+        .expect_err("unbalanced groups remain explicit errors");
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.directive() == "COMPOUNDRULE" && diagnostic.message().contains("balanced")
+        }));
+    }
+
+    #[test]
+    fn dictionary_comments_escaped_delimiters_and_empty_morphology_flags_import() {
+        let imported = import(
+            "test.aff",
+            "FLAG long\n",
+            "test.dic",
+            "2\n/ provenance comment\nCO/ po:abbrev\ng\\/cm³\n",
+            ImportMode::Strict,
+        )
+        .expect("reviewed dictionary conventions import without approximation");
+
+        assert!(imported.dictionary().contains("CO"));
+        assert!(imported.dictionary().contains("g/cm³"));
+        assert!(imported.diagnostics().is_empty());
     }
 
     #[test]
