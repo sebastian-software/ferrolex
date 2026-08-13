@@ -9,6 +9,7 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+exclude = ["/tests/**"]
 
 [dependencies]
 ferrolex-core = { path = "../ferrolex-core", version = "0.2.0" }
