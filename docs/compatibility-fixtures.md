@@ -150,22 +150,73 @@ When a recognition directive becomes supported, update the project-owned
 format and semantic documentation, rerun this report, and add a focused
 independent fixture before changing the real-world baseline.
 
+## Compatibility execution sets
+
+The project-owned minimal fixtures remain the primary semantic edge-case tests.
+They are deliberately small and independently authored; the real-world sets
+below supplement them and do not replace them.
+
+| Set | Fixtures | Purpose |
+| --- | --- | --- |
+| `required` | `en_US`, `de_DE`, `hu_HU`, `ar` | Fast relevant-change gate: strict and lenient import, legacy and mixed encoding, affixes/compounds, casing, and Arabic-script risk. |
+| `scorecard` | `en_US`, `de_DE`, `fr_FR`, `nl_NL`, `hu_HU`, `ar`, `tr_TR` | Full seven-locale download/import/cache/Hunspell differential evidence. |
+| `all` | Every manifest row | Opt-in local exploration; it is not a CI requirement. |
+
+`FERROLEX_COMPAT_FIXTURE_SET` selects the same named set in the Rust harness.
+The downloader accepts `--set` so CI downloads only the data the selected test
+will verify. The selector is tested against the checked-in manifest, including
+the required set's import, encoding, morphology, casing, and script coverage.
+
+The `Hunspell compatibility gate` is a required-check-safe PR job: it always
+reports a result, but only downloads and runs the `required` set when a
+Hunspell, compiler, dictionary, fixture, or workflow path changed. The normal
+CI `push` trigger is limited to `main`, so a PR commit does not receive both a
+branch push and pull-request run.
+
 ## Differential recognition scorecard
 
-The CI compatibility job downloads the digest-pinned reference files into its
-temporary directory, installs the system `hunspell` command, and uploads
-`recognition-scorecard.tsv` as an artifact. The normal workspace test remains
-offline and does not require this oracle. To reproduce the artifact locally:
+The reusable `Full Hunspell oracle scorecard` workflow downloads the seven
+digest-pinned reference pairs, imports them, cache-roundtrips them, invokes the
+system `hunspell` command, and uploads `recognition-scorecard.tsv`. CI invokes
+it weekly, by manual dispatch, and after Release Please creates a release. The
+normal workspace test remains offline and does not require this oracle.
+
+To reproduce the artifact locally:
 
 ```sh
-scripts/fetch-compat-fixtures.sh /tmp/ferrolex-compat-fixtures
+scripts/fetch-compat-fixtures.sh --set scorecard /tmp/ferrolex-compat-fixtures
 FERROLEX_COMPAT_FIXTURES=/tmp/ferrolex-compat-fixtures \
+FERROLEX_COMPAT_FIXTURE_SET=scorecard \
 FERROLEX_COMPAT_ORACLE=hunspell \
 FERROLEX_COMPAT_SCORECARD=/tmp/recognition-scorecard.tsv \
+FERROLEX_COMPAT_SCORECARD_BASELINE=crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv \
   cargo test -p ferrolex-hunspell --test real_world -- --nocapture
 ```
 
-The corpus combines stored stems with explicit manifest probes (including
-generated-form and casing cases) and deterministic negative mutations. The
-oracle is development-only black-box observation; ferrolex production code has
-no dependency on Hunspell or Nuspell.
+Each artifact records the selected fixture set, the exact oracle command, the
+local `hunspell -v` result, and the corpus recipe: sorted first 128 alphabetic
+stored stems plus manifest probes and suffixed negative probes. `measured`
+means the oracle completed for that corpus; `blocked` means the fixture's
+recorded decoding or import boundary prevented a measurement. The baseline at
+[`scorecard-baseline.tsv`](../crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv)
+is a durable, exact per-locale comparison of the seven measured rows.
+
+The currently expected aggregate divergences are classified as follows:
+
+| Locale | Classification | Rationale |
+| --- | --- | --- |
+| `nl_NL` | reviewed recognition difference | The pinned corpus exercises Dutch forms outside the currently documented recognition subset. |
+| `hu_HU` | reviewed lenient-import difference | The locale intentionally retains the documented Hungarian lenient-import boundary. |
+| All other scorecard rows | no observed divergence | The recorded corpus currently agrees with the oracle. |
+
+Any changed baseline row fails CI until a reviewer updates the checked-in
+baseline in the same change. A baseline update must explain the source/probe or
+semantic change, retain an independent project-owned edge fixture when
+applicable, and update this classification if its count changes. Improvements
+and regressions both require review; the aggregate classification must never be
+used to waive a newly introduced divergence.
+
+The oracle is development-only black-box observation; ferrolex production code
+has no dependency on Hunspell or Nuspell. This scorecard is scoped evidence for
+its pinned bytes and recorded corpus, not a bug-for-bug or broad Hunspell-parity
+claim.

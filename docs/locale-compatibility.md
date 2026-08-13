@@ -142,16 +142,17 @@ The optional external Hunspell oracle produces a per-locale accept/reject
 scorecard. Reproduce it with:
 
 ```sh
-scripts/fetch-compat-fixtures.sh /tmp/ferrolex-compat-fixtures
+scripts/fetch-compat-fixtures.sh --set scorecard /tmp/ferrolex-compat-fixtures
 FERROLEX_COMPAT_FIXTURES=/tmp/ferrolex-compat-fixtures \
+FERROLEX_COMPAT_FIXTURE_SET=scorecard \
 FERROLEX_COMPAT_ORACLE=hunspell \
 FERROLEX_COMPAT_SCORECARD=/tmp/recognition-scorecard.tsv \
+FERROLEX_COMPAT_SCORECARD_BASELINE=crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv \
   cargo test -p ferrolex-hunspell --test real_world -- --nocapture
 ```
 
-Every compatibility CI run invokes Hunspell for each strict fixture and uploads
-`recognition-scorecard.tsv`. Each locale row includes the deterministic corpus
-size, agreements, and disagreements; the artifact is the authoritative
-measurement, rather than a copied, stale table in this document. Lenient and
-blocked fixtures remain visible with their reason. The scorecard is evidence
-for its recorded corpus, not a general Hunspell-parity assertion.
+Weekly, manual, and release compatibility runs invoke Hunspell for the seven
+scorecard fixtures and compare their deterministic rows with the checked-in
+baseline. Each artifact records the corpus recipe, oracle command, and oracle
+version as well as the per-locale agreements and disagreements. The scorecard
+is evidence for its recorded corpus, not a general Hunspell-parity assertion.

@@ -22,6 +22,10 @@ use ferrolex_hunspell::{
 use sha2::{Digest as _, Sha256};
 
 const MANIFEST: &str = include_str!("real_world/manifest.tsv");
+const SCORECARD_BASELINE: &str = include_str!("real_world/scorecard-baseline.tsv");
+const REQUIRED_FIXTURE_IDS: &[&str] = &["en_US", "de_DE", "hu_HU", "ar"];
+const SCORECARD_FIXTURE_IDS: &[&str] =
+    &["en_US", "de_DE", "fr_FR", "nl_NL", "hu_HU", "ar", "tr_TR"];
 
 #[derive(Debug, Eq, PartialEq)]
 struct Fixture {
@@ -171,6 +175,43 @@ enum ImportExpectation {
     Blocked,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FixtureSet {
+    All,
+    Required,
+    Scorecard,
+}
+
+impl FixtureSet {
+    fn from_environment() -> Result<Self, String> {
+        match env::var("FERROLEX_COMPAT_FIXTURE_SET").as_deref() {
+            Err(env::VarError::NotPresent) | Ok("all") => Ok(Self::All),
+            Ok("required") => Ok(Self::Required),
+            Ok("scorecard") => Ok(Self::Scorecard),
+            Ok(value) => Err(format!(
+                "unknown FERROLEX_COMPAT_FIXTURE_SET `{value}`; expected all, required, or scorecard"
+            )),
+            Err(error) => Err(format!("could not read FERROLEX_COMPAT_FIXTURE_SET: {error}")),
+        }
+    }
+
+    const fn ids(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::All => None,
+            Self::Required => Some(REQUIRED_FIXTURE_IDS),
+            Self::Scorecard => Some(SCORECARD_FIXTURE_IDS),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Required => "required",
+            Self::Scorecard => "scorecard",
+        }
+    }
+}
+
 impl ImportExpectation {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
@@ -236,13 +277,40 @@ fn local_real_world_fixtures_report_format_and_recognition() {
     };
     let root = Path::new(&root);
     let fixtures = parse_manifest(MANIFEST).expect("checked-in compatibility manifest is valid");
+    let fixture_set =
+        FixtureSet::from_environment().expect("the compatibility fixture-set selector is valid");
+    let fixtures = select_fixtures(&fixtures, fixture_set)
+        .expect("the compatibility fixture-set exists in the manifest");
+    initialize_scorecard(fixture_set);
     let mut report = String::from("ferrolex real-world compatibility report\n");
 
-    for fixture in &fixtures {
+    for fixture in fixtures {
         run_fixture(root, fixture, &mut report);
     }
 
+    assert_scorecard_baseline_if_requested();
+
     eprintln!("{report}");
+}
+
+fn select_fixtures(fixtures: &[Fixture], fixture_set: FixtureSet) -> Result<Vec<&Fixture>, String> {
+    let Some(ids) = fixture_set.ids() else {
+        return Ok(fixtures.iter().collect());
+    };
+
+    ids.iter()
+        .map(|id| {
+            fixtures
+                .iter()
+                .find(|fixture| fixture.id == *id)
+                .ok_or_else(|| {
+                    format!(
+                        "fixture set `{}` references missing manifest fixture `{id}`",
+                        fixture_set.name()
+                    )
+                })
+        })
+        .collect()
 }
 
 fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
@@ -560,23 +628,92 @@ fn write_scorecard(
     ));
 }
 
+fn initialize_scorecard(fixture_set: FixtureSet) {
+    let Ok(path) = env::var("FERROLEX_COMPAT_SCORECARD") else {
+        return;
+    };
+    let oracle = env::var("FERROLEX_COMPAT_ORACLE").unwrap_or_else(|_| "not-requested".to_owned());
+    assert!(
+        oracle == "hunspell" || oracle == "not-requested",
+        "unknown compatibility oracle `{oracle}`; expected `hunspell`"
+    );
+    let version = (oracle == "hunspell")
+        .then(hunspell_version)
+        .unwrap_or_else(|| "not-requested".to_owned());
+    let contents = format!(
+        "# fixture-set: {}\n# corpus: sorted first 128 alphabetic stored stems, manifest probes, and suffixed negative probes\n# oracle-command: hunspell -a -d <dictionary>\n# oracle-version: {version}\nlocale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason\n",
+        fixture_set.name()
+    );
+    fs::write(&path, contents)
+        .unwrap_or_else(|error| panic!("could not initialize scorecard {path}: {error}"));
+}
+
+fn hunspell_version() -> String {
+    let output = Command::new("hunspell")
+        .arg("-v")
+        .output()
+        .unwrap_or_else(|error| panic!("could not inspect hunspell oracle version: {error}"));
+    assert!(
+        output.status.success(),
+        "hunspell version command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or("unknown")
+        .replace(['\t', '\r', '\n'], " ")
+}
+
 fn append_scorecard(row: &str) {
     let Ok(path) = env::var("FERROLEX_COMPAT_SCORECARD") else {
         return;
     };
     let path = Path::new(&path);
-    let needs_header = fs::metadata(path).map_or(true, |metadata| metadata.len() == 0);
     let mut file = OpenOptions::new()
-        .create(true)
         .append(true)
         .open(path)
-        .unwrap_or_else(|error| panic!("could not create scorecard {}: {error}", path.display()));
-    if needs_header {
-        file.write_all(b"locale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason\n")
-            .expect("scorecard header is writable");
-    }
+        .unwrap_or_else(|error| panic!("could not append scorecard {}: {error}", path.display()));
     file.write_all(row.as_bytes())
         .expect("scorecard row is writable");
+}
+
+fn assert_scorecard_baseline_if_requested() {
+    let Ok(baseline_path) = env::var("FERROLEX_COMPAT_SCORECARD_BASELINE") else {
+        return;
+    };
+    assert_eq!(
+        env::var("FERROLEX_COMPAT_ORACLE").as_deref(),
+        Ok("hunspell"),
+        "a scorecard baseline requires FERROLEX_COMPAT_ORACLE=hunspell"
+    );
+    let scorecard_path = env::var("FERROLEX_COMPAT_SCORECARD")
+        .expect("a scorecard baseline requires FERROLEX_COMPAT_SCORECARD");
+    let scorecard = fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("could not read scorecard {scorecard_path}: {error}"));
+    let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|error| {
+        panic!("could not read scorecard baseline {baseline_path}: {error}")
+    });
+    let actual_rows = scorecard_rows(&scorecard).expect("scorecard rows are well-formed");
+    let baseline_rows = scorecard_rows(&baseline).expect("baseline rows are well-formed");
+    assert_eq!(
+        actual_rows, baseline_rows,
+        "compatibility scorecard changed; update the checked-in baseline only with the documented review rationale"
+    );
+}
+
+fn scorecard_rows(text: &str) -> Result<Vec<&str>, String> {
+    text.lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| {
+            *line != "locale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason"
+        })
+        .map(|line| {
+            (line.split('\t').count() == 6)
+                .then_some(line)
+                .ok_or_else(|| format!("invalid scorecard row `{line}`"))
+        })
+        .collect()
 }
 
 fn hunspell_decisions(aff_path: &Path, corpus: &[String]) -> Vec<bool> {
@@ -645,6 +782,79 @@ fn hunspell_oracle_skips_protocol_control_words() {
         assert!(!is_hunspell_input(word));
     }
     assert!(is_hunspell_input("ferrolex"));
+}
+
+#[test]
+fn fixture_sets_select_the_reviewed_coverage() {
+    let fixtures = parse_manifest(MANIFEST).expect("checked-in compatibility manifest is valid");
+    let selected_ids = |fixture_set| {
+        select_fixtures(&fixtures, fixture_set)
+            .expect("reviewed fixture selection exists")
+            .into_iter()
+            .map(|fixture| fixture.id.as_str())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(selected_ids(FixtureSet::Required), REQUIRED_FIXTURE_IDS);
+    assert_eq!(selected_ids(FixtureSet::Scorecard), SCORECARD_FIXTURE_IDS);
+
+    let required = select_fixtures(&fixtures, FixtureSet::Required)
+        .expect("required fixtures exist in the manifest");
+    assert!(
+        required
+            .iter()
+            .any(|fixture| fixture.import_expectation == ImportExpectation::Strict),
+        "the required gate includes strict imports"
+    );
+    assert!(
+        required
+            .iter()
+            .any(|fixture| fixture.import_expectation == ImportExpectation::Lenient),
+        "the required gate includes a lenient import boundary"
+    );
+    assert!(
+        required
+            .iter()
+            .any(|fixture| fixture.aff_decode != Decode::Utf8),
+        "the required gate includes a non-UTF-8 decoding boundary"
+    );
+    for category in [
+        ProbeCategory::Affixed,
+        ProbeCategory::Compound,
+        ProbeCategory::SentenceInitial,
+        ProbeCategory::AllCaps,
+    ] {
+        assert!(
+            required
+                .iter()
+                .flat_map(|fixture| &fixture.accepted)
+                .any(|probe| probe.category == category),
+            "the required gate covers {} probes",
+            probe_category_name(category)
+        );
+    }
+    assert!(
+        required
+            .iter()
+            .flat_map(|fixture| &fixture.accepted)
+            .any(|probe| !probe.word.is_ascii()),
+        "the required gate includes non-Latin or script-sensitive probes"
+    );
+}
+
+#[test]
+fn checked_in_scorecard_baseline_is_well_formed_and_scoped() {
+    let rows = scorecard_rows(SCORECARD_BASELINE).expect("baseline rows are well-formed");
+    assert_eq!(rows.len(), SCORECARD_FIXTURE_IDS.len());
+    let locales = rows
+        .iter()
+        .map(|row| {
+            row.split('\t')
+                .next()
+                .expect("scorecard rows have a locale")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(locales, SCORECARD_FIXTURE_IDS);
 }
 
 fn read_verified_fixture(root: &Path, fixture: &Fixture) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {

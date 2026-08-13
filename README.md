@@ -19,8 +19,8 @@ CLI are intentionally small and may change before a stable release.
 ### Reviewed dictionary compatibility
 
 This concise status is generated from the digest-pinned real-world fixture
-catalog. CI verifies it on every pull request, push, and weekly compatibility
-run.
+catalog. CI checks it in the relevant-change compatibility gate and in the
+weekly, manual, and release differential scorecard runs.
 
 - ✅ **Ready for the tested core**: the exact pinned dictionary imports without
   recognition errors and its reviewed word forms work.
