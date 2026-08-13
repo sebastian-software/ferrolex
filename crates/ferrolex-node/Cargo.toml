@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-node"
-version = "0.1.0"
+version = "0.2.0"
 description = "Experimental Node.js binding spike for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
@@ -17,8 +17,8 @@ name = "ferrolex_node"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.1.0" }
+ferrolex-core = { path = "../ferrolex-core", version = "0.2.0" }
+ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.2.0" }
 napi = { version = "=3.12.1", default-features = false, features = ["napi8"] }
 napi-derive = "=3.6.0"
 
