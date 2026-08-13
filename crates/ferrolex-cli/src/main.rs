@@ -852,6 +852,13 @@ fn analysis_document<'source>(
     configured_comment_syntax: Option<&CommentSyntax>,
 ) -> Document<'source> {
     let is_rust = path.extension().and_then(|extension| extension.to_str()) == Some("rs");
+    if let Some(syntax) = configured_comment_syntax {
+        if is_rust && syntax != &CommentSyntax::line("//") {
+            // An explicit non-Rust directive syntax is a user request for the
+            // generic analyzer's established behavior.
+            return Document::new(source).with_comment_syntax(syntax.clone());
+        }
+    }
     let document = if is_rust {
         Document::rust(source)
     } else {
@@ -2848,6 +2855,26 @@ mod tests {
     }
 
     #[test]
+    fn explicit_non_rust_comment_prefix_keeps_generic_analysis_for_rust_files() {
+        let dictionary = temporary_dictionary("known\n");
+        let source = temporary_rust_file("# ferrolex:ignore typo\ntypo\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "analyze".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "--comment-prefix".to_owned(),
+            "#".to_owned(),
+            source.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("explicit directive syntax is supported"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
     fn parses_a_catalog_pinned_dictionary_fetch() {
         let command = parse_arguments([
             "ferrolex".to_owned(),
@@ -3376,6 +3403,16 @@ mod tests {
 
     fn temporary_file(contents: &str) -> TemporaryDictionary {
         temporary_bytes(contents.as_bytes())
+    }
+
+    fn temporary_rust_file(contents: &str) -> TemporaryDictionary {
+        let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ferrolex-cli-test-{}-{sequence}.rs",
+            std::process::id()
+        ));
+        fs::write(&path, contents).expect("the temporary directory is writable");
+        TemporaryDictionary { path }
     }
 
     fn temporary_bytes(contents: &[u8]) -> TemporaryDictionary {
