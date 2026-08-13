@@ -3,11 +3,11 @@
 # Oracle command: hunspell -a -d <dictionary>; Ubuntu 24.04 package 1.7.2+really1.7.2-10build3.
 # Baseline source: CI run 31731673331 (2026-08-13). New scorecard artifacts record `hunspell -v`.
 # Update only through the documented review process in docs/compatibility-fixtures.md.
-locale	status	corpus	agreements	disagreements	oracle-or-reason
-en_US	measured	139	139	0	hunspell
-de_DE	measured	139	139	0	hunspell
-fr_FR	measured	139	139	0	hunspell
-nl_NL	measured	142	68	74	hunspell
-hu_HU	measured	137	132	5	hunspell
-ar	measured	133	133	0	hunspell
-tr_TR	measured	134	134	0	hunspell
+locale	status	corpus	agreements	disagreements	oracle-or-reason	outcome-sha256
+en_US	measured	139	139	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+de_DE	measured	139	139	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+fr_FR	measured	139	139	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+nl_NL	measured	142	68	74	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+hu_HU	measured	137	132	5	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+ar	measured	133	133	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+tr_TR	measured	134	134	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000

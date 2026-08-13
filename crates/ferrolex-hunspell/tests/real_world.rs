@@ -574,7 +574,10 @@ const fn probe_category_name(category: ProbeCategory) -> &'static str {
 }
 
 fn write_blocked_scorecard(fixture: &Fixture, reason: &str) {
-    append_scorecard(&format!("{}\tblocked\t0\t0\t0\t{reason}\n", fixture.locale));
+    append_scorecard(&format!(
+        "{}\tblocked\t0\t0\t0\t{reason}\t-\n",
+        fixture.locale
+    ));
 }
 
 fn write_scorecard(
@@ -610,22 +613,42 @@ fn write_scorecard(
         .filter(|word| is_hunspell_input(word))
         .collect::<Vec<_>>();
     let oracle_decisions = hunspell_decisions(aff_path, &corpus);
-    let agreements = corpus
+    let decisions = corpus
         .iter()
         .zip(oracle_decisions)
-        .filter(|(word, accepted)| dictionary.contains(word) == *accepted)
+        .map(|(word, oracle)| (dictionary.contains(word), oracle))
+        .collect::<Vec<_>>();
+    let agreements = decisions
+        .iter()
+        .filter(|(ferrolex, oracle)| ferrolex == oracle)
         .count();
     let total = corpus.len();
     let disagreements = total - agreements;
+    let outcome_sha256 = outcome_digest(&corpus, &decisions);
     writeln!(
         report,
-        "  scorecard=oracle:hunspell corpus:{total} agreements:{agreements} disagreements:{disagreements}"
+        "  scorecard=oracle:hunspell corpus:{total} agreements:{agreements} disagreements:{disagreements} outcome_sha256:{outcome_sha256}"
     )
     .expect("writing to String does not fail");
     append_scorecard(&format!(
-        "{}\tmeasured\t{total}\t{agreements}\t{disagreements}\thunspell\n",
-        fixture.locale
+        "{}\tmeasured\t{total}\t{agreements}\t{disagreements}\thunspell\t{outcome_sha256}\n",
+        fixture.locale,
     ));
+}
+
+fn outcome_digest(corpus: &[String], decisions: &[(bool, bool)]) -> String {
+    assert_eq!(
+        corpus.len(),
+        decisions.len(),
+        "every scorecard word has one pair of decisions"
+    );
+    let mut digest = Sha256::new();
+    for (word, (ferrolex, oracle)) in corpus.iter().zip(decisions) {
+        digest.update(word.as_bytes());
+        digest.update([0]);
+        digest.update([u8::from(*ferrolex), u8::from(*oracle)]);
+    }
+    format!("{:x}", digest.finalize())
 }
 
 fn initialize_scorecard(fixture_set: FixtureSet) {
@@ -641,7 +664,7 @@ fn initialize_scorecard(fixture_set: FixtureSet) {
         .then(hunspell_version)
         .unwrap_or_else(|| "not-requested".to_owned());
     let contents = format!(
-        "# fixture-set: {}\n# corpus: sorted first 128 alphabetic stored stems, manifest probes, and suffixed negative probes\n# oracle-command: hunspell -a -d <dictionary>\n# oracle-version: {version}\nlocale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason\n",
+        "# fixture-set: {}\n# corpus: sorted first 128 alphabetic stored stems, manifest probes, and suffixed negative probes\n# oracle-command: hunspell -a -d <dictionary>\n# oracle-version: {version}\nlocale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason\toutcome-sha256\n",
         fixture_set.name()
     );
     fs::write(&path, contents)
@@ -706,10 +729,11 @@ fn scorecard_rows(text: &str) -> Result<Vec<&str>, String> {
     text.lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter(|line| {
-            *line != "locale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason"
+            *line
+                != "locale\tstatus\tcorpus\tagreements\tdisagreements\toracle-or-reason\toutcome-sha256"
         })
         .map(|line| {
-            (line.split('\t').count() == 6)
+            (line.split('\t').count() == 7)
                 .then_some(line)
                 .ok_or_else(|| format!("invalid scorecard row `{line}`"))
         })
@@ -785,6 +809,16 @@ fn hunspell_oracle_skips_protocol_control_words() {
 }
 
 #[test]
+fn outcome_digest_changes_when_a_different_word_disagrees() {
+    let corpus = ["accepted".to_owned(), "rejected".to_owned()];
+    assert_ne!(
+        outcome_digest(&corpus, &[(true, true), (false, true)]),
+        outcome_digest(&corpus, &[(false, false), (true, false)]),
+        "a fixed disagreement count does not hide changed per-word outcomes"
+    );
+}
+
+#[test]
 fn fixture_sets_select_the_reviewed_coverage() {
     let fixtures = parse_manifest(MANIFEST).expect("checked-in compatibility manifest is valid");
     let selected_ids = |fixture_set| {
@@ -815,8 +849,14 @@ fn fixture_sets_select_the_reviewed_coverage() {
     assert!(
         required
             .iter()
-            .any(|fixture| fixture.aff_decode != Decode::Utf8),
-        "the required gate includes a non-UTF-8 decoding boundary"
+            .any(|fixture| { matches!(fixture.aff_decode, Decode::Latin1 | Decode::Latin2) }),
+        "the required gate includes a legacy single-byte decoding boundary"
+    );
+    assert!(
+        required
+            .iter()
+            .any(|fixture| fixture.aff_decode == Decode::Utf8WithLatin2Fallback),
+        "the required gate includes the reviewed mixed UTF-8/Latin-2 fallback"
     );
     for category in [
         ProbeCategory::Affixed,
@@ -836,9 +876,15 @@ fn fixture_sets_select_the_reviewed_coverage() {
     assert!(
         required
             .iter()
-            .flat_map(|fixture| &fixture.accepted)
-            .any(|probe| !probe.word.is_ascii()),
-        "the required gate includes non-Latin or script-sensitive probes"
+            .find(|fixture| fixture.id == "ar")
+            .expect("the required gate includes Arabic")
+            .accepted
+            .iter()
+            .any(|probe| probe
+                .word
+                .chars()
+                .any(|character| ('\u{0600}'..='\u{06ff}').contains(&character))),
+        "the required gate includes an Arabic-script probe"
     );
 }
 
@@ -855,6 +901,14 @@ fn checked_in_scorecard_baseline_is_well_formed_and_scoped() {
         })
         .collect::<Vec<_>>();
     assert_eq!(locales, SCORECARD_FIXTURE_IDS);
+    assert!(rows.iter().all(|row| {
+        row.split('\t').nth(6).is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .chars()
+                    .all(|character| character.is_ascii_hexdigit())
+        })
+    }));
 }
 
 fn read_verified_fixture(root: &Path, fixture: &Fixture) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {

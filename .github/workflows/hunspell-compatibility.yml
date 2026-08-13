@@ -2,6 +2,17 @@ name: Full Hunspell compatibility scorecard
 
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: Git ref whose compatibility evidence is being measured.
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref whose compatibility evidence is being measured (defaults to this dispatch SHA).
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -10,9 +21,14 @@ jobs:
   scorecard:
     name: Full Hunspell oracle scorecard
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # CI run 31731673331 measured the preceding all-fixture scorecard in 107m10s.
+    # The selected seven-locale set retains most of that input, so 150 minutes
+    # leaves conservative diagnostic and artifact-upload headroom.
+    timeout-minutes: 150
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: 1.88
@@ -26,7 +42,8 @@ jobs:
           FERROLEX_COMPAT_SCORECARD="$RUNNER_TEMP/recognition-scorecard.tsv"
           FERROLEX_COMPAT_SCORECARD_BASELINE="crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv"
           cargo test -p ferrolex-hunspell --test real_world -- --nocapture
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() }}
         with:
           name: recognition-scorecard
           path: ${{ runner.temp }}/recognition-scorecard.tsv
