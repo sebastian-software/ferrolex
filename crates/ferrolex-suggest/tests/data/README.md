@@ -34,5 +34,6 @@ channel.
 
 `frequency_fixture` is either `-` or a semicolon-separated list of
 `candidate=unsigned-frequency` controls. It may contain only the intended word
-and the minimal alternate candidates needed to test a ranking tie. The
-evaluator parses and validates it directly; it is not a hidden dictionary.
+and the minimal alternate candidates needed to test a ranking tie. The intended
+word must have the unique highest supplied frequency. The evaluator parses and
+validates it directly; it is not a hidden dictionary.

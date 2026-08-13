@@ -417,14 +417,27 @@ fn validate_corpus(corpus: &[CorpusCase]) {
             case.id
         );
         if case.has_frequency_fixture() {
-            assert!(
-                control_words.contains(&case.intended_word),
-                "frequency fixture {} must include its intended word",
-                case.id
-            );
+            let intended_frequency = controls
+                .iter()
+                .find_map(|(candidate, frequency)| {
+                    (candidate == &case.intended_word).then_some(*frequency)
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "frequency fixture {} must include its intended word",
+                        case.id
+                    )
+                });
             assert!(
                 controls.len() >= 2,
                 "frequency fixture {} needs an alternate ranking candidate",
+                case.id
+            );
+            assert!(
+                controls.iter().all(|(candidate, frequency)| {
+                    candidate == &case.intended_word || *frequency < intended_frequency
+                }),
+                "frequency fixture {} must give its intended word the unique highest frequency",
                 case.id
             );
         }
