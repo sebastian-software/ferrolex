@@ -1,23 +1,24 @@
 # Native integrations
 
 ferrolex is a native Rust library and CLI first. Its core dictionary, text,
-code-analysis, compiler, and suggestion crates are deliberately independent of
-editor protocols and foreign-function runtimes.
+code-analysis, compiler, and suggestion crates remain independent of editor
+protocols and foreign-function runtimes.
 
-The [supported integrations epic](https://github.com/sebastian-software/ferrolex/issues/82)
-tracks the decision to promote an LSP or binding beyond the initial core. The
-experimental [C ABI spike](ffi.md) now records a
-narrow ownership, threading, error, and distribution contract for a
-plain-word-list checker. It is feature-gated, unpublished, and has no
-stability promise yet. The [Node.js and Python binding spikes](bindings.md)
-likewise remain unpublished while their packaging and compatibility contracts
-are evaluated. The generic [stdio language server](lsp.md) and its thin
-[Visual Studio Code client](vscode.md) ship separately from the core crates.
-The client launches a user-resolved server binary and maps workspace settings;
-Marketplace publication remains deferred until portable server distribution is
-defined.
+[ADR-0010](adr/0010-external-integration-support-tiers.md) records the
+current product tiers. The C ABI, Node.js, Python, generic stdio LSP, and VS
+Code client are all **maintained experimental**. Their source contracts and CI
+checks are maintained, but none yet makes a stable ABI, package, protocol, or
+Marketplace compatibility promise.
 
-The present integration boundary is therefore the Rust workspace and the
-`ferrolex` CLI. Both expose structured failures and deterministic output so an
-LSP or native binding can be added without moving editor or FFI semantics into
-the core crates.
+The generic [LSP](lsp.md) is the first selected external distribution surface:
+[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91) will
+deliver versioned GitHub Release artifacts and clean-install verification for
+its declared native platform matrix. Until then it is source-built. The
+[Visual Studio Code client](vscode.md) remains a thin, locally packaged client
+that resolves a user-supplied server; Marketplace publication remains deferred
+until that LSP artifact and update contract exists.
+
+The [C ABI spike](ffi.md) and [Node.js/Python binding spikes](bindings.md) are
+workspace-only experiments. They accept caller-provided plain-word-list data
+and neither bundle nor fetch dictionaries. All dictionary acquisition and
+redistribution decisions remain subject to ADR-0007.

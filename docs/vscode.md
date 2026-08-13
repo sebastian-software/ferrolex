@@ -20,9 +20,10 @@ plain-word-list file and is persisted by the server.
 
 ## Binary and distribution decision
 
-**Go:** maintain the extension source, its settings contract, and reproducible
-local package verification. Install its JavaScript dependency and build a local
-VSIX with:
+The extension is **maintained experimental**: its source, settings mapping,
+and reproducible local package verification are maintained, but it has no
+Marketplace or bundled-server compatibility promise. Install its JavaScript
+dependency and build a local VSIX with:
 
 ```sh
 cd editors/vscode/ferrolex
@@ -30,9 +31,11 @@ npm install
 npx @vscode/vsce package
 ```
 
-**No-go for Marketplace publication (for now):** the extension does not bundle
-or download a `ferrolex-lsp` binary. Publishing before signed, versioned,
-platform-specific server artifacts and their update policy exist would leave
-users with an extension that cannot reliably start its server. The command
-setting is therefore the explicit, portable resolution mechanism until that
-release contract is implemented.
+**Deferred for Marketplace publication:** the extension does not bundle or
+download a `ferrolex-lsp` binary. Marketplace publication requires the
+portable, versioned LSP artifacts and update contract tracked by
+[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91), followed
+by extension install/update verification on its declared platforms. The command
+setting is the explicit, portable resolution mechanism until then. See
+[ADR-0010](adr/0010-external-integration-support-tiers.md) for the complete
+tier and dictionary-distribution decision.

@@ -59,8 +59,8 @@ header synchronized with the symbols that Rust compiles.
 
 ## Decision record
 
-The C ABI is a **go for a maintained experimental spike**, not yet a go for a
-stable compatibility promise or crates.io publication. Promote it only after
-the Rust check/suggest/source-analysis APIs and binary distribution policy have
-stabilized, and after a real C consumer validates the ownership and packaging
-model.
+The C ABI is **maintained experimental** under
+[ADR-0010](adr/0010-external-integration-support-tiers.md), not a stable ABI
+or released library/header package. Promote it only after a real C consumer
+validates its ownership and packaging model, the Rust APIs it wraps have
+stabilized, and a versioned distribution and platform matrix are chosen.
