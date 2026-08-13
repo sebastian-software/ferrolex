@@ -57,7 +57,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.88
-      - run: cargo test -p ferrolex-suggest --test suggestion_quality -- --nocapture
+      - run: >-
+          FERROLEX_SUGGESTION_QUALITY_REQUIRE_APPROVED=1
+          cargo test -p ferrolex-suggest --test suggestion_quality -- --nocapture
 
   fuzz-smoke:
     name: Fuzz smoke

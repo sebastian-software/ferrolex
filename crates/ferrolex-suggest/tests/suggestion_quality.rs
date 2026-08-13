@@ -7,8 +7,9 @@ use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester, Suggestion};
 const CORPUS: &str = include_str!("data/suggestion-quality-corpus.tsv");
 const BASELINE: &str = include_str!("data/suggestion-quality-baseline.tsv");
 const CORPUS_HEADER: &str = "id\tmisspelling\tintended_word\tlocale\tcontext\tprovenance\treview_status\treviewed_by\treviewed_on\tdisposition\texclusion_rationale\tfrequency_fixture";
-const BASELINE_HEADER: &str = "version\tlocale\tcontext\tevaluated_cases\tstandard_top_1\tstandard_top_3\tfrequency_top_1\tfrequency_top_3\treview_status\treviewed_by\treviewed_on\tchange_rationale";
+const BASELINE_HEADER: &str = "version\tlocale\tcontext\tevaluated_cases\tstandard_top_1\tstandard_top_3\tfrequency_evaluated_cases\tfrequency_top_1\tfrequency_top_3\treview_status\treviewed_by\treviewed_on\tchange_rationale";
 const QUALITY_MAX_RESULTS: usize = 3;
+const REQUIRE_APPROVED_ENV: &str = "FERROLEX_SUGGESTION_QUALITY_REQUIRE_APPROVED";
 
 #[derive(Debug)]
 struct CorpusCase {
@@ -101,29 +102,11 @@ impl CandidateSource for QualitySource {
 fn suggestion_quality_matches_the_review_gated_baseline() {
     let corpus = parse_corpus(CORPUS);
     let baseline = parse_baseline(BASELINE);
-    validate_corpus(&corpus);
-    validate_baseline(&baseline);
+    let require_approved = std::env::var(REQUIRE_APPROVED_ENV).is_ok_and(|value| value == "1");
+    validate_corpus(&corpus, require_approved);
+    validate_baseline(&baseline, require_approved);
 
-    let standard_source = source_for(&corpus, false);
-    let frequency_source = source_for(&corpus, true);
-    let mut standard_scores = BTreeMap::new();
-    let mut frequency_scores = BTreeMap::new();
-
-    for case in corpus.iter().filter(|case| case.is_included()) {
-        let standard = recover(&standard_source, case);
-        standard_scores
-            .entry(case.group())
-            .or_insert_with(Score::default)
-            .record(standard.0, standard.1);
-
-        if case.has_frequency_fixture() {
-            let frequency = recover(&frequency_source, case);
-            frequency_scores
-                .entry(case.group())
-                .or_insert_with(Score::default)
-                .record(frequency.0, frequency.1);
-        }
-    }
+    let (standard_scores, frequency_scores) = score_corpus(&corpus);
 
     let expected_groups = baseline
         .iter()
@@ -185,6 +168,85 @@ fn suggestion_quality_matches_the_review_gated_baseline() {
             ),
         }
     }
+}
+
+#[test]
+fn strict_review_gate_rejects_pending_metadata() {
+    let rejected = std::panic::catch_unwind(|| {
+        validate_review_record(
+            "requires-maintainer-review",
+            "-",
+            "-",
+            "test corpus row",
+            true,
+        );
+    });
+
+    assert!(rejected.is_err());
+}
+
+#[test]
+fn frequency_scores_count_only_frequency_fixtures_in_mixed_groups() {
+    let corpus = vec![
+        test_case("frequency", "cot", "cut", "cat=1;cut=100"),
+        test_case("ordinary", "caat", "cat", "-"),
+    ];
+
+    let (standard, frequency) = score_corpus(&corpus);
+    let group = Group {
+        locale: "en-US".to_owned(),
+        context: "mixed".to_owned(),
+    };
+
+    assert_eq!(standard[&group].cases, 2);
+    assert_eq!(frequency[&group].cases, 1);
+}
+
+fn test_case(
+    id: &str,
+    misspelling: &str,
+    intended_word: &str,
+    frequency_fixture: &str,
+) -> CorpusCase {
+    CorpusCase {
+        id: id.to_owned(),
+        misspelling: misspelling.to_owned(),
+        intended_word: intended_word.to_owned(),
+        locale: "en-US".to_owned(),
+        context: "mixed".to_owned(),
+        provenance: "test-only fixture".to_owned(),
+        review_status: "approved-by-maintainer".to_owned(),
+        reviewed_by: "Test Maintainer".to_owned(),
+        reviewed_on: "2026-08-13".to_owned(),
+        disposition: "included".to_owned(),
+        exclusion_rationale: "-".to_owned(),
+        frequency_fixture: frequency_fixture.to_owned(),
+    }
+}
+
+fn score_corpus(corpus: &[CorpusCase]) -> (BTreeMap<Group, Score>, BTreeMap<Group, Score>) {
+    let standard_source = source_for(corpus, false);
+    let frequency_source = source_for(corpus, true);
+    let mut standard_scores = BTreeMap::new();
+    let mut frequency_scores = BTreeMap::new();
+
+    for case in corpus.iter().filter(|case| case.is_included()) {
+        let standard = recover(&standard_source, case);
+        standard_scores
+            .entry(case.group())
+            .or_insert_with(Score::default)
+            .record(standard.0, standard.1);
+
+        if case.has_frequency_fixture() {
+            let frequency = recover(&frequency_source, case);
+            frequency_scores
+                .entry(case.group())
+                .or_insert_with(Score::default)
+                .record(frequency.0, frequency.1);
+        }
+    }
+
+    (standard_scores, frequency_scores)
 }
 
 fn recover(source: &QualitySource, case: &CorpusCase) -> (bool, bool) {
@@ -308,7 +370,7 @@ fn parse_baseline(contents: &str) -> Vec<BaselineRow> {
             let fields = line.split('\t').collect::<Vec<_>>();
             assert_eq!(
                 fields.len(),
-                12,
+                13,
                 "baseline row {} has an invalid field count",
                 index + 2
             );
@@ -321,10 +383,15 @@ fn parse_baseline(contents: &str) -> Vec<BaselineRow> {
                     )
                 })
             };
-            let frequency = match (fields[6], fields[7]) {
-                ("-", "-") => None,
-                (top_1, top_3) => Some(Score {
-                    cases: parsed(3),
+            let frequency = match (fields[6], fields[7], fields[8]) {
+                ("-", "-", "-") => None,
+                (cases, top_1, top_3) => Some(Score {
+                    cases: cases.parse().unwrap_or_else(|error| {
+                        panic!(
+                            "baseline row {} frequency case count is not a number: {error}",
+                            index + 2
+                        )
+                    }),
                     top_1: top_1.parse().unwrap_or_else(|error| {
                         panic!(
                             "baseline row {} frequency top-1 is not a number: {error}",
@@ -351,16 +418,16 @@ fn parse_baseline(contents: &str) -> Vec<BaselineRow> {
                     top_3: parsed(5),
                 },
                 frequency,
-                review_status: fields[8].to_owned(),
-                reviewed_by: fields[9].to_owned(),
-                reviewed_on: fields[10].to_owned(),
-                change_rationale: fields[11].to_owned(),
+                review_status: fields[9].to_owned(),
+                reviewed_by: fields[10].to_owned(),
+                reviewed_on: fields[11].to_owned(),
+                change_rationale: fields[12].to_owned(),
             }
         })
         .collect()
 }
 
-fn validate_corpus(corpus: &[CorpusCase]) {
+fn validate_corpus(corpus: &[CorpusCase], require_approved: bool) {
     assert!(
         !corpus.is_empty(),
         "corpus must contain at least one reviewed row"
@@ -386,6 +453,7 @@ fn validate_corpus(corpus: &[CorpusCase]) {
             &case.reviewed_by,
             &case.reviewed_on,
             &format!("corpus row {}", case.id),
+            require_approved,
         );
         assert!(
             matches!(case.disposition.as_str(), "included" | "excluded"),
@@ -444,7 +512,7 @@ fn validate_corpus(corpus: &[CorpusCase]) {
     }
 }
 
-fn validate_baseline(baseline: &[BaselineRow]) {
+fn validate_baseline(baseline: &[BaselineRow], require_approved: bool) {
     assert!(
         !baseline.is_empty(),
         "baseline must contain every evaluated group"
@@ -461,6 +529,7 @@ fn validate_baseline(baseline: &[BaselineRow]) {
             &row.reviewed_by,
             &row.reviewed_on,
             &format!("baseline row {}/{}", row.group.locale, row.group.context),
+            require_approved,
         );
         assert!(
             !row.change_rationale.is_empty(),
@@ -469,13 +538,23 @@ fn validate_baseline(baseline: &[BaselineRow]) {
         assert!(row.standard.top_1 <= row.standard.top_3);
         assert!(row.standard.top_3 <= row.standard.cases);
         if let Some(frequency) = row.frequency {
+            assert!(
+                frequency.cases > 0,
+                "frequency baseline rows need at least one frequency-fixture case"
+            );
             assert!(frequency.top_1 <= frequency.top_3);
             assert!(frequency.top_3 <= frequency.cases);
         }
     }
 }
 
-fn validate_review_record(status: &str, reviewed_by: &str, reviewed_on: &str, subject: &str) {
+fn validate_review_record(
+    status: &str,
+    reviewed_by: &str,
+    reviewed_on: &str,
+    subject: &str,
+    require_approved: bool,
+) {
     match status {
         "requires-maintainer-review" => {
             assert_eq!(
@@ -486,11 +565,50 @@ fn validate_review_record(status: &str, reviewed_by: &str, reviewed_on: &str, su
                 reviewed_on, "-",
                 "{subject} has a pending review but a review date"
             );
+            assert!(
+                !require_approved,
+                "{subject} is pending human maintainer review; record an approved-by-maintainer status, reviewer, and ISO review date before CI can pass"
+            );
         }
         "approved-by-maintainer" => {
-            assert_ne!(reviewed_by, "-", "{subject} needs its approving maintainer");
-            assert_ne!(reviewed_on, "-", "{subject} needs its approval date");
+            assert!(
+                !reviewed_by.trim().is_empty() && reviewed_by != "-",
+                "{subject} needs its approving maintainer"
+            );
+            assert!(
+                iso_date(reviewed_on),
+                "{subject} needs an ISO YYYY-MM-DD approval date"
+            );
         }
         _ => panic!("{subject} has an invalid review status: {status}"),
     }
+}
+
+fn iso_date(value: &str) -> bool {
+    let mut parts = value.split('-');
+    let Some(year) = parts.next() else {
+        return false;
+    };
+    let Some(month) = parts.next() else {
+        return false;
+    };
+    let Some(day) = parts.next() else {
+        return false;
+    };
+    if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return false;
+    }
+    let (Ok(year), Ok(month), Ok(day)) =
+        (year.parse::<u16>(), month.parse::<u8>(), day.parse::<u8>())
+    else {
+        return false;
+    };
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days_in_month).contains(&day)
 }

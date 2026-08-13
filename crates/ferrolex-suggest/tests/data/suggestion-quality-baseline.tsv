@@ -1,6 +1,6 @@
-version	locale	context	evaluated_cases	standard_top_1	standard_top_3	frequency_top_1	frequency_top_3	review_status	reviewed_by	reviewed_on	change_rationale
-1	de-DE	general	1	1	1	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
-1	en-US	frequency-ranking	1	0	1	1	1	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
-1	en-US	general	2	2	2	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
-1	en-US	product-docs	1	1	1	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
-1	en-US	source-code	1	1	1	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
+version	locale	context	evaluated_cases	standard_top_1	standard_top_3	frequency_evaluated_cases	frequency_top_1	frequency_top_3	review_status	reviewed_by	reviewed_on	change_rationale
+1	de-DE	general	1	1	1	-	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
+1	en-US	frequency-ranking	1	0	1	1	1	1	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
+1	en-US	general	2	2	2	-	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
+1	en-US	product-docs	1	1	1	-	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
+1	en-US	source-code	1	1	1	-	-	-	requires-maintainer-review	-	-	Initial original-data baseline; a maintainer must review this row before accepting later baseline changes.
