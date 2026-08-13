@@ -69,6 +69,34 @@ When a candidate source carries frequency metadata, higher frequency breaks a
 tie after both distances and before lexical spelling. Sources without frequency
 metadata use the exact same ordering as before.
 
+## Quality corpus and regression baseline
+
+`ferrolex-suggest` has a deliberately small, deterministic quality corpus at
+`crates/ferrolex-suggest/tests/data/suggestion-quality-corpus.tsv`. It measures
+top-1 and top-3 recovery by locale and context. The integration test prints the
+per-group scorecard, and CI compares it to the tracked
+`suggestion-quality-baseline.tsv`; a material regression fails. Changing an
+expected score is therefore an explicit baseline change with a rationale, not
+a regenerated golden file.
+
+The corpus uses original, isolated typo/target pairs only. Each record carries
+its locale, context, provenance, disposition, review status, reviewer, and
+review date; excluded records also carry their rationale. Entries remain marked
+`requires-maintainer-review` until a maintainer approves their use in review
+and records that approval.
+The corpus policy lives beside the data in
+`crates/ferrolex-suggest/tests/data/README.md`: do not copy from dictionaries,
+spell-checkers, search logs, or user text without a documented compatible
+license and review decision. Prefer minimal original pairs and never add an
+enumerable lexicon, personal data, or long text.
+
+The only frequency fixture deliberately creates an equal-distance tie. Its
+frequency-aware score is reported separately from the frequency-free score, so
+the corpus verifies that optional metadata can improve ranking without making a
+frequency corpus a runtime requirement. The test data is excluded from the
+published `ferrolex-suggest` package and is never read by the library at
+runtime; ferrolex does not distribute a dictionary through this quality suite.
+
 The `ferrolex suggest` command exposes `--max-results`,
 `--max-edit-distance`, `--max-candidates`, and `--max-edit-cells`. The latter
 two are useful when deliberately spending a larger, still explicit work budget

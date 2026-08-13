@@ -1,0 +1,8 @@
+id	misspelling	intended_word	locale	context	provenance	review_status	reviewed_by	reviewed_on	disposition	exclusion_rationale	frequency_fixture
+en-us-general-receive	recieve	receive	en-US	general	Original isolated typo/target pair authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	included	-	-
+en-us-general-address	adress	address	en-US	general	Original isolated typo/target pair authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	included	-	-
+en-us-source-code-authentication	authentcation	authentication	en-US	source-code	Original isolated typo/target pair authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	included	-	-
+de-de-general-strasse	strasse	straße	de-DE	general	Original isolated typo/target pair authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	included	-	-
+en-us-product-docs-ferrolex	ferolex	ferrolex	en-US	product-docs	Original product-name typo/target pair authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	included	-	-
+en-us-frequency-ranking-cot	cot	cut	en-US	frequency-ranking	Original ranking-control pair authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	included	-	cut-over-cat
+en-us-proper-name-excluded	artemis	Artemis	en-US	proper-name	Original reviewer proposal authored for this repository; no external corpus consulted.	requires-maintainer-review	-	-	excluded	Proper names are outside the first general-language metric until a separately reviewed policy defines their candidate source.	-
