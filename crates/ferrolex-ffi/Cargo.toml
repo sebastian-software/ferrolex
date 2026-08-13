@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-ffi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Experimental C ABI spike for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
@@ -21,8 +21,8 @@ c-abi = []
 
 [dependencies]
 cbindgen = "0.29.4"
-ferrolex-core = { path = "../ferrolex-core", version = "0.1.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.1.0" }
+ferrolex-core = { path = "../ferrolex-core", version = "0.2.0" }
+ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.2.0" }
 
 [build-dependencies]
 cbindgen = "0.29.4"
