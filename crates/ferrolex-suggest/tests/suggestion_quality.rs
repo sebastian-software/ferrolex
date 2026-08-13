@@ -76,11 +76,11 @@ struct BaselineRow {
     change_rationale: String,
 }
 
-struct QualitySource<'candidate> {
-    candidates: Vec<(&'candidate str, Option<u64>)>,
+struct QualitySource {
+    candidates: Vec<(String, Option<u64>)>,
 }
 
-impl CandidateSource for QualitySource<'_> {
+impl CandidateSource for QualitySource {
     fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
         for (candidate, _) in &self.candidates {
             if !visitor(candidate) {
@@ -92,7 +92,7 @@ impl CandidateSource for QualitySource<'_> {
     fn candidate_frequency(&self, candidate: &str) -> Option<u64> {
         self.candidates
             .iter()
-            .find_map(|(stored, frequency)| (*stored == candidate).then_some(*frequency))
+            .find_map(|(stored, frequency)| (stored == candidate).then_some(*frequency))
             .flatten()
     }
 }
@@ -187,7 +187,7 @@ fn suggestion_quality_matches_the_review_gated_baseline() {
     }
 }
 
-fn recover(source: &QualitySource<'_>, case: &CorpusCase) -> (bool, bool) {
+fn recover(source: &QualitySource, case: &CorpusCase) -> (bool, bool) {
     let result = Suggester::new(
         source,
         SuggestConfig {
@@ -213,25 +213,51 @@ fn recover(source: &QualitySource<'_>, case: &CorpusCase) -> (bool, bool) {
     )
 }
 
-fn source_for(corpus: &[CorpusCase], with_frequency: bool) -> QualitySource<'_> {
-    let mut candidates = corpus
-        .iter()
-        .filter(|case| case.is_included())
-        .map(|case| (case.intended_word.as_str(), None))
-        .collect::<Vec<_>>();
-
-    // This is a ranking control, not a word-list fixture. `cat` is the only
-    // alternate candidate and exists solely to make `cot` a stable tie.
-    candidates.push(("cat", with_frequency.then_some(1)));
-    if with_frequency {
-        let cut = candidates
-            .iter_mut()
-            .find(|(word, _)| *word == "cut")
-            .expect("frequency fixture declares cut");
-        cut.1 = Some(100);
+fn source_for(corpus: &[CorpusCase], with_frequency: bool) -> QualitySource {
+    let mut candidates = BTreeMap::new();
+    for case in corpus.iter().filter(|case| case.is_included()) {
+        candidates.entry(case.intended_word.clone()).or_insert(None);
+        for (candidate, frequency) in frequency_fixture(case) {
+            let entry = candidates.entry(candidate).or_insert(None);
+            if with_frequency {
+                assert!(
+                    entry
+                        .replace(frequency)
+                        .is_none_or(|existing| existing == frequency),
+                    "frequency controls must not disagree for one candidate"
+                );
+            }
+        }
     }
-    candidates.sort_unstable_by(|left, right| left.0.cmp(right.0));
-    QualitySource { candidates }
+    QualitySource {
+        candidates: candidates.into_iter().collect(),
+    }
+}
+
+fn frequency_fixture(case: &CorpusCase) -> Vec<(String, u64)> {
+    if case.frequency_fixture == "-" {
+        return Vec::new();
+    }
+    case.frequency_fixture
+        .split(';')
+        .map(|control| {
+            let (candidate, frequency) = control
+                .split_once('=')
+                .unwrap_or_else(|| panic!("{} has an invalid frequency fixture", case.id));
+            assert!(
+                !candidate.is_empty(),
+                "{} has an empty frequency-fixture candidate",
+                case.id
+            );
+            let frequency = frequency.parse::<u64>().unwrap_or_else(|error| {
+                panic!(
+                    "{} has an invalid frequency-fixture value: {error}",
+                    case.id
+                )
+            });
+            (candidate.to_owned(), frequency)
+        })
+        .collect()
 }
 
 fn parse_corpus(contents: &str) -> Vec<CorpusCase> {
@@ -379,11 +405,29 @@ fn validate_corpus(corpus: &[CorpusCase]) {
                 case.id
             );
         }
-        assert!(
-            matches!(case.frequency_fixture.as_str(), "-" | "cut-over-cat"),
-            "corpus row {} declares an unknown frequency fixture",
+        let controls = frequency_fixture(case);
+        let control_words = controls
+            .iter()
+            .map(|(candidate, _)| candidate)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            control_words.len(),
+            controls.len(),
+            "corpus row {} repeats a frequency-fixture candidate",
             case.id
         );
+        if case.has_frequency_fixture() {
+            assert!(
+                control_words.contains(&case.intended_word),
+                "frequency fixture {} must include its intended word",
+                case.id
+            );
+            assert!(
+                controls.len() >= 2,
+                "frequency fixture {} needs an alternate ranking candidate",
+                case.id
+            );
+        }
     }
 }
 

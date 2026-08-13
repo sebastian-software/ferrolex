@@ -31,3 +31,8 @@ The corpus is used only by the integration test. `ferrolex-suggest` explicitly
 excludes `tests/**` from its published package, keeping this data out of the
 runtime and preventing the package from becoming a dictionary distribution
 channel.
+
+`frequency_fixture` is either `-` or a semicolon-separated list of
+`candidate=unsigned-frequency` controls. It may contain only the intended word
+and the minimal alternate candidates needed to test a ranking tie. The
+evaluator parses and validates it directly; it is not a hidden dictionary.
