@@ -13,8 +13,9 @@ claims.
 
 ## Status
 
-The project is in its initial development phase. The current public API and
-CLI are intentionally small and may change before a stable release.
+The project is pre-1.0. Its supported native Rust API and CLI, experimental
+diagnostics and integrations, MSRV, artifact policy, and release gates are
+defined in the [v0.1 release contract](docs/release-contract.md).
 
 ### Reviewed dictionary compatibility
 
@@ -166,7 +167,9 @@ untrusted throughout the supported import and loading paths.
 
 ## MSRV
 
-ferrolex supports Rust 1.88 and later.
+ferrolex supports Rust 1.88 and later; see the [release
+contract](docs/release-contract.md#versioning-and-msrv) for the MSRV change
+policy.
 
 ## License
 
