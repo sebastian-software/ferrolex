@@ -4,6 +4,50 @@
 an immutable `Dictionary`, preserves the source token and its UTF-8 byte range,
 and reports misspelled segments without changing dictionary semantics.
 
+## Language-awareness tiers
+
+Language support is progressive. A higher tier is opt-in for a named language;
+it does not change the generic analyzer contract for other files.
+
+### Generic support (Level 1)
+
+Generic support is available for every input, including unsupported file types.
+The analyzer classifies generic tokens, segments identifiers, applies the
+configured dictionary and ignore policy, and reports original UTF-8 byte
+ranges. It does not parse the file, so it cannot distinguish a real comment or
+string literal from text that merely looks like one in that language.
+
+The existing `Analyzer`, `Document`, project configuration, dictionary
+selection, ignore classes and patterns, directives, and identifier-suggestion
+contract remain the supported fallback for unsupported languages. Adding a
+language integration must not change their defaults, keys, precedence, or
+meaning for generic documents.
+
+### Syntax-aware support (Level 2)
+
+Syntax-aware support selects a comment-syntax preset from the file type. It
+only determines where `ferrolex:` directives are recognized; ordinary token
+classification and checking remain the generic pass. It does not parse a
+grammar, recover from syntax errors, identify string literals, or understand
+embedded languages. A caller can always override the preset with an explicit
+`Document` comment syntax or CLI/configuration setting.
+
+### Parser/semantic support (Levels 3–4)
+
+A parser-backed integration uses a grammar to locate analyzable language
+constructs and retain their source ranges. It may then pass those spans through
+the same dictionary and policy contract as generic analysis. Semantic support
+is a separate, explicitly documented extension that can use language meaning
+such as symbol or type information; parser support alone makes no semantic
+claim.
+
+The first parser-backed target is Rust; its bounded implementation work is
+tracked in [#96](https://github.com/sebastian-software/ferrolex/issues/96).
+That issue covers syntax boundaries only. It does not add type resolution,
+macro expansion, name resolution, compiler integration, or parser support for
+other languages. See [ADR-0009](adr/0009-language-aware-source-analysis.md)
+for the evidence and trade-offs behind this choice.
+
 ## Identifier segmentation
 
 The default splitter separates underscores, hyphens, digits, and symbols. It

@@ -33,3 +33,4 @@ configuration, CI, and the [GitHub delivery epics](https://github.com/sebastian-
 | [0006](0006-compiled-format-safety-and-layout.md) | Compiled format: owned loading, little-endian, byte-identical | accepted |
 | [0007](0007-dictionary-distribution.md) | Verified upstream sources and local dictionary caches | accepted |
 | [0008](0008-no-cspell-compatibility.md) | Own directive format, no cspell compatibility | accepted |
+| [0009](0009-language-aware-source-analysis.md) | Progressive language-aware source analysis | accepted |
