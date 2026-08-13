@@ -27,6 +27,13 @@ review; it must not be used to mask a regression. The initial rows are marked
 `approved-by-maintainer` and records their identity and review date only after
 the PR review that approves the data.
 
+The named `Suggestion quality regression` CI job sets
+`FERROLEX_SUGGESTION_QUALITY_REQUIRE_APPROVED=1`. That is an enforceable gate:
+it rejects pending corpus and baseline rows. The reviewer must be a non-empty
+maintainer identity and `reviewed_on` must be an ISO `YYYY-MM-DD` date. Until a
+maintainer records those facts, the quality job is expected to fail and the
+change must not merge.
+
 The corpus is used only by the integration test. `ferrolex-suggest` explicitly
 excludes `tests/**` from its published package, keeping this data out of the
 runtime and preventing the package from becoming a dictionary distribution
@@ -37,3 +44,8 @@ channel.
 and the minimal alternate candidates needed to test a ranking tie. The intended
 word must have the unique highest supplied frequency. The evaluator parses and
 validates it directly; it is not a hidden dictionary.
+
+Frequency metrics have their own denominator. `frequency_evaluated_cases` is
+the number of included rows in that locale/context with a frequency fixture;
+it is `-` when the group has none. This permits a group to mix ordinary and
+frequency-aware cases without silently comparing scores against all cases.

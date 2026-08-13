@@ -84,6 +84,11 @@ its locale, context, provenance, disposition, review status, reviewer, and
 review date; excluded records also carry their rationale. Entries remain marked
 `requires-maintainer-review` until a maintainer approves their use in review
 and records that approval.
+
+The dedicated CI lane requires every corpus and baseline row to be
+`approved-by-maintainer`, with a non-empty maintainer identity and an ISO
+`YYYY-MM-DD` review date. Pending records deliberately fail that lane; an
+implementation agent must never change their status on a maintainer's behalf.
 The corpus policy lives beside the data in
 `crates/ferrolex-suggest/tests/data/README.md`: do not copy from dictionaries,
 spell-checkers, search logs, or user text without a documented compatible
@@ -96,6 +101,9 @@ the corpus verifies that optional metadata can improve ranking without making a
 frequency corpus a runtime requirement. The test data is excluded from the
 published `ferrolex-suggest` package and is never read by the library at
 runtime; ferrolex does not distribute a dictionary through this quality suite.
+The frequency score's denominator counts only rows with a declared frequency
+fixture, so a locale/context may safely contain both ordinary and
+frequency-aware cases.
 
 The `ferrolex suggest` command exposes `--max-results`,
 `--max-edit-distance`, `--max-candidates`, and `--max-edit-cells`. The latter
