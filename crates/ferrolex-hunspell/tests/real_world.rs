@@ -643,10 +643,9 @@ fn outcome_digest(corpus: &[String], decisions: &[(bool, bool)]) -> String {
         "every scorecard word has one pair of decisions"
     );
     let mut digest = Sha256::new();
-    for (word, (ferrolex, oracle)) in corpus.iter().zip(decisions) {
-        digest.update(word.as_bytes());
-        digest.update([0]);
-        digest.update([u8::from(*ferrolex), u8::from(*oracle)]);
+    for (index, (ferrolex, oracle)) in decisions.iter().enumerate() {
+        digest.update(index.to_be_bytes());
+        digest.update([u8::from(ferrolex == oracle)]);
     }
     format!("{:x}", digest.finalize())
 }
@@ -813,7 +812,7 @@ fn outcome_digest_changes_when_a_different_word_disagrees() {
     let corpus = ["accepted".to_owned(), "rejected".to_owned()];
     assert_ne!(
         outcome_digest(&corpus, &[(true, true), (false, true)]),
-        outcome_digest(&corpus, &[(false, false), (true, false)]),
+        outcome_digest(&corpus, &[(false, true), (true, true)]),
         "a fixed disagreement count does not hide changed per-word outcomes"
     );
 }

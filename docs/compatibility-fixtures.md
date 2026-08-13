@@ -208,9 +208,9 @@ means the oracle completed for that corpus; `blocked` means the fixture's
 recorded decoding or import boundary prevented a measurement. The baseline at
 [`scorecard-baseline.tsv`](../crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv)
 is a durable, exact per-locale comparison of the seven measured rows. Each row
-also records the SHA-256 of the sorted corpus's `word`, ferrolex decision, and
-Hunspell decision tuples. This identity changes when a new disagreement
-replaces an old one with the same aggregate count.
+also records the SHA-256 of the ordered per-word agreement states. The source
+bytes and sorted corpus are already digest-pinned; this identity changes when a
+new disagreement replaces an old one with the same aggregate count.
 
 The currently expected aggregate divergences are classified as follows:
 
