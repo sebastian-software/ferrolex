@@ -1,13 +1,14 @@
 # Reviewed seven-locale differential baseline for the scorecard fixture set.
 # Corpus: sorted first 128 alphabetic stored stems, manifest probes, and suffixed negative probes.
 # Oracle command: hunspell -a -d <dictionary>; Ubuntu 24.04 package 1.7.2+really1.7.2-10build3.
-# Baseline source: CI run 31731673331 (2026-08-13). New scorecard artifacts record `hunspell -v`.
+# Aggregate source: CI run 31731673331 (2026-08-13); outcome identities were independently measured with Hunspell 1.7.1.
+# New scorecard artifacts record `hunspell -v` and compare this full identity.
 # Update only through the documented review process in docs/compatibility-fixtures.md.
 locale	status	corpus	agreements	disagreements	oracle-or-reason	outcome-sha256
-en_US	measured	139	139	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
-de_DE	measured	139	139	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
-fr_FR	measured	139	139	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
-nl_NL	measured	142	68	74	hunspell	0000000000000000000000000000000000000000000000000000000000000000
-hu_HU	measured	137	132	5	hunspell	0000000000000000000000000000000000000000000000000000000000000000
-ar	measured	133	133	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
-tr_TR	measured	134	134	0	hunspell	0000000000000000000000000000000000000000000000000000000000000000
+en_US	measured	139	139	0	hunspell	35a31e7f4f6cbbe3099970a0c27272bba9fa6f9b16000ca85eca1e02680b6ead
+de_DE	measured	139	139	0	hunspell	35a31e7f4f6cbbe3099970a0c27272bba9fa6f9b16000ca85eca1e02680b6ead
+fr_FR	measured	139	139	0	hunspell	35a31e7f4f6cbbe3099970a0c27272bba9fa6f9b16000ca85eca1e02680b6ead
+nl_NL	measured	142	68	74	hunspell	3f07b90043c6f111ffc7a1a14f54c749785059c361959a198087e36b417823a1
+hu_HU	measured	137	132	5	hunspell	b33d924e9bb6a946fdeb310024478de5735a0ff8e72650dd0547918d8e348772
+ar	measured	133	133	0	hunspell	132d0a7ca1d322f84b14c468b287c2473e807fc0cb65d3887098ea82c12cd1c1
+tr_TR	measured	134	134	0	hunspell	effbd6e9c8f2dc2f671c3f5f7eebb11c93830dcf20c5ac93afd36956d9e8e7fb
