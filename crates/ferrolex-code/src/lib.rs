@@ -1,8 +1,9 @@
 //! Generic source-code analysis for ferrolex.
 //!
 //! The analyzer classifies generic tokens and splits identifiers without
-//! depending on a programming-language parser. Language-specific adapters can
-//! provide a [`Document`] with the appropriate [`CommentSyntax`].
+//! depending on a programming-language parser. Rust documents use the
+//! maintained Tree-sitter Rust grammar to select comments, string contents,
+//! and identifier components before applying the same analysis policy.
 //!
 //! ```
 //! use ferrolex_code::{Analyzer, Document};
@@ -23,6 +24,7 @@ use std::ops::Range;
 
 use ferrolex_core::{Dictionary, Normalization};
 use regex::Regex;
+use tree_sitter::{Node, Parser};
 use unicode_normalization::char::canonical_combining_class;
 
 /// The classification assigned to a complete source token.
@@ -120,6 +122,13 @@ impl CommentSyntax {
 pub struct Document<'source> {
     source: &'source str,
     comment_syntax: CommentSyntax,
+    language: DocumentLanguage,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DocumentLanguage {
+    Generic,
+    Rust,
 }
 
 impl<'source> Document<'source> {
@@ -129,6 +138,21 @@ impl<'source> Document<'source> {
         Self {
             source,
             comment_syntax: CommentSyntax::None,
+            language: DocumentLanguage::Generic,
+        }
+    }
+
+    /// Creates a Rust document that uses parser-backed syntax selection.
+    ///
+    /// The Rust grammar selects only comments, string contents, and identifier
+    /// components for analysis. It deliberately does not resolve types, names,
+    /// or macros.
+    #[must_use]
+    pub fn rust(source: &'source str) -> Self {
+        Self {
+            source,
+            comment_syntax: CommentSyntax::line("//"),
+            language: DocumentLanguage::Rust,
         }
     }
 
@@ -690,6 +714,23 @@ impl<'dictionary> Analyzer<'dictionary> {
     /// Checks a document and returns findings plus directive diagnostics.
     #[must_use]
     pub fn check<'source>(&self, document: &Document<'source>) -> Analysis<'source> {
+        match document.language {
+            DocumentLanguage::Generic => self.check_generic(document),
+            DocumentLanguage::Rust => self.check_rust_document(document),
+        }
+    }
+
+    /// Checks Rust source with parser-backed syntax selection.
+    ///
+    /// This is equivalent to checking [`Document::rust`]. Findings retain
+    /// UTF-8 byte ranges in the original source, including after parser error
+    /// recovery.
+    #[must_use]
+    pub fn check_rust<'source>(&self, source: &'source str) -> Analysis<'source> {
+        self.check(&Document::rust(source))
+    }
+
+    fn check_generic<'source>(&self, document: &Document<'source>) -> Analysis<'source> {
         let lines = document_lines(document.source);
         let mut directives = DirectiveState::default();
         let mut directive_lines = BTreeSet::new();
@@ -725,6 +766,71 @@ impl<'dictionary> Analyzer<'dictionary> {
                     &directives.ignored_words,
                     &mut findings,
                 );
+            }
+        }
+
+        Analysis {
+            findings,
+            directive_diagnostics: diagnostics,
+        }
+    }
+
+    fn check_rust_document<'source>(&self, document: &Document<'source>) -> Analysis<'source> {
+        let nodes = rust_nodes(document.source);
+        let mut directives = DirectiveState::default();
+        let mut diagnostics = Vec::new();
+
+        for node in &nodes {
+            if node.kind != RustNodeKind::Comment {
+                continue;
+            }
+            let text = &document.source[node.range.clone()];
+            if let Some(directive) = parse_directive(text, &document.comment_syntax) {
+                directives.record_ignore_words(&directive);
+                if let Some(problem) = directive.problem() {
+                    diagnostics.push(DirectiveDiagnostic {
+                        range: node.range.clone(),
+                        problem,
+                    });
+                }
+            }
+        }
+
+        let mut findings = Vec::new();
+        for node in nodes {
+            let text = &document.source[node.range.clone()];
+            if node.kind == RustNodeKind::Comment {
+                if let Some(directive) = parse_directive(text, &document.comment_syntax) {
+                    directives.apply_switch(&directive);
+                    continue;
+                }
+            }
+            if directives.disabled {
+                continue;
+            }
+
+            match node.kind {
+                RustNodeKind::Comment | RustNodeKind::StringContent => {
+                    for raw_token in raw_tokens(text, node.range.start) {
+                        self.check_token(
+                            document.source,
+                            &raw_token,
+                            &directives.ignored_words,
+                            &mut findings,
+                        );
+                    }
+                }
+                RustNodeKind::Identifier => {
+                    self.check_token(
+                        document.source,
+                        &RawToken {
+                            text,
+                            range: node.range,
+                        },
+                        &directives.ignored_words,
+                        &mut findings,
+                    );
+                }
             }
         }
 
@@ -1059,6 +1165,57 @@ fn parse_directive<'source>(
 struct RawToken<'source> {
     text: &'source str,
     range: Range<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RustNodeKind {
+    Comment,
+    StringContent,
+    Identifier,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RustNode {
+    kind: RustNodeKind,
+    range: Range<usize>,
+}
+
+fn rust_nodes(source: &str) -> Vec<RustNode> {
+    let mut parser = Parser::new();
+    let language = tree_sitter_rust::LANGUAGE;
+    parser
+        .set_language(&language.into())
+        .expect("the bundled Tree-sitter Rust grammar must load");
+    let tree = parser
+        .parse(source, None)
+        .expect("parsing without cancellation must produce a syntax tree");
+
+    let mut nodes = Vec::new();
+    collect_rust_nodes(tree.root_node(), &mut nodes);
+    nodes
+}
+
+fn collect_rust_nodes(node: Node<'_>, nodes: &mut Vec<RustNode>) {
+    let kind = match node.kind() {
+        "line_comment" | "block_comment" => Some(RustNodeKind::Comment),
+        "string_content" => Some(RustNodeKind::StringContent),
+        "identifier" | "type_identifier" | "field_identifier" | "shorthand_field_identifier" => {
+            Some(RustNodeKind::Identifier)
+        }
+        _ => None,
+    };
+    if let Some(kind) = kind {
+        nodes.push(RustNode {
+            kind,
+            range: node.byte_range(),
+        });
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_rust_nodes(child, nodes);
+    }
 }
 
 fn raw_tokens(line: &str, line_start: usize) -> Vec<RawToken<'_>> {
@@ -1558,6 +1715,84 @@ mod tests {
         assert_eq!(
             recombine_identifier_suggestion(finding, "authentication"),
             Some("OAuthAuthenticationProvider".to_owned())
+        );
+    }
+
+    #[test]
+    fn rust_analysis_selects_comments_strings_and_identifier_components() {
+        let dictionary = WordList::new([
+            "fn", "known", "Function", "let", "value", "machine", "raw", "string",
+        ])
+        .expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = r##"
+fn knownFunction() {
+    // commenttypo
+    let value = "escapedtypo\nstring";
+    let raw_value = r#"rawtypo raw string"#;
+    let machine = 0xdeadbeef + 123_456;
+}
+"##;
+
+        let analysis = analyzer.check_rust(source);
+
+        assert_eq!(
+            analysis
+                .findings()
+                .iter()
+                .map(super::Finding::word)
+                .collect::<Vec<_>>(),
+            ["commenttypo", "escapedtypo", "rawtypo"]
+        );
+        assert!(analysis
+            .findings()
+            .iter()
+            .all(|finding| &source[finding.range()] == finding.word()));
+    }
+
+    #[test]
+    fn rust_analysis_preserves_utf8_ranges_and_directives() {
+        let dictionary = WordList::new(["let", "name", "café"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "// café\n// ferrolex:ignore commenttypo\nlet misspeled_name = r#\"rawtypo\";";
+
+        let analysis = analyzer.check(&Document::rust(source));
+
+        assert_eq!(
+            analysis
+                .findings()
+                .iter()
+                .map(super::Finding::word)
+                .collect::<Vec<_>>(),
+            ["misspeled", "rawtypo"]
+        );
+        assert_eq!(
+            analysis.findings()[0].range(),
+            source.find("misspeled").expect("identifier is present")
+                ..source.find("misspeled").expect("identifier is present") + "misspeled".len()
+        );
+        assert_eq!(
+            analysis.findings()[1].range(),
+            source.find("rawtypo").expect("raw string is present")
+                ..source.find("rawtypo").expect("raw string is present") + "rawtypo".len()
+        );
+    }
+
+    #[test]
+    fn rust_analysis_recovers_after_a_parser_error() {
+        let dictionary = WordList::new(["fn", "let", "value"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "fn broken( {\n// commenttypo\nlet misspeled_value = \"stringtypo\";\n}";
+
+        let analysis = analyzer.check_rust(source);
+
+        assert_eq!(
+            analysis
+                .findings()
+                .iter()
+                .map(super::Finding::word)
+                .collect::<Vec<_>>(),
+            ["broken", "commenttypo", "misspeled", "stringtypo"]
         );
     }
 }

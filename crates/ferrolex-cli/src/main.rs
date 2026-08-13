@@ -797,14 +797,14 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
             path: path.clone(),
             source,
         })?;
-        let document = match command
-            .comment_syntax
-            .as_ref()
-            .or(project_comment_syntax.as_ref())
-        {
-            Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
-            None => Document::new(&source).with_comment_syntax(comment_syntax_for_path(&path)),
-        };
+        let document = analysis_document(
+            &path,
+            &source,
+            command
+                .comment_syntax
+                .as_ref()
+                .or(project_comment_syntax.as_ref()),
+        );
         let analysis = analyzer.check(&document);
         for finding in analysis.findings() {
             print_finding(&path, &source, finding.range().start, finding.word());
@@ -843,6 +843,25 @@ fn comment_syntax_for_path(path: &Path) -> CommentSyntax {
         Some("sql" | "lua" | "hs") => CommentSyntax::line("--"),
         Some("md" | "markdown" | "html" | "htm" | "xml") => CommentSyntax::Html,
         _ => CommentSyntax::None,
+    }
+}
+
+fn analysis_document<'source>(
+    path: &Path,
+    source: &'source str,
+    configured_comment_syntax: Option<&CommentSyntax>,
+) -> Document<'source> {
+    let is_rust = path.extension().and_then(|extension| extension.to_str()) == Some("rs");
+    let document = if is_rust {
+        Document::rust(source)
+    } else {
+        Document::new(source)
+    };
+
+    match configured_comment_syntax {
+        Some(syntax) => document.with_comment_syntax(syntax.clone()),
+        None if is_rust => document,
+        None => document.with_comment_syntax(comment_syntax_for_path(path)),
     }
 }
 
