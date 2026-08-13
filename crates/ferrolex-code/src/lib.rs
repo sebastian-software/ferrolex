@@ -785,13 +785,15 @@ impl<'dictionary> Analyzer<'dictionary> {
                 continue;
             }
             let text = &document.source[node.range.clone()];
-            if let Some(directive) = parse_directive(text, &document.comment_syntax) {
-                directives.record_ignore_words(&directive);
-                if let Some(problem) = directive.problem() {
-                    diagnostics.push(DirectiveDiagnostic {
-                        range: node.range.clone(),
-                        problem,
-                    });
+            if rust_comment_starts_line(document.source, &node.range) {
+                if let Some(directive) = parse_directive(text, &document.comment_syntax) {
+                    directives.record_ignore_words(&directive);
+                    if let Some(problem) = directive.problem() {
+                        diagnostics.push(DirectiveDiagnostic {
+                            range: node.range.clone(),
+                            problem,
+                        });
+                    }
                 }
             }
         }
@@ -799,7 +801,9 @@ impl<'dictionary> Analyzer<'dictionary> {
         let mut findings = Vec::new();
         for node in nodes {
             let text = &document.source[node.range.clone()];
-            if node.kind == RustNodeKind::Comment {
+            if node.kind == RustNodeKind::Comment
+                && rust_comment_starts_line(document.source, &node.range)
+            {
                 if let Some(directive) = parse_directive(text, &document.comment_syntax) {
                     directives.apply_switch(&directive);
                     continue;
@@ -1199,9 +1203,11 @@ fn collect_rust_nodes(node: Node<'_>, nodes: &mut Vec<RustNode>) {
     let kind = match node.kind() {
         "line_comment" | "block_comment" => Some(RustNodeKind::Comment),
         "string_content" => Some(RustNodeKind::StringContent),
-        "identifier" | "type_identifier" | "field_identifier" | "shorthand_field_identifier" => {
-            Some(RustNodeKind::Identifier)
-        }
+        "identifier"
+        | "type_identifier"
+        | "field_identifier"
+        | "shorthand_field_identifier"
+        | "metavariable" => Some(RustNodeKind::Identifier),
         _ => None,
     };
     if let Some(kind) = kind {
@@ -1216,6 +1222,13 @@ fn collect_rust_nodes(node: Node<'_>, nodes: &mut Vec<RustNode>) {
     for child in node.children(&mut cursor) {
         collect_rust_nodes(child, nodes);
     }
+}
+
+fn rust_comment_starts_line(source: &str, range: &Range<usize>) -> bool {
+    let line_start = source[..range.start]
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+    source[line_start..range.start].trim().is_empty()
 }
 
 fn raw_tokens(line: &str, line_start: usize) -> Vec<RawToken<'_>> {
@@ -1793,6 +1806,38 @@ fn knownFunction() {
                 .map(super::Finding::word)
                 .collect::<Vec<_>>(),
             ["broken", "commenttypo", "misspeled", "stringtypo"]
+        );
+    }
+
+    #[test]
+    fn rust_analysis_only_applies_directives_from_complete_comment_lines() {
+        let dictionary = WordList::new(["let", "known"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "let known = 1; // ferrolex:disable\nmisspeled";
+
+        let analysis = analyzer.check_rust(source);
+
+        assert!(analysis
+            .findings()
+            .iter()
+            .any(|finding| finding.word() == "misspeled"));
+    }
+
+    #[test]
+    fn rust_analysis_checks_macro_rule_metavariables() {
+        let dictionary = WordList::new(["known", "ident"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source = "macro_rules! known { ($misspeled:ident) => { $misspeled }; }";
+
+        let analysis = analyzer.check_rust(source);
+
+        assert_eq!(
+            analysis
+                .findings()
+                .iter()
+                .filter(|finding| finding.word() == "misspeled")
+                .count(),
+            2
         );
     }
 }
