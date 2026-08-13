@@ -41,7 +41,9 @@ can make these limits explicit per caller.
 
 ## Dictionary entries
 
-The first non-comment `.dic` line may contain an entry count. The count is
+The first non-comment `.dic` line may contain an entry count. Lines beginning
+with `#` or `/` are comments. A slash in a stem is written as `\/`; a trailing
+slash may omit flags only when morphology fields follow it. The count is
 validated when present but does not change recognition semantics. Each remaining
 entry has this shape:
 

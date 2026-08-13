@@ -49,13 +49,13 @@ into an accidental quality promise.
 | --- | --- | --- | --- | --- |
 | `en_US` | Latin | UTF-8 | Strict probe | The 2026-08-11 digest-verified exact pair strict-imports after bounded `COMPOUNDRULE` quantifier support. `TRY` and `NOSUGGEST` remain suggestion-only warnings. Recognition probes and an opt-in fixture remain required before a broader support claim. |
 | `de_DE` | Latin | ISO-8859-1 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports and builds the runtime cache. It accepts `Straße`, `Häuser`, and `Häusern`, and rejects `Ferrolex`. `TRY`, `MAP`, and `NOSUGGEST` remain suggestion-only warnings; this is not full upstream recognition parity. |
-| `es_ES` | Latin | UTF-8 | Strict probe | The 2026-08-11 digest-verified exact pair strict-imports with a variation-selector UTF-8 flag. `MAP` and `TRY` remain suggestion-only warnings. Recognition probes and an opt-in fixture remain required before a broader support claim. |
-| `fr_FR` | Latin | UTF-8 | Blocked | `FULLSTRIP`, `ICONV`, `OCONV`, and `WORDCHARS` strict-import. Its anchored, multi-scalar `BREAK` patterns remain recognition-affecting errors; `TRY`, `MAP`, `KEY`, and `NOSUGGEST` are suggestion-only warnings. |
-| `it_IT` | Latin | UTF-8 | Blocked | `HOME`, `NAME`, and `VERSION` are not part of the importer subset. `LANG` imports with Unicode-default capitalization fallback. |
-| `pt_BR` | Latin | UTF-8 with leading BOM in `.aff` | Blocked | The byte importer normalizes the leading BOM; `BREAK`, `ONLYMAXDIFF`, and `WARN` remain outside the subset. |
-| `pt_PT` | Latin | UTF-8 | Strict probe | The 2026-08-11 digest-verified exact pair strict-imports after `LANG` support. Its tag uses Unicode-default capitalization fallback; `KEY`, `MAP`, and `TRY` remain suggestion-only warnings. Recognition probes and an opt-in fixture remain required before a broader support claim. |
-| `nl_NL` | Latin | UTF-8 | Blocked | `ONLYMAXDIFF`, `WARN`, non-positive `COMPOUNDMIN`, and an oversized/complex `BREAK` section remain strict errors. Compound safeguards, `OCONV`, `WORDCHARS`, and bounded `COMPOUNDRULE` are no longer gates. |
-| `pl_PL` | Latin | ISO-8859-2 | Strict fixture | The exact-byte fixture imports through the public ISO-8859-2 byte path, compiles and reloads the runtime cache, accepts `słowo` and `słowami`, and rejects its synthetic negative probe. This validates the documented subset, not full Hunspell compatibility or redistribution terms. |
+| `es_ES` | Latin | UTF-8 | Strict fixture | The exact source uses a variation-selector UTF-8 flag. The fixture covers a stem, suffix form, and Unicode-default casing fallback; `TRY` remains a suggestion-only warning. |
+| `fr_FR` | Latin | UTF-8 | Strict fixture | The exact pair accepts its multi-scalar, anchored `BREAK` patterns and the fixture covers stem, suffix, casing, and `KEEPCASE` behavior. `TRY` is a suggestion-only warning; the source count discrepancy remains visible as a warning. |
+| `it_IT` | Latin | UTF-8 | Strict fixture | Slash-prefixed DIC comments, escaped literal slashes, and morphology-only trailing slashes import without changing recognition. `HOME`, `NAME`, `VERSION`, and `TRY` are suggestion-only warnings; `LANG it_IT` uses Unicode-default capitalization fallback. |
+| `pt_BR` | Latin | UTF-8 with leading BOM in `.aff` and `.dic` | Strict fixture | The byte importer normalizes each leading BOM. The fixture covers stem, suffix, and casing; `TRY`, `MAXNGRAMSUGS`, `MAXDIFF`, `ONLYMAXDIFF`, and `WARN` are suggestion-only warnings. |
+| `pt_PT` | Latin | UTF-8 | Strict fixture | The exact pair uses `LANG pt_PT` with Unicode-default capitalization fallback and has stem, suffix, and casing probes. `TRY` is a suggestion-only warning. |
+| `nl_NL` | Latin | UTF-8 | Strict fixture | Grouped `COMPOUNDRULE` flags, `COMPOUNDMIN 0`, escaped DIC slashes, morphology-only trailing slashes, and `KEEPCASE` are covered. The fixture includes a generated compound; suggestion directives remain warnings. |
+| `pl_PL` | Latin | ISO-8859-2 | Strict fixture | The exact-byte fixture imports through the public ISO-8859-2 byte path, compiles and reloads the runtime cache, and covers stem, suffix, and casing probes. Count discrepancies remain warning-only. |
 | `ru_RU` | Cyrillic | UTF-8 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports, builds the runtime cache, accepts `русский` and `русского`, and rejects `русскии`. `TRY` is the only observed suggestion-only warning; the probes do not establish full upstream recognition parity. |
 | `tr_TR` | Latin, agglutinative | UTF-8 | Strict fixture | The digest-verified exact pair strict-imports with `FLAG num`, including flag `0`, entries up to 32 KiB, and up to 4,096 flags per entry. It accepts the recorded `yedieminle` suffix form, and `LANG tr_TR` uses dotted/dotless-I capitalization fallback. The probes are not full generated-form or recognition parity evidence. |
 | `ar` | Arabic | UTF-8 | Strict fixture | The 2026-08-11 exact-pair probe strict-imports with `FLAG long`, long-form `AF` aliases, and alias references in affix continuation flags. `TRY`, `KEY`, and `MAP` remain suggestion-only warnings; this is not full upstream recognition parity. |
@@ -149,18 +149,9 @@ FERROLEX_COMPAT_SCORECARD=/tmp/recognition-scorecard.tsv \
   cargo test -p ferrolex-hunspell --test real_world -- --nocapture
 ```
 
-The CI baseline from [run 31487827770](https://github.com/sebastian-software/ferrolex/actions/runs/31487827770)
-is recorded in the `recognition-scorecard` artifact.
-
-| Locale | Status | Corpus | Agreement | Disagreement |
-| --- | --- | ---: | ---: | ---: |
-| `en_US` | measured | 137 | 137 | 0 |
-| `de_DE` | measured | 135 | 135 | 0 |
-| `fr_FR` | measured | 135 | 135 | 0 |
-| `nl_NL` | measured | 135 | 61 | 74 |
-| `hu_HU` | lenient local fixture validated (reviewed UTF-8/ISO-8859-2 AFF fallback; oracle pending) | — | — | — |
-| `ar` | measured | 133 | 133 | 0 |
-| `tr_TR` | measured | 132 | 132 | 0 |
-
-The `nl_NL` disagreement is a triage item, not a supported-parity claim.
-Every CI run uploads its current TSV; blocked sources remain visible.
+Every compatibility CI run invokes Hunspell for each strict fixture and uploads
+`recognition-scorecard.tsv`. Each locale row includes the deterministic corpus
+size, agreements, and disagreements; the artifact is the authoritative
+measurement, rather than a copied, stale table in this document. Lenient and
+blocked fixtures remain visible with their reason. The scorecard is evidence
+for its recorded corpus, not a general Hunspell-parity assertion.

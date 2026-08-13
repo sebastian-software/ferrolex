@@ -26,8 +26,10 @@ against the stem index; multi-step permit chains remain a later feature gate.
 A permit-affix remains valid as an ordinary affix outside a compound. A
 `COMPOUNDRULE` header may additionally declare up to 1,024 literal patterns
 with two through sixteen component flags, such as `AB` or `XYZ`; components
-must carry the corresponding flags in order. Parenthesized groups are diagnosed
-as unsupported rather than interpreted as literal flags. For Unicode flag mode,
+must carry the corresponding flags in order. Parenthesized groups, such as
+`(N1)(n2)`, explicitly delimit exactly one flag per component and are accepted
+for Unicode, `long`, and `num` flag modes. Nested, unbalanced, quantified, or
+multi-flag groups are rejected. For Unicode flag mode,
 postfix `*`, `+`, and `?` expand during import into only the possible
 two-through-sixteen component sequences. Expansion is capped at 1,024 patterns
 per rule and 16,384 per dictionary, with an import diagnostic on overflow.
