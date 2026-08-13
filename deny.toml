@@ -22,7 +22,19 @@ allow = [
     "MIT",
 ]
 confidence-threshold = 0.8
-exceptions = []
+# These narrowly scoped entries are reviewed in
+# https://github.com/sebastian-software/ferrolex/issues/84. They do not expand
+# the distribution-wide allow list: each remains limited to the stated crate
+# version and must be reassessed when that dependency is upgraded or removed.
+exceptions = [
+    # cbindgen is a build-time generator for the FFI C header; its MPL-2.0
+    # sources are not included in the ferrolex distribution.
+    { allow = ["MPL-2.0"], crate = "cbindgen@0.29.4" },
+    # unicode-ident provides Unicode identifier tables transitively to Rust
+    # procedural-macro tooling; the Unicode-3.0 notice accompanies its
+    # otherwise MIT OR Apache-2.0 license expression.
+    { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.24" },
+]
 
 [bans]
 # Duplicates are surfaced for maintenance review without blocking a safe build.

@@ -716,8 +716,7 @@ impl CompiledDictionary {
         if index_offset < HEADER_SIZE
             || index_offset
                 .checked_add(index_len)
-                .filter(|end| *end <= bytes.len())
-                .is_none()
+                .is_none_or(|end| end > bytes.len())
         {
             return Err(LoadError::InvalidLayout {
                 reason: LayoutError::IndexOutsideFile,
@@ -725,8 +724,7 @@ impl CompiledDictionary {
         }
         if data_offset
             .checked_add(data_len)
-            .filter(|end| *end <= bytes.len())
-            .is_none()
+            .is_none_or(|end| end > bytes.len())
         {
             return Err(LoadError::InvalidLayout {
                 reason: LayoutError::DataOutsideFile,
