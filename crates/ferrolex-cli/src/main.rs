@@ -853,7 +853,10 @@ fn analysis_document<'source>(
 ) -> Document<'source> {
     let is_rust = path.extension().and_then(|extension| extension.to_str()) == Some("rs");
     if let Some(syntax) = configured_comment_syntax {
-        if is_rust && syntax != &CommentSyntax::line("//") {
+        if is_rust
+            && (matches!(syntax, CommentSyntax::Html)
+                || matches!(syntax, CommentSyntax::Line(prefix) if prefix != "//"))
+        {
             // An explicit non-Rust directive syntax is a user request for the
             // generic analyzer's established behavior.
             return Document::new(source).with_comment_syntax(syntax.clone());
@@ -2870,6 +2873,27 @@ mod tests {
 
         assert_eq!(
             run(arguments).expect("explicit directive syntax is supported"),
+            RunOutcome::Success
+        );
+    }
+
+    #[test]
+    fn no_comment_syntax_keeps_parser_backed_analysis_for_rust_files() {
+        let dictionary = temporary_dictionary("fn\nknown\n");
+        let source = temporary_rust_file("async fn known() {}\n");
+        let config = temporary_file("comment-syntax = none\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "analyze".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "--config".to_owned(),
+            config.path.to_string_lossy().into_owned(),
+            source.path.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("the project configuration is supported"),
             RunOutcome::Success
         );
     }
