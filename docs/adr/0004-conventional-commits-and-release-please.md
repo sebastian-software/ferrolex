@@ -40,5 +40,5 @@ low-ceremony releases from day one.
 
 ## References
 
-- [rfc.md](../../rfc.md) §60
+- [Release readiness epic](https://github.com/sebastian-software/ferrolex/issues/79)
 - <https://github.com/sebastian-software/standards>

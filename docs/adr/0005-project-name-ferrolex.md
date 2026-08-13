@@ -7,7 +7,7 @@
 
 ## Context
 
-The RFC used `spell` as a placeholder CLI name, which collides with the
+Early planning used `spell` as a placeholder CLI name, which collides with the
 classic Unix `spell` tool, and `spell-*` as placeholder crate names. The
 repository's working title was already `ferrolex` (ferro/iron alluding to
 Rust, lex to lexicon).
@@ -27,13 +27,9 @@ One name everywhere: the project, the crates.io namespace (`ferrolex-core`,
 - No collision with Unix `spell`; the name is unique and greppable.
 - The `ferrolex` crate name should be reserved on crates.io before the first
   public release.
-- RFC examples and future docs use `ferrolex` consistently.
+- Examples and future docs use `ferrolex` consistently.
 
 ## Validation and review triggers
 
 - Reopen if a software-sector trademark conflict for "ferrolex" surfaces
   before the first public release.
-
-## References
-
-- [rfc.md](../../rfc.md) §6, §33, §53

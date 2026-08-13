@@ -63,10 +63,10 @@ tempting and detectable (Spellbook).
 
 ## Consequences
 
-- `CONTRIBUTING.md` must carry the policy text (RFC §5.2).
+- `CONTRIBUTING.md` must carry the policy text.
 - Code review includes a provenance check for suspicious structural closeness.
-- Behavior documentation (RFC §5.3) must exist before the hardest
-  compatibility work starts, and serves as the implementation reference.
+- Behavior documentation must exist before the hardest compatibility work
+  starts, and serves as the implementation reference.
 - The policy is a public trust artifact: it is documented visibly, not only
   internally.
 
@@ -78,5 +78,5 @@ tempting and detectable (Spellbook).
 
 ## References
 
-- [rfc.md](../../rfc.md) §3.1, §5
+- [Compatibility delivery epic](https://github.com/sebastian-software/ferrolex/issues/80)
 - Spellbook: <https://github.com/helix-editor/spellbook> (MPL-2.0)

@@ -7,7 +7,7 @@
 
 ## Context
 
-The core engine ships without dictionaries to stay license-clean (RFC §4.3).
+The core engine ships without dictionaries to stay license-clean.
 Users still need a low-friction way to obtain compiled dictionaries, and
 dictionary licenses (often GPL/LGPL/MPL or custom) must remain explicit and
 separate from the engine's MIT OR Apache-2.0 licensing.
@@ -76,4 +76,5 @@ requirement exists yet.
 
 - [Dictionary fetching](../dictionary-fetching.md)
 - [Locale compatibility](../locale-compatibility.md)
-- [rfc.md](../../rfc.md) §4.3, §12, §42
+- [Dictionary distribution epic](https://github.com/sebastian-software/ferrolex/issues/12)
+- [Compatibility delivery epic](https://github.com/sebastian-software/ferrolex/issues/80)

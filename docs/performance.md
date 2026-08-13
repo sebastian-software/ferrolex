@@ -41,8 +41,8 @@ runtime CLI surface.
 
 ### External Hunspell comparison
 
-To investigate the RFC §41 high-volume-lookup goal, install Hunspell outside
-this repository, use a digest-verified fixture from the compatibility suite,
+To investigate high-volume lookup, install Hunspell outside this repository,
+use a digest-verified fixture from the compatibility suite,
 and compare only the same preloaded word sequence on one quiet machine. Record
 the Ferrolex and Hunspell commands, dictionary digest, query mix, toolchain,
 OS/CPU/power mode, and raw Criterion output. Treat the external executable as

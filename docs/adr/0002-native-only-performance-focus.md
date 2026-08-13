@@ -18,12 +18,12 @@ surface.
 ## Decision
 
 The engine is native-only. Browser and WebAssembly deployment are not goals,
-initial or otherwise (RFC §4.5).
+initial or otherwise.
 
 The engine is consistently CPU-optimized with memory-saving operations
 wherever feasible: cache-friendly contiguous layouts, allocation-free lookup
 hot paths, compact encodings, and SIMD only where benchmarks prove a win
-(RFC §31). When memory savings and hot-path latency conflict, latency wins and
+When memory savings and hot-path latency conflict, latency wins and
 the trade-off is documented.
 
 ## Considered options
@@ -49,8 +49,8 @@ the optimization space unconstrained.
   the mmap-centric compiled format and threading model. This cost is accepted.
 - `wasm32` compatibility must not be used as an argument in design or
   dependency reviews.
-- Node.js and other non-Rust consumers are served through native bindings
-  (RFC §32), not WASM.
+- Node.js and other non-Rust consumers are served through native bindings, not
+  WASM.
 
 ## Validation and review triggers
 
@@ -58,4 +58,5 @@ the optimization space unconstrained.
 
 ## References
 
-- [rfc.md](../../rfc.md) §3.5, §4.5, §13, §31, §57 (principle 9)
+- [Compiled artifacts and performance epic](https://github.com/sebastian-software/ferrolex/issues/81)
+- [Supported integrations epic](https://github.com/sebastian-software/ferrolex/issues/82)
