@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: nightly
       - run: cargo install cargo-fuzz --locked
@@ -68,7 +68,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
       - id: changes
@@ -83,13 +83,13 @@ jobs:
             head='${{ github.sha }}'
           fi
           git diff --name-only "$base" "$head" > "$RUNNER_TEMP/changed-files"
-          if grep -Eq '^(crates/ferrolex-(hunspell|compiler|dictionaries)/|crates/ferrolex-hunspell/tests/real_world|scripts/fetch-compat-fixtures\.sh$|\.github/workflows/)' "$RUNNER_TEMP/changed-files"; then
+          if grep -Eq '^(Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.cargo/|crates/|scripts/(fetch-compat-fixtures|generate-readme-compat-status)\.sh$|README\.md$|\.github/workflows/)' "$RUNNER_TEMP/changed-files"; then
             echo 'relevant=true' >> "$GITHUB_OUTPUT"
           else
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
-            echo 'No Hunspell/compiler/dictionary/fixture/CI paths changed.'
+            echo 'No executable, dependency, fixture, generator, README, or CI paths changed.'
           fi
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         if: steps.changes.outputs.relevant == 'true'
         with:
           toolchain: 1.88

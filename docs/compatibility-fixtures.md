@@ -169,9 +169,10 @@ the required set's import, encoding, morphology, casing, and script coverage.
 
 The `Hunspell compatibility gate` is a required-check-safe PR job: it always
 reports a result, but only downloads and runs the `required` set when a
-Hunspell, compiler, dictionary, fixture, or workflow path changed. The normal
-CI `push` trigger is limited to `main`, so a PR commit does not receive both a
-branch push and pull-request run.
+Cargo manifest/lockfile, Rust toolchain, local crate, fixture, downloader,
+generator, README, or workflow path changed. The normal CI `push` trigger is
+limited to `main`, so a PR commit does not receive both a branch push and
+pull-request run.
 
 ## Differential recognition scorecard
 
@@ -180,6 +181,13 @@ digest-pinned reference pairs, imports them, cache-roundtrips them, invokes the
 system `hunspell` command, and uploads `recognition-scorecard.tsv`. CI invokes
 it weekly, by manual dispatch, and after Release Please creates a release. The
 normal workspace test remains offline and does not require this oracle.
+
+The scorecard job allows 150 minutes. The preceding all-fixture scorecard took
+107m10s in CI run `31731673331`; the selected seven-locale corpus retains most
+of its input bytes, including `tr_TR`. The limit deliberately preserves time
+for diagnosis and artifact upload rather than claiming that the selected set
+has a shorter full-run measurement. The scorecard artifact uploads whenever
+the job is not cancelled, including when the baseline comparison fails.
 
 To reproduce the artifact locally:
 
@@ -199,7 +207,10 @@ stored stems plus manifest probes and suffixed negative probes. `measured`
 means the oracle completed for that corpus; `blocked` means the fixture's
 recorded decoding or import boundary prevented a measurement. The baseline at
 [`scorecard-baseline.tsv`](../crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv)
-is a durable, exact per-locale comparison of the seven measured rows.
+is a durable, exact per-locale comparison of the seven measured rows. Each row
+also records the SHA-256 of the sorted corpus's `word`, ferrolex decision, and
+Hunspell decision tuples. This identity changes when a new disagreement
+replaces an old one with the same aggregate count.
 
 The currently expected aggregate divergences are classified as follows:
 
@@ -213,8 +224,9 @@ Any changed baseline row fails CI until a reviewer updates the checked-in
 baseline in the same change. A baseline update must explain the source/probe or
 semantic change, retain an independent project-owned edge fixture when
 applicable, and update this classification if its count changes. Improvements
-and regressions both require review; the aggregate classification must never be
-used to waive a newly introduced divergence.
+and regressions both require review; the aggregate classification and outcome
+digest must both be updated deliberately, so an expected divergence cannot
+waive a newly introduced one.
 
 The oracle is development-only black-box observation; ferrolex production code
 has no dependency on Hunspell or Nuspell. This scorecard is scoped evidence for

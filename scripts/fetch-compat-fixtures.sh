@@ -15,13 +15,13 @@ workspace_root=$(cd "$(dirname "$0")/.." && pwd)
 
 case "$fixture_set" in
   required)
-    locales=(en_US de_DE ar)
+    locales=(en_US de_DE hu_HU ar)
     ;;
   scorecard)
-    locales=(en_US de_DE fr_FR nl_NL ar tr_TR)
+    locales=(en_US de_DE fr_FR nl_NL hu_HU ar tr_TR)
     ;;
   all)
-    locales=(en_US de_DE es_ES fr_FR it_IT pt_BR pt_PT nl_NL pl_PL ar tr_TR)
+    locales=(en_US de_DE es_ES fr_FR it_IT pt_BR pt_PT nl_NL hu_HU pl_PL ar tr_TR)
     ;;
   *)
     echo "unknown fixture set \`$fixture_set\`; expected required, scorecard, or all" >&2
@@ -30,6 +30,9 @@ case "$fixture_set" in
 esac
 
 for locale in "${locales[@]}"; do
+  if [[ "$locale" == hu_HU ]]; then
+    continue
+  fi
   cargo run --quiet -p ferrolex-cli -- dictionary fetch "$locale" --cache "$fixture_root"
 done
 
