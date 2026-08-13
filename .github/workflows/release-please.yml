@@ -17,6 +17,8 @@ jobs:
   release-please:
     name: Prepare release
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - id: release
         uses: googleapis/release-please-action@v5
@@ -24,3 +26,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  compatibility-scorecard:
+    name: Full Hunspell oracle scorecard
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/hunspell-compatibility.yml
+    secrets: inherit
