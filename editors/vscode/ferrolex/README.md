@@ -28,9 +28,11 @@ Server** after changing the server command itself.
 
 ## Packaging status
 
-The extension source and local package contract are maintained in this
-repository. Marketplace publication is intentionally deferred: ferrolex does
-not yet distribute signed, versioned `ferrolex-lsp` binaries for every VS Code
-platform. Until that release contract exists, package a local VSIX with
-`npx @vscode/vsce package` after installing dependencies, and configure the
-server command explicitly.
+This is a **maintained experimental** extension: its source and local-package
+contract are maintained, but it has no Marketplace or bundled-server
+compatibility promise. Marketplace publication is deferred until the versioned
+`ferrolex-lsp` release artifacts and portable update contract selected in
+[ADR-0010](../../../docs/adr/0010-external-integration-support-tiers.md) are
+delivered by [Issue #91](https://github.com/sebastian-software/ferrolex/issues/91).
+Until then, package a local VSIX with `npx @vscode/vsce package` after
+installing dependencies and configure the server command explicitly.

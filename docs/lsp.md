@@ -37,7 +37,12 @@ production dictionary selection remains a separate integration decision.
 
 ## Scope decision
 
-This is a **go for a maintained generic LSP implementation**. The protocol
+This is a **maintained experimental generic LSP implementation**. The protocol
 server, diagnostics, quick fixes, user-dictionary flow, configuration reload,
-and incremental document handling ship in the workspace. Editor packaging is
-intentionally separate and is tracked by #67.
+and incremental document handling ship in the workspace. It is the first
+selected external distribution surface, but versioned release artifacts and
+clean-install verification are not available until
+[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91) lands.
+Editor packaging is intentionally separate. The compatibility, dictionary, and
+promotion boundaries are authoritative in
+[ADR-0010](adr/0010-external-integration-support-tiers.md).

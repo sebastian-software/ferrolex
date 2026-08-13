@@ -101,8 +101,13 @@ not expand affix or compound forms. `UserDictionary` project overlays can be
 used through the library API. The comparison and ranking contract is documented
 in [Suggestions](docs/suggestions.md).
 
-The current native integration boundary and explicit LSP/FFI deferral are
-recorded in [Native integrations](docs/integrations.md).
+The current external-integration tiers are recorded in
+[Native integrations](docs/integrations.md): C ABI, Node.js, Python, the
+generic LSP, and VS Code are maintained experimental. The LSP is the first
+selected distribution surface; its release-artifact delivery is tracked by
+[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91). These
+are product decisions, not claims that every package or binary is already
+available.
 
 The optional, digest-pinned LibreOffice installer is documented in
 [Dictionary fetching](docs/dictionary-fetching.md). It fetches reviewed
