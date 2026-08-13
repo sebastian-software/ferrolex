@@ -14,16 +14,16 @@ source-analysis work (#10) provides a generic analyzer and Level-2
 file-type-aware directive presets, but does not make parser boundaries or a
 first parser target explicit.
 
-Repository evidence at `origin/main` (`3309245`) favors Rust as the first
-source-language target: the workspace contains 26 Rust files and about 21,475
-Rust source lines, compared with three JavaScript files and about 256 combined
-JavaScript/TypeScript source lines. The maintained LSP is implemented in Rust,
-and Rust is one of the synthetic repository-checking benchmark workloads.
-TypeScript is also a benchmark workload and backs the small VS Code extension,
-but its repository footprint is smaller. Python is an experimental binding
-spike, not a primary source-analysis workload. The repository contains no user
-request or usage evidence that would justify claiming demand for any one
-language.
+Repository evidence at the reviewed commit (`600f25d`) favors Rust as the
+first source-language target: the repository contains 32 tracked Rust source
+files and about 21,475 Rust source lines, compared with three tracked
+JavaScript source files and about 256 JavaScript source lines; it contains no
+tracked TypeScript files. The maintained LSP is implemented in Rust, and Rust
+is one of the synthetic repository-checking benchmark workloads. TypeScript
+appears only as a synthetic benchmark workload. The small VS Code extension
+and its test are JavaScript. Python is an experimental binding spike, not a
+primary source-analysis workload. The repository contains no user request or
+usage evidence that would justify claiming demand for any one language.
 
 ## Decision
 
@@ -49,11 +49,13 @@ so it adds one parser/grammar maintenance surface where contributors already
 work. The cost is keeping that parser compatible with Rust syntax and testing
 error recovery, but the follow-up limits the first change to syntax boundaries.
 
-### TypeScript parser-backed analysis (deferred)
+### JavaScript and TypeScript parser-backed analysis (deferred)
 
-It could improve the local VS Code extension path and is present in benchmarks,
-but the extension is small and adds a separate language grammar/version
-maintenance burden before the primary Rust workload has parser coverage.
+The checked-in VS Code extension and its test are JavaScript, while TypeScript
+appears only in a synthetic benchmark. Neither is a repository source workload
+comparable to Rust, and an integration would add a separate language
+grammar/version maintenance burden before the primary Rust workload has parser
+coverage.
 
 ### Python parser-backed analysis (deferred)
 
