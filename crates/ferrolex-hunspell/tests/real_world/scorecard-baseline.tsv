@@ -5,10 +5,10 @@
 # New scorecard artifacts record `hunspell -v` and compare this full identity.
 # Update only through the documented review process in docs/compatibility-fixtures.md.
 locale	status	corpus	agreements	disagreements	oracle-or-reason	outcome-sha256
-en_US	measured	139	139	0	hunspell	35a31e7f4f6cbbe3099970a0c27272bba9fa6f9b16000ca85eca1e02680b6ead
-de_DE	measured	139	139	0	hunspell	35a31e7f4f6cbbe3099970a0c27272bba9fa6f9b16000ca85eca1e02680b6ead
-fr_FR	measured	139	139	0	hunspell	35a31e7f4f6cbbe3099970a0c27272bba9fa6f9b16000ca85eca1e02680b6ead
-nl_NL	measured	142	68	74	hunspell	3f07b90043c6f111ffc7a1a14f54c749785059c361959a198087e36b417823a1
-hu_HU	measured	137	132	5	hunspell	b33d924e9bb6a946fdeb310024478de5735a0ff8e72650dd0547918d8e348772
-ar	measured	133	133	0	hunspell	132d0a7ca1d322f84b14c468b287c2473e807fc0cb65d3887098ea82c12cd1c1
-tr_TR	measured	134	134	0	hunspell	effbd6e9c8f2dc2f671c3f5f7eebb11c93830dcf20c5ac93afd36956d9e8e7fb
+en_US	measured	139	139	0	hunspell	69d2d5f3503da3a74101b72edfedf3dfbae5dfc08081f02caf93b3c60c8959d2
+de_DE	measured	139	139	0	hunspell	af26c8c1bd6be9c1bae16d2f0b82cbb23f470ba161d3366d71aed3e157ade832
+fr_FR	measured	139	139	0	hunspell	1cb726b02fd783693bb9215c83f1042b3f30890ab688d1d103426b0ffcdf0f5e
+nl_NL	measured	142	68	74	hunspell	8eb8a45eee9088caddd029d2501c58592860c0d99975320f810677843571873d
+hu_HU	measured	137	132	5	hunspell	0f938c93521199e22aae595b7ed427e9c5a1052b3b451be8c4c37bc65c6ac5b7
+ar	measured	133	133	0	hunspell	be38a5030362fdeda85ab5c57c3fde0c1982dc05dc613362b66833a15e9c3327
+tr_TR	measured	134	134	0	hunspell	cb7a624a0f78f179826a79aded129d424e431e8099db6a8ab7ff2c9763dd7de1
