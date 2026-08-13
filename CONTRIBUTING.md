@@ -34,4 +34,5 @@ be prompted against ferrolex-owned behavior documentation rather than asking
 for reproductions of other implementations.
 
 See [ADR-0001](docs/adr/0001-code-provenance-policy.md) for the rationale and
-the RFC for project requirements.
+the [GitHub delivery epics](https://github.com/sebastian-software/ferrolex/issues?q=is%3Aissue%20label%3Aepic)
+for tracked requirements.

@@ -56,4 +56,4 @@ name.
 
 ## References
 
-- [rfc.md](../../rfc.md) §27, §49
+- [Language-aware developer experience epic](https://github.com/sebastian-software/ferrolex/issues/83)

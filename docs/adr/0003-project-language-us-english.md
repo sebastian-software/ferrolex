@@ -28,7 +28,3 @@ is US English.
 - German-language domain examples (e.g., compound words like
   `Haustürschlüssel` in tests and docs) remain welcome as *data* — the
   surrounding prose stays English.
-
-## References
-
-- [rfc.md](../../rfc.md) §60

@@ -19,7 +19,7 @@ This directory holds the project's durable decisions and their rationale.
 - **Language:** US English (see ADR-0003).
 
 ADRs hold rationale and direction. Exact values and enforcement live in code,
-configuration, CI, and the RFC ([rfc.md](../../rfc.md)).
+configuration, CI, and the [GitHub delivery epics](https://github.com/sebastian-software/ferrolex/issues?q=is%3Aissue%20label%3Aepic).
 
 ## Index
 

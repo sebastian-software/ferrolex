@@ -11,7 +11,7 @@ The initial compiled format was described as mmap-ready, but the workspace
 forbids unsafe code and the current loader owns a `Vec<u8>`. A whole-file
 checksum would also fault in every mapped page before lookup, eliminating the
 claimed mmap startup path. The format still needs fixed endianness, alignment,
-reproducibility, and fail-closed compatibility rules (RFC §§39, 42, 43).
+reproducibility, and fail-closed compatibility rules.
 
 ## Decision
 
@@ -55,8 +55,8 @@ measurements. It is not a loader convenience change.
 
 ## Consequences
 
-- The loader and lookup code carry the bounds-checking discipline; fuzzing
-  the compiled-dictionary loader (RFC §37) is the enforcement mechanism.
+- The loader and lookup code carry the bounds-checking discipline; fuzzing the
+  compiled-dictionary loader is the enforcement mechanism.
 - The format specification must document the header, checksum, alignment, and
   endianness rules from the first version.
 - New layouts must reject overlapping sections during fast loading.
@@ -69,4 +69,4 @@ measurements. It is not a loader convenience change.
 
 ## References
 
-- [rfc.md](../../rfc.md) §12, §13, §37, §39, §42
+- [Compiled artifacts and performance epic](https://github.com/sebastian-software/ferrolex/issues/81)
