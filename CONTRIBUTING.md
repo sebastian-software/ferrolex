@@ -26,7 +26,22 @@ If a necessary dependency does not pass, do not suppress the check in CI. Open
 an issue that records the crate and version, why it is needed, the relevant
 license or advisory assessment, the maintainer who approved it, and an expiry
 or removal plan. Add the smallest version-scoped entry to `deny.toml` with that
-issue URL as its `reason`; remove it once no longer needed.
+issue URL and rationale in a nearby configuration comment (license exceptions
+do not support a `reason` field); remove it once no longer needed.
+
+### Reviewed cargo-deny license exceptions
+
+The following crate-and-version exceptions were reviewed in [#84][issue-84].
+They are not distribution-wide license allowances and must be revisited with
+every dependency upgrade; remove an exception when the dependency is removed
+or its license expression no longer needs it.
+
+| Crate | SPDX term | Why it is needed | Removal plan |
+| --- | --- | --- | --- |
+| `cbindgen` 0.29.4 | `MPL-2.0` | Build-time generator for Ferrolex's FFI C header; its sources are not shipped in the Ferrolex distribution. | Reassess at every `cbindgen` upgrade; remove if FFI header generation no longer uses it. |
+| `unicode-ident` 1.0.24 | `Unicode-3.0` | Transitive Unicode identifier tables used by Rust procedural-macro tooling; the crate otherwise declares `MIT OR Apache-2.0`. | Reassess at every `unicode-ident` upgrade; remove if its license expression no longer includes this term. |
+
+[issue-84]: https://github.com/sebastian-software/ferrolex/issues/84
 
 Spellbook must not be used as porting material. AI-assisted contributions are
 reviewed for obvious structural closeness to known implementations and should
