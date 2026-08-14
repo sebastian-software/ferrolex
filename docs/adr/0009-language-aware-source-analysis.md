@@ -1,90 +1,57 @@
-# ADR-0009: Progressive language-aware source analysis
+# ADR-0009: Keep document parsing outside ferrolex
 
 - Status: accepted
 - Date: 2026-08-13
-- Last updated: 2026-08-13
-- Deciders: Sebastian Werner
+- Last updated: 2026-08-14
+- Deciders: Ferrolex maintainers
 
 ## Context
 
-RFC §§23–28 require source analysis to stay independent from dictionary
-semantics while allowing progressively richer language integration. RFC §49
-also names source code, Markdown, and HTML as future analyzers. The completed
-source-analysis work (#10) provides a generic analyzer and Level-2
-file-type-aware directive presets, but does not make parser boundaries or a
-first parser target explicit.
+ferrolex started with a generic source-token analyzer and later selected Rust
+as the first parser-backed language. That direction added a grammar dependency,
+syntax-error recovery, language-specific fixtures, editor-oriented behavior,
+and a new compatibility surface. The selection was based on the repository's
+own Rust source volume rather than evidence that ferrolex users needed Rust
+parsing.
 
-Repository evidence at the reviewed commit (`600f25d`) favors Rust as the
-first source-language target: the repository contains 32 tracked Rust source
-files and about 21,475 Rust source lines, compared with three tracked
-JavaScript source files and about 256 JavaScript source lines; it contains no
-tracked TypeScript files. The maintained LSP is implemented in Rust, and Rust
-is one of the synthetic repository-checking benchmark workloads. TypeScript
-appears only as a synthetic benchmark workload. The small VS Code extension
-and its test are JavaScript. Python is an experimental binding spike, not a
-primary source-analysis workload. The repository contains no user request or
-usage evidence that would justify claiming demand for any one language.
+The focused product is a native spell-checking engine: it loads dictionaries,
+checks words, and returns deterministic suggestions. Markdown, PO, TypeScript,
+and other formats already have owning tools with better syntax knowledge.
 
 ## Decision
 
-Keep generic analysis as the stable fallback for every language. Define three
-support tiers: generic token analysis (Level 1), file-type-aware directive
-syntax selection (Level 2), and opt-in parser/semantic integrations (Levels
-3–4). A parser-backed implementation must reuse the generic dictionary and
-policy contract; semantic behavior is an additional per-language commitment,
-not an implication of parsing.
+ferrolex will not own programming-language or document parsers. It will not add
+Tree-sitter grammars, semantic analysis, compiler integration, or named
+language-support tiers.
 
-Choose Rust as the first parser-backed analyzer target. Implement only its
-syntax-boundary extraction in [#96](https://github.com/sebastian-software/ferrolex/issues/96): comments, string literals, and identifier components with
-original UTF-8 ranges and parser-error recovery. Type resolution, macro
-expansion, name resolution, compiler integration, new configuration keys, and
-other languages remain out of scope.
+Format-aware consumers select human-language content and call the ferrolex Rust
+or Node.js API:
 
-## Considered options
+- Ferromark owns Markdown parsing and passes prose to ferrolex.
+- Ferrocat owns PO parsing and passes translatable strings to ferrolex.
+- OXC owns TypeScript parsing and passes selected comments, strings, or
+  identifiers to ferrolex.
 
-### Rust parser-backed analysis (chosen)
-
-It aligns with the dominant maintained source workload and existing Rust LSP,
-so it adds one parser/grammar maintenance surface where contributors already
-work. The cost is keeping that parser compatible with Rust syntax and testing
-error recovery, but the follow-up limits the first change to syntax boundaries.
-
-### JavaScript and TypeScript parser-backed analysis (deferred)
-
-The checked-in VS Code extension and its test are JavaScript, while TypeScript
-appears only in a synthetic benchmark. Neither is a repository source workload
-comparable to Rust, and an integration would add a separate language
-grammar/version maintenance burden before the primary Rust workload has parser
-coverage.
-
-### Python parser-backed analysis (deferred)
-
-The experimental binding spike is insufficient workload evidence for a first
-maintained parser integration. It would introduce another grammar and support
-commitment without a stronger repository-based driver.
+The existing `ferrolex-code` crate may remain as a generic, parser-independent
+helper while the workspace is simplified. Its presence is not a promise that
+ferrolex will become a general source-analysis framework.
 
 ## Consequences
 
-- Unsupported languages keep the exact generic analyzer behavior and
-  configuration contract documented in `docs/source-code-analysis.md`.
-- Rust will gain more accurate syntax boundaries only after #96 is implemented;
-  this record does not claim parser or semantic support already exists.
-- A future language target needs comparable workload evidence, a maintenance
-  assessment, and a bounded implementation issue before it receives a support
-  claim.
+- Parser-backed Rust analysis is removed from the product and dependency graph.
+- Format-specific accuracy and configuration stay with the projects that own
+  those formats.
+- All integrations share one dictionary, recognition, and suggestion contract.
+- ferrolex avoids language-version tracking, parser error recovery, incremental
+  syntax state, and editor-specific test matrices.
 
-## Validation and review triggers
+## Review triggers
 
-- Verify that the documented generic fallback and configuration behavior remain
-  unchanged when #96 lands.
-- Revisit the target order if measured repository workloads, user requests, or
-  a maintained integration provide stronger evidence for another language.
-- Revisit semantic scope only when a concrete workflow requires language
-  meaning beyond parser-selected spans.
+Revisit this boundary only when a concrete consumer cannot integrate through
+the word, text, or token API and can demonstrate that centralizing a parser in
+ferrolex reduces total ownership across multiple real callers.
 
 ## References
 
-- [Issue #92](https://github.com/sebastian-software/ferrolex/issues/92)
-- [Follow-up #96](https://github.com/sebastian-software/ferrolex/issues/96)
-- [Source-code analysis](../source-code-analysis.md)
-- [Source analysis epic #10](https://github.com/sebastian-software/ferrolex/issues/10)
+- [Architecture](../../ARCHITECTURE.md)
+- [Generic token analysis](../source-code-analysis.md)

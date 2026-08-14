@@ -69,4 +69,5 @@ measurements. It is not a loader convenience change.
 
 ## References
 
-- [Compiled artifacts and performance epic](https://github.com/sebastian-software/ferrolex/issues/81)
+- [Compiled dictionary format](../binary-format.md)
+- [Performance measurement contract](../performance.md)

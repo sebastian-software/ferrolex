@@ -1,5 +1,8 @@
 # Ferrolex for Visual Studio Code
 
+> Prototype only. This extension is outside ferrolex's current product and
+> distribution scope and is not planned for Marketplace publication.
+
 This extension launches the generic `ferrolex-lsp` server over stdio. Its
 diagnostics and quick fixes are shown by VS Code through the Language Server
 Protocol.
@@ -28,11 +31,7 @@ Server** after changing the server command itself.
 
 ## Packaging status
 
-This is a **maintained experimental** extension: its source and local-package
-contract are maintained, but it has no Marketplace or bundled-server
-compatibility promise. Marketplace publication is deferred until the versioned
-`ferrolex-lsp` release artifacts and portable update contract selected in
-[ADR-0010](../../../docs/adr/0010-external-integration-support-tiers.md) are
-delivered by [Issue #91](https://github.com/sebastian-software/ferrolex/issues/91).
-Until then, package a local VSIX with `npx @vscode/vsce package` after
-installing dependencies and configure the server command explicitly.
+There is no Marketplace or bundled-server compatibility promise. For local
+evaluation only, package a VSIX with `npx @vscode/vsce package` after installing
+dependencies and configure the server command explicitly. See
+[ADR-0010](../../../docs/adr/0010-external-integration-support-tiers.md).

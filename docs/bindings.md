@@ -1,8 +1,11 @@
-# Experimental Node.js and Python bindings
+# Node.js and deferred binding prototypes
 
-The `ferrolex-node` and `ferrolex-python` crates are Phase 8 evaluation
-spikes. They are workspace-only and explicitly `publish = false`; no npm package,
-Python wheel, or crates.io binding is published.
+`ferrolex-node` is the selected first direct non-Rust integration. It remains
+unpublished while its npm package, TypeScript API, supported binary targets,
+managed dictionary workflow, and clean-install verification are defined.
+
+`ferrolex-python` is an evaluation prototype outside the current product scope.
+There is no PyPI package, wheel matrix, or compatibility commitment.
 
 Both expose the same deliberately narrow API over newline-delimited UTF-8
 plain-word-list text:
@@ -11,9 +14,9 @@ plain-word-list text:
 - `check(word)` returns exact recognition; and
 - `suggest(word)` returns deterministic, bounded spelling suggestions.
 
-Neither prototype selects, downloads, or persists dictionaries, and neither
-exposes source analysis. Those policy-bearing APIs need their own stabilized
-Rust contracts before an external runtime can promise compatibility.
+The current narrow APIs still accept newline-delimited word lists. Aligning the
+Node.js binding with managed Hunspell dictionaries and suggestions is the next
+integration step. Python does not drive that design.
 
 ## Reproducible benchmark
 
@@ -29,32 +32,29 @@ bash scripts/bench-python-binding.sh
 
 Each command emits JSON with elapsed nanoseconds and the recognized-query
 count. Timings are machine-local observations; equality of the count and the
-successful extension import are the correctness gates. The checks run in CI.
+successful extension import are the correctness gates. Both checks still run
+while the workspace is being simplified, but only Node.js belongs to the
+current release direction.
 
 ## Decisions
 
 ### Node.js / napi-rs
 
-**Maintained experimental workspace spike; deferred for npm publication.** The
-prototype is useful for evaluating the CSpell-adjacent workflow and exposes no
+**Selected pre-1.0 integration; deferred for npm publication.** The adapter
+exposes no
 hand-written unsafe adapter code. napi-rs generates the required Node-API
 registration glue, so its isolated adapter crate allows generated unsafe code
 while the ferrolex core crates continue to forbid it.
 
 Release remains blocked on a supported prebuilt-binary matrix, npm package
-ownership, TypeScript API policy, and a stable dictionary/source-analysis
-surface. Current napi-rs requires Rust 1.88, which is the workspace MSRV.
+ownership, TypeScript API policy, and the managed dictionary workflow. Current
+napi-rs requires Rust 1.88, which is the workspace MSRV.
 
 ### Python / PyO3 and maturin
 
-**Maintained experimental workspace spike; deferred for wheel/PyPI
-publication.** The prototype validates service-embedding ergonomics with the
-current PyO3 API and includes a `pyproject.toml` for maturin builds.
+**Evaluation prototype outside the current product scope.** The checked-in code
+validates service-embedding ergonomics with the current PyO3 API and includes a
+`pyproject.toml` for maturin builds, but there is no wheel or PyPI plan.
 
-Release remains blocked on an abi3/wheel support policy, interpreter and
-platform matrix, package ownership, and a stable dictionary/source-analysis
-surface. Python extension behavior is validated through a real import rather
-than a Rust test binary, avoiding platform-specific embedded-interpreter
-linker assumptions. The owner, source-only release channel, and promotion
-criteria for both bindings are authoritative in
-[ADR-0010](adr/0010-external-integration-support-tiers.md).
+The prototype does not drive the Node.js API, platform matrix, or release gate.
+See [ADR-0010](adr/0010-external-integration-support-tiers.md).

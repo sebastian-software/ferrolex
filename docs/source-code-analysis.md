@@ -1,15 +1,16 @@
-# Source-code analysis
+# Generic token analysis
 
-`ferrolex-code` is the generic, parser-independent analysis layer. It consumes
-an immutable `Dictionary`, preserves the source token and its UTF-8 byte range,
-and reports misspelled segments without changing dictionary semantics.
+`ferrolex-code` is an existing generic, parser-independent helper. It consumes
+an immutable `Dictionary`, preserves source tokens and UTF-8 byte ranges, and
+reports misspelled segments without changing dictionary semantics.
 
-## Language-awareness tiers
+It is not the product boundary for Markdown, PO, TypeScript, Rust, or another
+format. Format-owning tools should parse their own input and call the ferrolex
+dictionary and suggestion APIs with the selected text. ferrolex will not add
+language grammars, parser dependencies, semantic analysis, or per-language
+support tiers.
 
-Language support is progressive. A higher tier is opt-in for a named language;
-it does not change the generic analyzer contract for other files.
-
-### Generic support (Level 1)
+## Generic behavior
 
 Generic support is available for every input, including unsupported file types.
 The analyzer classifies generic tokens, segments identifiers, applies the
@@ -23,30 +24,16 @@ contract remain the supported fallback for unsupported languages. Adding a
 language integration must not change their defaults, keys, precedence, or
 meaning for generic documents.
 
-### Syntax-aware support (Level 2)
+File-extension presets select only the comment marker used for `ferrolex:`
+directives. Ordinary token classification and checking remain the generic
+pass. These presets do not parse a grammar, recover from syntax errors,
+identify string literals, or understand embedded languages. A caller can
+always override the preset with an explicit `Document` comment syntax or
+CLI/configuration setting.
 
-Syntax-aware support selects a comment-syntax preset from the file type. It
-only determines where `ferrolex:` directives are recognized; ordinary token
-classification and checking remain the generic pass. It does not parse a
-grammar, recover from syntax errors, identify string literals, or understand
-embedded languages. A caller can always override the preset with an explicit
-`Document` comment syntax or CLI/configuration setting.
-
-### Parser/semantic support (Levels 3–4)
-
-A parser-backed integration uses a grammar to locate analyzable language
-constructs and retain their source ranges. It may then pass those spans through
-the same dictionary and policy contract as generic analysis. Semantic support
-is a separate, explicitly documented extension that can use language meaning
-such as symbol or type information; parser support alone makes no semantic
-claim.
-
-The first parser-backed target is Rust; its bounded implementation work is
-tracked in [#96](https://github.com/sebastian-software/ferrolex/issues/96).
-That issue covers syntax boundaries only. It does not add type resolution,
-macro expansion, name resolution, compiler integration, or parser support for
-other languages. See [ADR-0009](adr/0009-language-aware-source-analysis.md)
-for the evidence and trade-offs behind this choice.
+Parser and semantic support belong to consumer projects. See
+[ADR-0009](adr/0009-language-aware-source-analysis.md) for the product-boundary
+decision.
 
 ## Identifier segmentation
 
@@ -167,9 +154,10 @@ dictionary flag. `ignore-class = url` adds a token class to the ignore policy;
 `path`, `base64`, `uuid`, `domain`, `generated-token`, and `unknown`.
 
 Keys are strict and values are validated with their source line. The file is
-not a general TOML/YAML compatibility layer; keeping this contract small makes
-the library, CLI, and future editor integrations share the same policy without
-an ambient parser or silent configuration drift.
+not a general TOML/YAML compatibility layer. Keeping this contract small lets
+the library and CLI share policy without an ambient parser or silent
+configuration drift. Format-aware consumers should normally select text before
+calling ferrolex instead of adopting this project configuration format.
 
 ## Inline directives
 
@@ -177,11 +165,11 @@ Directives are only interpreted in the comment syntax supplied with a
 `Document`; text that merely resembles a directive has no special meaning.
 The CLI accepts a line prefix with `--comment-prefix` (including dash prefixes
 such as `--comment-prefix=--`) or HTML comments with `--comment-syntax html`.
-Without an explicit option, Level-2 presets select `//` for common C-family
+Without an explicit option, extension presets select `//` for common C-family
 files, `#` for shell/Python/config files, `--` for SQL/Lua/Haskell, and HTML
 comments for Markdown, HTML, and XML. Markdown prose and fenced code remain in
 the same generic, parser-independent analysis pass; a language parser is
-deliberately outside this level's scope.
+deliberately outside this helper's scope.
 Set `comment-syntax = html`, `comment-syntax = none`, or
 `comment-syntax = line://` in the project configuration to override those
 presets; an explicit CLI option takes precedence.

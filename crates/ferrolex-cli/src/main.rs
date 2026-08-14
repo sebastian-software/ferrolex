@@ -797,14 +797,14 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
             path: path.clone(),
             source,
         })?;
-        let document = analysis_document(
-            &path,
-            &source,
-            command
-                .comment_syntax
-                .as_ref()
-                .or(project_comment_syntax.as_ref()),
-        );
+        let document = match command
+            .comment_syntax
+            .as_ref()
+            .or(project_comment_syntax.as_ref())
+        {
+            Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
+            None => Document::new(&source).with_comment_syntax(comment_syntax_for_path(&path)),
+        };
         let analysis = analyzer.check(&document);
         for finding in analysis.findings() {
             print_finding(&path, &source, finding.range().start, finding.word());
@@ -843,35 +843,6 @@ fn comment_syntax_for_path(path: &Path) -> CommentSyntax {
         Some("sql" | "lua" | "hs") => CommentSyntax::line("--"),
         Some("md" | "markdown" | "html" | "htm" | "xml") => CommentSyntax::Html,
         _ => CommentSyntax::None,
-    }
-}
-
-fn analysis_document<'source>(
-    path: &Path,
-    source: &'source str,
-    configured_comment_syntax: Option<&CommentSyntax>,
-) -> Document<'source> {
-    let is_rust = path.extension().and_then(|extension| extension.to_str()) == Some("rs");
-    if let Some(syntax) = configured_comment_syntax {
-        if is_rust
-            && (matches!(syntax, CommentSyntax::Html)
-                || matches!(syntax, CommentSyntax::Line(prefix) if prefix != "//"))
-        {
-            // An explicit non-Rust directive syntax is a user request for the
-            // generic analyzer's established behavior.
-            return Document::new(source).with_comment_syntax(syntax.clone());
-        }
-    }
-    let document = if is_rust {
-        Document::rust(source)
-    } else {
-        Document::new(source)
-    };
-
-    match configured_comment_syntax {
-        Some(syntax) => document.with_comment_syntax(syntax.clone()),
-        None if is_rust => document,
-        None => document.with_comment_syntax(comment_syntax_for_path(path)),
     }
 }
 
@@ -2858,47 +2829,6 @@ mod tests {
     }
 
     #[test]
-    fn explicit_non_rust_comment_prefix_keeps_generic_analysis_for_rust_files() {
-        let dictionary = temporary_dictionary("known\n");
-        let source = temporary_rust_file("# ferrolex:ignore typo\ntypo\n");
-        let arguments = [
-            "ferrolex".to_owned(),
-            "analyze".to_owned(),
-            "--dictionary".to_owned(),
-            dictionary.path.to_string_lossy().into_owned(),
-            "--comment-prefix".to_owned(),
-            "#".to_owned(),
-            source.path.to_string_lossy().into_owned(),
-        ];
-
-        assert_eq!(
-            run(arguments).expect("explicit directive syntax is supported"),
-            RunOutcome::Success
-        );
-    }
-
-    #[test]
-    fn no_comment_syntax_keeps_parser_backed_analysis_for_rust_files() {
-        let dictionary = temporary_dictionary("fn\nknown\n");
-        let source = temporary_rust_file("async fn known() {}\n");
-        let config = temporary_file("comment-syntax = none\n");
-        let arguments = [
-            "ferrolex".to_owned(),
-            "analyze".to_owned(),
-            "--dictionary".to_owned(),
-            dictionary.path.to_string_lossy().into_owned(),
-            "--config".to_owned(),
-            config.path.to_string_lossy().into_owned(),
-            source.path.to_string_lossy().into_owned(),
-        ];
-
-        assert_eq!(
-            run(arguments).expect("the project configuration is supported"),
-            RunOutcome::Success
-        );
-    }
-
-    #[test]
     fn parses_a_catalog_pinned_dictionary_fetch() {
         let command = parse_arguments([
             "ferrolex".to_owned(),
@@ -3427,16 +3357,6 @@ mod tests {
 
     fn temporary_file(contents: &str) -> TemporaryDictionary {
         temporary_bytes(contents.as_bytes())
-    }
-
-    fn temporary_rust_file(contents: &str) -> TemporaryDictionary {
-        let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "ferrolex-cli-test-{}-{sequence}.rs",
-            std::process::id()
-        ));
-        fs::write(&path, contents).expect("the temporary directory is writable");
-        TemporaryDictionary { path }
     }
 
     fn temporary_bytes(contents: &[u8]) -> TemporaryDictionary {
