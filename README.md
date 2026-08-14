@@ -24,8 +24,8 @@ weekly, manual, and release differential scorecard runs.
 
 - ✅ **Ready for the tested core**: the exact pinned dictionary imports without
   recognition errors and its reviewed word forms work.
-- 🟡 **In progress**: reviewed common words work, but known dictionary features
-  still have gaps.
+- 🟡 **In progress**: reviewed probes work with a documented lenient-import
+  boundary; strict diagnostics are recorded.
 - 🔴 **Blocked**: ferrolex cannot reliably import that exact dictionary yet.
 
 This is deliberately not a “100% Hunspell compatible” claim. The [full locale
@@ -43,7 +43,7 @@ scorecard artifact contains the current differential evidence.
 | `pt_BR` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 | `pt_PT` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 | `nl_NL` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
-| `hu_HU` | 🟡 In progress | Common reviewed words work, but known dictionary features still need support. |
+| `hu_HU` | 🟡 In progress | Reviewed probes work with a documented lenient-import boundary; strict diagnostics are recorded. |
 | `ar` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 | `tr_TR` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 | `pl_PL` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |

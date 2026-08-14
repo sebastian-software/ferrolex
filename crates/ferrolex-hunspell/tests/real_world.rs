@@ -42,6 +42,7 @@ struct Fixture {
     import_expectation: ImportExpectation,
     accepted: Vec<Probe>,
     rejected: Vec<String>,
+    strict_error_directives: BTreeSet<String>,
     source: String,
     license: String,
     license_evidence: String,
@@ -261,6 +262,18 @@ fn real_world_manifest_is_complete_and_source_pinned() {
             assert!(!probe.word.is_empty(), "positive probe words are non-empty");
         }
         assert!(!fixture.rejected.is_empty());
+        if fixture.import_expectation == ImportExpectation::Lenient {
+            assert!(
+                !fixture.strict_error_directives.is_empty(),
+                "lenient fixture {} records its strict-import boundary",
+                fixture.id
+            );
+        } else {
+            assert!(
+                fixture.strict_error_directives.is_empty(),
+                "only lenient fixtures record strict-import error directives"
+            );
+        }
         if fixture.import_expectation == ImportExpectation::Blocked {
             assert_eq!(fixture.aff_decode, Decode::NotUtf8);
         }
@@ -291,6 +304,29 @@ fn local_real_world_fixtures_report_format_and_recognition() {
     assert_scorecard_baseline_if_requested();
 
     eprintln!("{report}");
+}
+
+#[test]
+fn local_lenient_fixture_strict_boundaries_are_reproducible() {
+    let Ok(root) = env::var("FERROLEX_COMPAT_FIXTURES") else {
+        eprintln!(
+            "skipping lenient strict-boundary fixtures; set FERROLEX_COMPAT_FIXTURES to the reviewed fixture root"
+        );
+        return;
+    };
+    let fixtures = parse_manifest(MANIFEST).expect("checked-in compatibility manifest is valid");
+    let fixture_set =
+        FixtureSet::from_environment().expect("the compatibility fixture-set selector is valid");
+
+    for fixture in select_fixtures(&fixtures, fixture_set)
+        .expect("the compatibility fixture-set exists in the manifest")
+        .into_iter()
+        .filter(|fixture| fixture.import_expectation == ImportExpectation::Lenient)
+    {
+        let (aff_path, dic_path, aff_bytes, dic_bytes) =
+            read_verified_fixture(Path::new(&root), fixture);
+        assert_strict_boundary(fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes);
+    }
 }
 
 fn select_fixtures(fixtures: &[Fixture], fixture_set: FixtureSet) -> Result<Vec<&Fixture>, String> {
@@ -355,6 +391,9 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     let imported =
         import_fixture_bytes(fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes, mode)
             .unwrap_or_else(|error| panic!("{} import unexpectedly failed: {error}", fixture.id));
+    report_strict_boundary(
+        fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes, report,
+    );
     assert_neutral_ir_spike(fixture, imported.ir());
     let diagnostics = imported
         .diagnostics()
@@ -404,6 +443,73 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     .expect("writing to String does not fail");
     write_scorecard(fixture, &dictionary, &aff_path, report);
     report_keepcase_coverage(fixture, &aff_text, &dic_text, report);
+}
+
+fn report_strict_boundary(
+    fixture: &Fixture,
+    aff_path: &Path,
+    aff_bytes: &[u8],
+    dic_path: &Path,
+    dic_bytes: &[u8],
+    report: &mut String,
+) {
+    if fixture.import_expectation != ImportExpectation::Lenient {
+        assert!(
+            fixture.strict_error_directives.is_empty(),
+            "{} is not a lenient fixture but records strict-import errors",
+            fixture.id
+        );
+        return;
+    }
+
+    assert!(
+        !fixture.strict_error_directives.is_empty(),
+        "{} lenient fixture must record its strict-import error directives",
+        fixture.id
+    );
+    let actual = assert_strict_boundary(fixture, aff_path, aff_bytes, dic_path, dic_bytes);
+    writeln!(
+        report,
+        "  strict_boundary=error_directives:{}",
+        join(&actual)
+    )
+    .expect("writing to String does not fail");
+}
+
+fn assert_strict_boundary(
+    fixture: &Fixture,
+    aff_path: &Path,
+    aff_bytes: &[u8],
+    dic_path: &Path,
+    dic_bytes: &[u8],
+) -> BTreeSet<String> {
+    assert!(
+        fixture.import_expectation == ImportExpectation::Lenient,
+        "{} is not a lenient fixture",
+        fixture.id
+    );
+    let error = import_fixture_bytes(
+        fixture,
+        aff_path,
+        aff_bytes,
+        dic_path,
+        dic_bytes,
+        ImportMode::Strict,
+    )
+    .expect_err("the manifested strict-import boundary rejects the pinned source");
+    let actual = error
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == ferrolex_hunspell::Severity::Error)
+        .map(ferrolex_hunspell::Diagnostic::directive)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        actual, fixture.strict_error_directives,
+        "{} strict-import error directives changed; update the explicit boundary only with a documented semantic review",
+        fixture.id
+    );
+    actual
 }
 
 fn assert_neutral_ir_spike(fixture: &Fixture, ir: &ferrolex_compiler::DictionaryIr) {
@@ -1004,9 +1110,9 @@ fn parse_manifest(text: &str) -> Result<Vec<Fixture>, String> {
 
 fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
     let fields = line.split('\t').collect::<Vec<_>>();
-    if fields.len() != 16 {
+    if fields.len() != 17 {
         return Err(format!(
-            "manifest line {line_number} has {} fields; expected 16",
+            "manifest line {line_number} has {} fields; expected 17",
             fields.len()
         ));
     }
@@ -1047,9 +1153,14 @@ fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
             .filter(|word| !word.is_empty())
             .map(str::to_owned)
             .collect(),
-        source: fields[13].to_owned(),
-        license: fields[14].to_owned(),
-        license_evidence: fields[15].to_owned(),
+        strict_error_directives: fields[13]
+            .split(',')
+            .filter(|directive| !directive.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        source: fields[14].to_owned(),
+        license: fields[15].to_owned(),
+        license_evidence: fields[16].to_owned(),
     })
 }
 

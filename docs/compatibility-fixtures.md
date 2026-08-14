@@ -11,7 +11,8 @@ source review visible.
 [`crates/ferrolex-hunspell/tests/real_world/manifest.tsv`](../crates/ferrolex-hunspell/tests/real_world/manifest.tsv)
 is the authoritative registry. It pins a source revision, file sizes,
 SHA-256 values, decoding status, import expectation, category-labelled positive
-recognition probes, and a negative probe for every fixture. It deliberately
+recognition probes, a negative probe, and (for lenient fixtures) the exact
+strict-import error directives for every fixture. It deliberately
 contains only this bounded metadata and probe set, never dictionary source data
 or affix rules.
 
@@ -23,24 +24,30 @@ mode for arbitrary dictionaries.
 
 ### Hungarian compatibility boundary
 
-`hu_HU` now imports in lenient mode and protects stored (`szó`, `ház`), affixed
-(`házban`), and compound (`házszó`) recognition through the runtime-cache
-roundtrip. Strict import remains intentionally disabled until these observed
-source constructs have their project-owned semantics:
+`hu_HU` imports with the source-specific fallback decoder in lenient mode and
+protects stored (`szó`, `ház`), affixed (`házban`), and compound (`házszó`)
+recognition through the runtime-cache roundtrip. Strict import remains
+intentionally unavailable.
 
-- Hungarian-specific compound positions and restrictions
+The fixture repeats the import with the same reviewed decoder in strict mode
+and asserts this exact error-directive set from the digest-verified pair:
+`COMPOUNDFIRST`, `COMPOUNDLAST`, `COMPOUNDROOT`, `GENERATE`,
+`HU_KOTOHANGZO`, `LEMMA_PRESENT`, `ONLYROOT`, `SUBSTANDARD`, `SYLLABLENUM`,
+and malformed dictionary `entry` rows. This diagnostic is reproduced by the
+standard required-fixture command below; it is not inferred from an AFF scan.
+The directives remain a deliberate boundary until they have independently
+authored semantics:
+
+- Hungarian compound positions and restrictions
   (`COMPOUNDFIRST`, `COMPOUNDLAST`, `COMPOUNDROOT`, `ONLYROOT`, and
   `HU_KOTOHANGZO`) remain in the directive-completeness epic [#6](https://github.com/sebastian-software/ferrolex/issues/6);
-- multi-scalar `BREAK` patterns are tracked by [#24](https://github.com/sebastian-software/ferrolex/issues/24);
-- header metadata (`HOME`, `NAME`, `VERSION`) is tracked by [#26](https://github.com/sebastian-software/ferrolex/issues/26);
-- Hungarian-specific recognition directives (`HU_KOTOHANGZO`, `ONLYROOT`,
+- Hungarian recognition directives (`HU_KOTOHANGZO`, `ONLYROOT`,
   `SUBSTANDARD`, `GENERATE`, `LEMMA_PRESENT`, and `SYLLABLENUM`) remain in
   [#6](https://github.com/sebastian-software/ferrolex/issues/6) until their
   semantics are documented; and
-- the pinned DIC declares 97,663 entries but has malformed/empty rows, while
-  one `REP` row is malformed. ferrolex retains the safely parsed subset and
-  reports these as `count`, `entry`, and `REP` diagnostics; the bounded format
-  policy belongs to [#27](https://github.com/sebastian-software/ferrolex/issues/27).
+- the pinned DIC declares 97,663 entries but has malformed/empty rows.
+  Ferrolex retains the safely parsed subset in lenient mode; malformed entries
+  are strict errors under the bounded format policy in [#27](https://github.com/sebastian-software/ferrolex/issues/27).
 
 This list is the explicit strict-import boundary for the locale. It is not an
 oracle-parity claim for unlisted Hungarian forms.
@@ -128,6 +135,16 @@ Then run the opt-in integration test:
 ```sh
 FERROLEX_COMPAT_FIXTURES="$PWD/.compat-fixtures" \
   cargo test -p ferrolex-hunspell --test real_world -- --nocapture
+```
+
+To reproduce just the Hungarian boundary used by the PR compatibility gate:
+
+```sh
+scripts/fetch-compat-fixtures.sh --set required /tmp/ferrolex-compat-fixtures
+FERROLEX_COMPAT_FIXTURES=/tmp/ferrolex-compat-fixtures \
+FERROLEX_COMPAT_FIXTURE_SET=required \
+  cargo test -p ferrolex-hunspell --test real_world \
+  local_real_world_fixtures_report_format_and_recognition -- --nocapture
 ```
 
 Without `FERROLEX_COMPAT_FIXTURES`, the fixture test prints a skip message and
@@ -218,7 +235,7 @@ The currently expected aggregate divergences are classified as follows:
 | Locale | Classification | Rationale |
 | --- | --- | --- |
 | `nl_NL` | reviewed recognition difference | The pinned corpus exercises Dutch forms outside the currently documented recognition subset. |
-| `hu_HU` | reviewed lenient-import difference | The locale intentionally retains the documented Hungarian lenient-import boundary. |
+| `hu_HU` | reviewed lenient-import difference | The 2026-08-13 baseline records 132 agreements and 5 disagreements for its 137-word corpus; the locale intentionally retains the documented Hungarian lenient-import boundary. |
 | All other scorecard rows | no observed divergence | The recorded corpus currently agrees with the oracle. |
 
 Any changed baseline row fails CI until a reviewer updates the checked-in
