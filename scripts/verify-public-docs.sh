@@ -34,4 +34,7 @@ for package in \
   test -s "$documentation_target/doc/$package/index.html"
 done
 
-grep -Fq 'Supported public Rust API.' "$documentation_target/doc/ferrolex/index.html"
+umbrella_docs="$documentation_target/doc/ferrolex/index.html"
+grep -Fq '<meta name="description" content="Public umbrella crate for ferrolex.">' "$umbrella_docs"
+grep -Fq '<h3 id="stability"' "$umbrella_docs"
+grep -Fq '<strong>supported public Rust API</strong>' "$umbrella_docs"
