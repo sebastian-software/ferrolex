@@ -135,7 +135,9 @@ does not own document parsing, editor protocols, or language semantics. In
 particular, parser-backed source analysis, an LSP, and editor extensions are not
 part of the current product scope. Existing experimental code may remain while
 the workspace is simplified, but it must not drive the public API, release
-matrix, or required CI.
+matrix, or future release gates. Some prototype checks still run in the general
+workspace CI during this transition and are tracked for removal from the
+focused release path.
 
 ## Benchmarks
 

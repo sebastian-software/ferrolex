@@ -27,8 +27,10 @@ types, and clean-install verification exist.
 
 The C ABI and Python packages are retained only as evaluation prototypes. The
 generic LSP and Visual Studio Code client are outside the current product and
-distribution scope. None of these deferred surfaces drives required CI,
-release artifacts, or compatibility promises.
+distribution scope. They do not define release artifacts or compatibility
+promises. Existing workspace CI checks may remain temporarily while the
+prototype code is evaluated for removal, but they are not focused release
+gates.
 
 Document and language integrations belong to their owning tools and call the
 Rust or Node.js API after parsing. They do not require a ferrolex-owned LSP.
