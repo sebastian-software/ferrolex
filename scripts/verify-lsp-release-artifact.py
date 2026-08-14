@@ -30,7 +30,8 @@ def archive_files(artifact: str) -> list[str]:
 
 def main() -> None:
     args = parse_args()
-    root = f"ferrolex-lsp-{args.version}-{args.target}"
+    version = args.version.removeprefix("ferrolex-v")
+    root = f"ferrolex-lsp-{version}-{args.target}"
     expected = {
         f"{root}/{args.binary_name}",
         f"{root}/LICENSE-APACHE",

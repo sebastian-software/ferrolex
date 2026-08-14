@@ -52,16 +52,20 @@ download. Dictionary selection remains caller-controlled under
 | Windows x86_64 | `ferrolex-lsp-<VERSION>-x86_64-pc-windows-msvc.zip` |
 
 Download the matching asset and `SHA256SUMS` from the same release tag. Before
-extracting it, verify the checksum. On macOS, run:
+extracting it, verify only that asset's manifest entry. On macOS, run:
 
 ```sh
-shasum -a 256 -c SHA256SUMS
+asset="ferrolex-lsp-<VERSION>-<TARGET>.tar.gz"
+entry=$(grep -F -- "  $asset" SHA256SUMS) || exit 1
+printf '%s\n' "$entry" | shasum -a 256 -c -
 ```
 
-On Ubuntu, run:
+On Ubuntu, run the same selection with `sha256sum`:
 
 ```sh
-sha256sum -c SHA256SUMS
+asset="ferrolex-lsp-<VERSION>-<TARGET>.tar.gz"
+entry=$(grep -F -- "  $asset" SHA256SUMS) || exit 1
+printf '%s\n' "$entry" | sha256sum -c -
 ```
 
 On Windows PowerShell, verify the downloaded Windows asset with:

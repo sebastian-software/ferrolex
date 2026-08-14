@@ -76,17 +76,30 @@ jobs:
         with:
           python-version: "3.12"
       - run: cargo build -p ferrolex-lsp --release --target ${{ matrix.target }}
+      - id: package
+        shell: bash
+        run: |
+          artifact="$(python scripts/package-lsp-release.py \
+            --binary target/${{ matrix.target }}/release/ferrolex-lsp${{ matrix.binary_suffix }} \
+            --version ${{ needs.release-please.outputs.tag_name }} \
+            --target ${{ matrix.target }} \
+            --out-dir ${{ runner.temp }}/ferrolex-lsp-release \
+            --format ${{ matrix.archive_format }})"
+          printf 'artifact=%s\n' "$artifact" >> "$GITHUB_OUTPUT"
       - run: >-
-          python scripts/package-lsp-release.py
-          --binary target/${{ matrix.target }}/release/ferrolex-lsp${{ matrix.binary_suffix }}
+          python scripts/verify-lsp-release-artifact.py
+          --artifact ${{ steps.package.outputs.artifact }}
           --version ${{ needs.release-please.outputs.tag_name }}
           --target ${{ matrix.target }}
-          --out-dir ${{ runner.temp }}/ferrolex-lsp-release
-          --format ${{ matrix.archive_format }}
+          --binary-name ferrolex-lsp${{ matrix.binary_suffix }}
+      - run: >-
+          python scripts/lsp-stdio-smoke.py
+          --artifact ${{ steps.package.outputs.artifact }}
+          --binary-name ferrolex-lsp${{ matrix.binary_suffix }}
       - uses: actions/upload-artifact@v4
         with:
           name: ferrolex-lsp-${{ matrix.target }}
-          path: ${{ runner.temp }}/ferrolex-lsp-release/*
+          path: ${{ steps.package.outputs.artifact }}
           if-no-files-found: error
 
   publish-lsp-release-assets:
