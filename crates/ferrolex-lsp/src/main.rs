@@ -276,12 +276,17 @@ struct ExecuteCommand {
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (connection, io_threads) = Connection::stdio();
-    let initialized = connection.initialize(json!({
-        "capabilities": { "textDocumentSync": 2, "codeActionProvider": true,
-            "executeCommandProvider": { "commands": ["ferrolex.addToDictionary"] } },
-        "serverInfo": { "name": "ferrolex-lsp", "version": env!("CARGO_PKG_VERSION") }
-    }))?;
+    let (initialize_id, initialized) = connection.initialize_start()?;
+    connection.initialize_finish(
+        initialize_id,
+        json!({
+            "capabilities": { "textDocumentSync": 2, "codeActionProvider": true,
+                "executeCommandProvider": { "commands": ["ferrolex.addToDictionary"] } },
+            "serverInfo": { "name": "ferrolex-lsp", "version": env!("CARGO_PKG_VERSION") }
+        }),
+    )?;
     run(&connection, State::new(config_from(&initialized)))?;
+    drop(connection);
     io_threads.join()?;
     Ok(())
 }

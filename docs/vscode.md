@@ -32,10 +32,9 @@ npx @vscode/vsce package
 ```
 
 **Deferred for Marketplace publication:** the extension does not bundle or
-download a `ferrolex-lsp` binary. Marketplace publication requires the
-portable, versioned LSP artifacts and update contract tracked by
-[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91), followed
-by extension install/update verification on its declared platforms. The command
-setting is the explicit, portable resolution mechanism until then. See
-[ADR-0010](adr/0010-external-integration-support-tiers.md) for the complete
-tier and dictionary-distribution decision.
+download a `ferrolex-lsp` binary. The released server artifacts documented in
+[the LSP guide](lsp.md) do not add a Marketplace or bundled-server promise;
+that remains out of scope until the extension has its own install and update
+verification. The command setting remains the explicit, portable resolution
+mechanism. See [ADR-0010](adr/0010-external-integration-support-tiers.md) for
+the complete tier and dictionary-distribution decision.

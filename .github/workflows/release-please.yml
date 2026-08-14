@@ -36,3 +36,83 @@ jobs:
     with:
       ref: ${{ needs.release-please.outputs.tag_name }}
     secrets: inherit
+
+  lsp-release-assets:
+    name: Build LSP release assets (${{ matrix.platform }})
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            archive_format: tar.gz
+            binary_suffix: ""
+          - platform: macOS arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            archive_format: tar.gz
+            binary_suffix: ""
+          - platform: Ubuntu x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_format: tar.gz
+            binary_suffix: ""
+          - platform: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_format: zip
+            binary_suffix: .exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.88
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo build -p ferrolex-lsp --release --target ${{ matrix.target }}
+      - run: >-
+          python scripts/package-lsp-release.py
+          --binary target/${{ matrix.target }}/release/ferrolex-lsp${{ matrix.binary_suffix }}
+          --version ${{ needs.release-please.outputs.tag_name }}
+          --target ${{ matrix.target }}
+          --out-dir ${{ runner.temp }}/ferrolex-lsp-release
+          --format ${{ matrix.archive_format }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrolex-lsp-${{ matrix.target }}
+          path: ${{ runner.temp }}/ferrolex-lsp-release/*
+          if-no-files-found: error
+
+  publish-lsp-release-assets:
+    name: Publish LSP release assets
+    needs: [release-please, lsp-release-assets]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ferrolex-lsp-*
+          path: release-assets
+          merge-multiple: true
+      - run: >-
+          python scripts/release-sha256sums.py
+          --directory release-assets
+          --manifest release-assets/SHA256SUMS
+      - run: >-
+          python scripts/release-sha256sums.py
+          --verify
+          --directory release-assets
+          --manifest release-assets/SHA256SUMS
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release-assets/* --clobber

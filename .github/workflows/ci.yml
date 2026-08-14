@@ -134,3 +134,67 @@ jobs:
       - run: npm --prefix editors/vscode/ferrolex ci --ignore-scripts
       - run: npm --prefix editors/vscode/ferrolex test
       - run: npm --prefix editors/vscode/ferrolex run pack:check
+
+  lsp-release-smoke:
+    name: LSP release smoke (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            archive_format: tar.gz
+            binary_suffix: ""
+          - platform: macOS arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            archive_format: tar.gz
+            binary_suffix: ""
+          - platform: Ubuntu x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_format: tar.gz
+            binary_suffix: ""
+          - platform: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_format: zip
+            binary_suffix: .exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo build -p ferrolex-lsp --release --target ${{ matrix.target }}
+      - run: >-
+          python scripts/package-lsp-release.py
+          --binary target/${{ matrix.target }}/release/ferrolex-lsp${{ matrix.binary_suffix }}
+          --version 0.2.0
+          --target ${{ matrix.target }}
+          --out-dir ${{ runner.temp }}/ferrolex-lsp-release
+          --format ${{ matrix.archive_format }}
+      - run: >-
+          python scripts/verify-lsp-release-artifact.py
+          --artifact ${{ runner.temp }}/ferrolex-lsp-release/ferrolex-lsp-0.2.0-${{ matrix.target }}.${{ matrix.archive_format }}
+          --version 0.2.0
+          --target ${{ matrix.target }}
+          --binary-name ferrolex-lsp${{ matrix.binary_suffix }}
+      - run: >-
+          python scripts/release-sha256sums.py
+          --directory ${{ runner.temp }}/ferrolex-lsp-release
+          --manifest ${{ runner.temp }}/ferrolex-lsp-release/SHA256SUMS
+      - run: >-
+          python scripts/release-sha256sums.py
+          --verify
+          --directory ${{ runner.temp }}/ferrolex-lsp-release
+          --manifest ${{ runner.temp }}/ferrolex-lsp-release/SHA256SUMS
+      - run: >-
+          python scripts/lsp-stdio-smoke.py
+          --artifact ${{ runner.temp }}/ferrolex-lsp-release/ferrolex-lsp-0.2.0-${{ matrix.target }}.${{ matrix.archive_format }}
+          --binary-name ferrolex-lsp${{ matrix.binary_suffix }}
