@@ -801,6 +801,11 @@ impl<'dictionary> Analyzer<'dictionary> {
         let mut findings = Vec::new();
         for node in nodes {
             let text = &document.source[node.range.clone()];
+            // `$crate` is Rust's special hygienic macro metavariable rather
+            // than a user-provided binding name.
+            if node.kind == RustNodeKind::Identifier && text == "$crate" {
+                continue;
+            }
             if node.kind == RustNodeKind::Comment
                 && rust_comment_starts_line(document.source, &node.range)
             {
@@ -1831,6 +1836,29 @@ fn knownFunction() {
 
         let analysis = analyzer.check_rust(source);
 
+        assert_eq!(
+            analysis
+                .findings()
+                .iter()
+                .filter(|finding| finding.word() == "misspeled")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn rust_analysis_excludes_the_crate_macro_metavariable() {
+        let dictionary = WordList::new(["known", "ident"]).expect("test words are valid");
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let source =
+            "macro_rules! known { ($misspeled:ident) => { $crate::known(); $misspeled }; }";
+
+        let analysis = analyzer.check_rust(source);
+
+        assert!(analysis
+            .findings()
+            .iter()
+            .all(|finding| finding.word() != "crate"));
         assert_eq!(
             analysis
                 .findings()
