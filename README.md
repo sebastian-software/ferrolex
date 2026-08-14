@@ -15,7 +15,7 @@ claims.
 
 The project is pre-1.0. Its supported native Rust API and CLI, experimental
 diagnostics and integrations, MSRV, artifact policy, and release gates are
-defined in the [v0.1 release contract](docs/release-contract.md).
+defined in the [pre-1.0 release contract](docs/release-contract.md).
 
 ### Reviewed dictionary compatibility
 

@@ -1,4 +1,11 @@
 //! Command-line interface for ferrolex.
+//!
+//! This package is an **internal** packaging crate for the supported
+//! `ferrolex` executable, not a Rust library integration surface. It is
+//! intentionally excluded from the public-docs build because its binary name
+//! collides with the public umbrella library's rustdoc path; see ferrolex's
+//! [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
 
 #![forbid(unsafe_code)]
 

@@ -1,4 +1,8 @@
 //! Generic stdio Language Server Protocol integration for ferrolex.
+//!
+//! This is an **experimental**, unpublished (`publish = false`) source-built
+//! server under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
 
 #![forbid(unsafe_code)]
 

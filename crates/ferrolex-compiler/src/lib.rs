@@ -6,6 +6,12 @@
 //! version only represents exact words. Metadata and morphology are separate
 //! future format features rather than implicit, unstable payloads.
 //!
+//! ## Stability
+//!
+//! This is a **supported public Rust API** under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
+//! The neutral IR is an implementation model, not a stable serialized format.
+//!
 //! ```
 //! use ferrolex_compiler::{compile_words, CompiledDictionary};
 //! use ferrolex_core::Dictionary;

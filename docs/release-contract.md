@@ -1,9 +1,10 @@
-# v0.1 release contract
+# Pre-1.0 release contract (v0.2+)
 
-This is the release and support contract for ferrolex's pre-1.0 releases. It
-turns the current native Rust library and CLI into an explicit supported
-surface without promoting the diagnostic or external-integration experiments.
-It applies to every `0.y.z` release until a 1.0 contract replaces it.
+This is the release and support contract for ferrolex's current pre-1.0
+(`v0.2+`) releases. It turns the current native Rust library and CLI into an
+explicit supported surface without promoting the diagnostic or
+external-integration experiments.
+applies to every release from `0.2.0` until a 1.0 contract replaces it.
 
 ## Versioning and MSRV
 
@@ -12,16 +13,20 @@ managed by Release Please. The MSRV is Rust **1.88**; CI builds, lints, and
 tests the workspace with 1.88 and the current stable toolchain. The separate
 nightly fuzz workspace is outside this MSRV contract.
 
-ferrolex follows SemVer with the normal pre-1.0 rule:
+ferrolex uses the following project and Cargo-compatible pre-1.0 convention:
 
 - Patch releases (`0.y.z` to `0.y.z+1`) do not intentionally break the
   supported API, CLI, or artifact contract.
 - Additive, backward-compatible changes may be released in a patch release.
 - A breaking change to a supported surface, including an MSRV increase, needs
   a minor pre-1.0 release (`0.y.z` to `0.(y+1).0`) and release notes.
-- Experimental and internal surfaces are excluded from this promise. Their
-  promotion requires the evidence named in their documentation; CI coverage or
-  a source build alone is not promotion evidence.
+- Experimental and internal surfaces are excluded from the supported-surface
+  promise, but intentional incompatible experimental changes also require the
+  next minor release and release notes. Patches do not intentionally break an
+  experimental surface. This is the project's Cargo-compatible release
+  convention, not a claim about a generic SemVer pre-1.0 rule. Promotion still
+  requires the evidence named in the relevant documentation; CI coverage or a
+  source build alone is not promotion evidence.
 
 ## Support tiers
 
@@ -35,7 +40,7 @@ implementation or release helper, not an external dependency surface.
 
 | Package | Tier | Contract |
 | --- | --- | --- |
-| `ferrolex` | Supported | Umbrella crate; re-exports the supported core dictionary API. |
+| `ferrolex` | Supported, with an exception | Umbrella crate; re-exports the supported core dictionary API. Its `ffi` feature is experimental because it enables the experimental `ferrolex-ffi/c-abi` surface. |
 | `ferrolex-core` | Supported | Dictionary interfaces, word lists, checkers, normalization, and user overlays. |
 | `ferrolex-text` | Supported | Plain-text tokenization and checking. |
 | `ferrolex-code` | Supported | Generic source-code analysis and its documented configuration contract. |
@@ -94,7 +99,7 @@ cache](hunspell-runtime-cache.md) for the exact current formats and bounds.
 
 ## Release gate
 
-A v0.1 release candidate requires all configured CI jobs to be green,
+A `v0.2+` release candidate requires all configured CI jobs to be green,
 including the Rust 1.88/stable test matrix, compatibility fixtures, fuzz
 smoke, binding spikes, and VS Code extension checks. The dependency-policy job
 runs `cargo deny check` and verifies both distribution licenses; its advisory,
@@ -104,10 +109,14 @@ continue to enforce the release process.
 
 Documentation is part of the gate: the README and linked contract documents
 must describe every supported and experimental surface, and CI must generate
-Rust documentation for the workspace without dependencies.
+the public package docs without dependencies. The internal `ferrolex-cli`
+binary is deliberately excluded from that docs command because its binary name
+collides with the public `ferrolex` library's rustdoc output; the checker uses
+an isolated target directory and verifies the public umbrella page instead.
 
-Before tagging, run the following source-based reproducibility verification
-from a clean checkout with Rust 1.88 installed:
+Before creating or tagging a `v0.2+` release candidate, run the following
+source-based reproducibility verification from a clean checkout with Rust 1.88
+installed:
 
 ```sh
 bash scripts/verify-release.sh

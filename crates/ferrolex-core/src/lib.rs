@@ -4,6 +4,11 @@
 //! Importers and compiled dictionary loaders implement [`Dictionary`] at their
 //! respective boundaries.
 //!
+//! ## Stability
+//!
+//! This is a **supported public Rust API** under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
+//!
 //! ```
 //! use ferrolex_core::{Dictionary, WordList};
 //!

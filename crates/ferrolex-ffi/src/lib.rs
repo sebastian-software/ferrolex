@@ -2,6 +2,9 @@
 //!
 //! This crate is a Phase 8 spike, not a stable published API. Enable the
 //! `c-abi` feature to compile its exported functions and generated header.
+//! It is **experimental**, unpublished (`publish = false`), and excluded from
+//! the supported API under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
 
 #![cfg_attr(not(feature = "c-abi"), allow(dead_code))]
 #![allow(unsafe_code, reason = "C ABI boundary requires validated raw pointers")]

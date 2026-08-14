@@ -4,6 +4,11 @@
 //! depending on a programming-language parser. Language-specific adapters can
 //! provide a [`Document`] with the appropriate [`CommentSyntax`].
 //!
+//! ## Stability
+//!
+//! This is a **supported public Rust API** under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
+//!
 //! ```
 //! use ferrolex_code::{Analyzer, Document};
 //! use ferrolex_core::WordList;

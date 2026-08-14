@@ -3,6 +3,10 @@
 //! This crate is deliberately unpublished. It exposes only immutable,
 //! plain-word-list checking and bounded suggestions while packaging and API
 //! stability are evaluated.
+//!
+//! This is an **experimental**, unpublished (`publish = false`) binding under
+//! ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
 
 // napi-rs generates Node-API registration glue with unsafe code. The
 // handwritten adapter below remains safe Rust; core crates still forbid it.

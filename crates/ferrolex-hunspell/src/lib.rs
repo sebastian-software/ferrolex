@@ -4,6 +4,14 @@
 //! Hunspell format and translates it into ferrolex-owned data structures. No
 //! runtime dependency on another spell checker is introduced.
 //!
+//! ## Stability
+//!
+//! This is a **supported public Rust API** under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md),
+//! except for the experimental lookup-explanation types and methods. Those
+//! diagnostic results are deliberately unstable and are not a serialization
+//! contract.
+//!
 //! ```
 //! use ferrolex_core::Dictionary;
 //! use ferrolex_hunspell::{import, ImportMode};

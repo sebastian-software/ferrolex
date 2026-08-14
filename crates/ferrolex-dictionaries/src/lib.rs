@@ -5,6 +5,12 @@
 //! [`VerifiedDictionary`] manifest. Bytes are accepted only from HTTPS URLs,
 //! checked against the manifest's SHA-256 digests, and atomically installed.
 //!
+//! ## Stability
+//!
+//! This is a **supported public Rust API** under ferrolex's [pre-1.0 release
+//! contract](https://github.com/sebastian-software/ferrolex/blob/main/docs/release-contract.md).
+//! It does not bundle or redistribute dictionary data.
+//!
 //! ```
 //! use ferrolex_dictionaries::find_locale;
 //!
