@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-code"
-version = "0.2.0"
+version = "0.3.0"
 description = "Source-code analysis for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.2.0" }
+ferrolex-core = { path = "../ferrolex-core", version = "0.3.0" }
 regex = "1.13.1"
 tree-sitter = "0.25.10"
 tree-sitter-rust = "0.24.0"

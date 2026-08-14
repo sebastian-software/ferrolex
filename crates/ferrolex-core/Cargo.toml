@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Core dictionary interfaces for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
