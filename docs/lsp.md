@@ -1,5 +1,10 @@
 # ferrolex language server
 
+> **Prototype outside the current product scope.** ferrolex does not currently
+> distribute or maintain an LSP release surface. Format-aware tools should call
+> the Rust or Node.js engine after parsing their own documents. This document
+> records the checked-in prototype until its code is removed or relocated.
+
 `ferrolex-lsp` is a generic Language Server Protocol server over stdio. It is
 editor-neutral: any LSP client can launch `cargo run -p ferrolex-lsp` during
 development, or the built binary in a packaged integration.
@@ -35,14 +40,11 @@ Set this object either in `initializationOptions.ferrolex` or under the
 production dictionary selection remains a separate integration decision.
 `userDictionaryPath` uses ferrolex's deterministic plain-word-list format.
 
-## Scope decision
+## Prototype status
 
-This is a **maintained experimental generic LSP implementation**. The protocol
-server, diagnostics, quick fixes, user-dictionary flow, configuration reload,
-and incremental document handling ship in the workspace. It is the first
-selected external distribution surface, but versioned release artifacts and
-clean-install verification are not available until
-[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91) lands.
-Editor packaging is intentionally separate. The compatibility, dictionary, and
-promotion boundaries are authoritative in
+The protocol server, diagnostics, quick fixes, user-dictionary flow,
+configuration reload, and incremental document handling are checked-in
+prototype code. They are not an active release surface or compatibility
+promise. No versioned LSP artifacts or editor distribution are planned under
+the current product focus. See
 [ADR-0010](adr/0010-external-integration-support-tiers.md).

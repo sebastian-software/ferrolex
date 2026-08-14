@@ -19,9 +19,9 @@ Advisory where appropriate.
 
 ## Scope
 
-ferrolex treats dictionaries, compiled artifacts, source files, and suggestion
-queries as untrusted input. In scope are memory-safety defects, panics,
-unbounded resource consumption, and integrity failures in importers, artifact
-loaders, source analysis, and bounded suggestion processing. Unsupported
-dictionary semantics that are diagnosed rather than silently accepted are not
-compatibility vulnerabilities by themselves.
+ferrolex treats dictionaries, compiled artifacts, text passed by callers, and
+suggestion queries as untrusted input. In scope are memory-safety defects,
+panics, unbounded resource consumption, and integrity failures in importers,
+artifact loaders, generic token handling, and bounded suggestion processing.
+Unsupported dictionary semantics that are diagnosed rather than silently
+accepted are not compatibility vulnerabilities by themselves.

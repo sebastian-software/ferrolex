@@ -1,40 +1,74 @@
 # Architecture
 
-ferrolex keeps input formats, word recognition, document analysis, suggestions,
-and compiled storage separate so that no importer or analyzer becomes the core
-runtime model.
+ferrolex is a spell-checking engine, not a document-analysis framework. Its
+core boundary starts with dictionary bytes and ends with deterministic word
+recognition and suggestions.
 
 ```text
-plain word list / Hunspell / compiled dictionary
-                    │
-                    ▼
-             ferrolex-core
-                    │
-          ┌─────────┴──────────┐
-          ▼                    ▼
-    ferrolex-text         ferrolex-code
-          │                    │
-          └─────────┬──────────┘
-                    ▼
-                ferrolex CLI
+reviewed upstream sources / local Hunspell pairs / plain word lists
+                              │
+                              ▼
+                 ferrolex-dictionaries
+                    verified fetch/cache
+                              │
+                              ▼
+                    ferrolex-hunspell
+                  import and runtime cache
+                              │
+                              ▼
+                      ferrolex-core
+                 immutable Dictionary contract
+                              │
+                   ┌──────────┴──────────┐
+                   ▼                     ▼
+          ferrolex-suggest        reference CLI
+                   │
+                   ▼
+             Rust consumers
+                   │
+                   ▼
+           ferrolex-node adapter
 ```
 
-## Current crates
+## Product crates
 
 - `ferrolex-core` owns immutable dictionary lookup, explicit normalization,
-  and dictionary composition. Its public `Dictionary` trait is intentionally
-  small; importers and future binary loaders implement it at their boundary.
-- `ferrolex-text` owns natural-language tokenization. It returns original token
-  slices and UTF-8 byte ranges, without encoding file-format semantics in the
-  dictionary layer.
-- `ferrolex-code` owns generic source token classification, identifier
-  segmentation, inline directives, and diagnostics. It remains parser- and
-  language-agnostic; future adapters supply document and comment context.
-- `ferrolex-cli` owns process I/O, exit codes, and rendering diagnostics.
+  composition, and user overlays. Its `Dictionary` trait is the central
+  integration contract.
+- `ferrolex-hunspell` safely imports supported `.aff`/`.dic` semantics and owns
+  the provenance-bound runtime cache.
+- `ferrolex-suggest` owns bounded, deterministic suggestions without changing
+  dictionary recognition semantics.
+- `ferrolex-dictionaries` owns the reviewed catalog, verified acquisition, and
+  caller-selected local cache. It never bundles or silently updates dictionary
+  data.
+- `ferrolex-node` is the selected direct non-Rust adapter. It should expose the
+  same engine concepts rather than grow a separate spell-checker.
 
-Base dictionaries are immutable, `Send`, and `Sync`. A mutable user overlay,
-Hunspell import, morphology, source-code analysis, suggestions, and the native
-compiled format are separate forthcoming layers.
+The root `ferrolex` crate currently re-exports the small core API. The public
+Rust package boundary should be aligned with the product crates before a stable
+release instead of declaring every workspace crate supported.
+
+## Supporting and historical crates
+
+- `ferrolex-cli` is a reference and diagnostic interface for the engine and
+  managed dictionary workflow.
+- `ferrolex-compiler` and compiled artifacts are implementation and deployment
+  tools. They are not a separate product promise without a demonstrated
+  consumer need.
+- `ferrolex-text` and `ferrolex-code` are existing generic helpers. They do not
+  own Markdown, PO, TypeScript, or other format semantics and must not acquire
+  parser dependencies.
+- The C ABI, Python, LSP, and VS Code packages are prototypes outside the
+  current product and distribution scope.
+
+## Consumer-owned format integration
+
+Document-aware projects own parsing and selection of human-language content.
+Ferromark can pass Markdown prose, Ferrocat can pass translatable PO strings,
+and OXC can pass selected TypeScript comments, strings, or identifiers to the
+same ferrolex dictionary and suggestion APIs. Ferrolex does not embed their
+parsers or duplicate their syntax policies.
 
 ## Normalization boundary
 

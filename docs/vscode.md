@@ -1,6 +1,10 @@
 # Visual Studio Code integration
 
-The maintained VS Code client lives in
+> **Prototype outside the current product scope.** There is no planned
+> Marketplace or bundled-LSP distribution. This document records the existing
+> client prototype until its code is removed or relocated.
+
+The VS Code prototype lives in
 [`editors/vscode/ferrolex`](../editors/vscode/ferrolex). It is deliberately
 thin: it starts the generic [`ferrolex-lsp`](lsp.md) server over stdio and
 maps VS Code's `ferrolex.*` settings to the server's initialization and
@@ -18,12 +22,10 @@ so a repository can keep its accepted and ignored words alongside its VS Code
 settings. The optional `ferrolex.userDictionaryPath` remains a user-chosen
 plain-word-list file and is persisted by the server.
 
-## Binary and distribution decision
+## Local prototype packaging
 
-The extension is **maintained experimental**: its source, settings mapping,
-and reproducible local package verification are maintained, but it has no
-Marketplace or bundled-server compatibility promise. Install its JavaScript
-dependency and build a local VSIX with:
+The extension has no Marketplace or bundled-server compatibility promise. Its
+existing source can still be packaged locally for evaluation with:
 
 ```sh
 cd editors/vscode/ferrolex
@@ -31,11 +33,5 @@ npm install
 npx @vscode/vsce package
 ```
 
-**Deferred for Marketplace publication:** the extension does not bundle or
-download a `ferrolex-lsp` binary. Marketplace publication requires the
-portable, versioned LSP artifacts and update contract tracked by
-[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91), followed
-by extension install/update verification on its declared platforms. The command
-setting is the explicit, portable resolution mechanism until then. See
-[ADR-0010](adr/0010-external-integration-support-tiers.md) for the complete
-tier and dictionary-distribution decision.
+Marketplace publication and automatic LSP acquisition are not on the current
+roadmap. See [ADR-0010](adr/0010-external-integration-support-tiers.md).

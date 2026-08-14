@@ -1,5 +1,8 @@
 # Experimental C ABI
 
+> Evaluation prototype only. The C ABI has no current consumer, distribution
+> channel, platform matrix, or compatibility commitment.
+
 `ferrolex-ffi` is a Phase 8 design spike. It is not published and it does not
 make a stability promise yet. The default Rust workspace build does not compile
 or expose this ABI; it is enabled explicitly through `c-abi` (or the umbrella
@@ -59,8 +62,7 @@ header synchronized with the symbols that Rust compiles.
 
 ## Decision record
 
-The C ABI is **maintained experimental** under
-[ADR-0010](adr/0010-external-integration-support-tiers.md), not a stable ABI
-or released library/header package. Promote it only after a real C consumer
-validates its ownership and packaging model, the Rust APIs it wraps have
-stabilized, and a versioned distribution and platform matrix are chosen.
+The C ABI is an **evaluation prototype outside the current product scope**
+under [ADR-0010](adr/0010-external-integration-support-tiers.md), not a stable
+ABI or released library/header package. Reconsider it only after a real C
+consumer validates its ownership and packaging model.

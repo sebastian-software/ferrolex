@@ -56,4 +56,4 @@ name.
 
 ## References
 
-- [Language-aware developer experience epic](https://github.com/sebastian-software/ferrolex/issues/83)
+- [Keep document parsing outside ferrolex](0009-language-aware-source-analysis.md)

@@ -1,20 +1,26 @@
 # ferrolex
 
-Modern spell-checking infrastructure for text and code.
+Native spell-checking for Rust and Node.js.
 
-ferrolex is an independent, native Rust implementation with planned support
-for the Hunspell dictionary ecosystem. It is not a Hunspell port. It currently
-provides immutable UTF-8 plain-word-list dictionaries, generic source-code
-analysis, bounded deterministic suggestions, and a documented Hunspell
-`.aff`/`.dic` recognition subset. That subset includes lazy affixes,
-continuations, circumfixes, special-word flags, and bounded compound rules;
-unsupported directives remain explicit diagnostics rather than compatibility
-claims.
+ferrolex is an independent Rust engine that safely loads existing Hunspell
+dictionaries and provides fast, deterministic word checks and suggestions
+without linking to the native Hunspell library. A verified dictionary catalog
+and downloader cover the complete path from an upstream dictionary to a local,
+caller-controlled cache.
+
+The engine intentionally does not parse Markdown, programming languages, or
+other document formats. Format-aware tools extract prose or identifiers and
+call ferrolex through its Rust or Node.js API. This keeps language ownership in
+projects such as Ferromark for Markdown, Ferrocat for PO catalogs, and OXC for
+TypeScript instead of turning ferrolex into a general analysis framework.
 
 ## Status
 
-The project is in its initial development phase. The current public API and
-CLI are intentionally small and may change before a stable release.
+The project is pre-1.0. The Rust engine, Hunspell compatibility, suggestions,
+and managed dictionary acquisition are the current product focus. The Node.js
+binding is the first direct runtime integration and remains unpublished while
+its package and installation contract are completed. Public APIs may change in
+minor releases before 1.0; breaking changes are recorded in the changelog.
 
 ### Reviewed dictionary compatibility
 
@@ -58,19 +64,10 @@ one word or a plain-text file:
 ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
 ferrolex suggest --dictionary words.txt Strase
-ferrolex analyze --dictionary words.txt --comment-prefix // src/lib.rs
-ferrolex analyze --dictionary words.txt --config .ferrolex/config src/lib.rs
 ferrolex validate --strict dictionary.aff dictionary.dic
-ferrolex compile --dictionary words.txt -o words.flex
-ferrolex compile dictionary.aff dictionary.dic -o dictionary.flexh
-ferrolex inspect dictionary.flexh
-ferrolex validate --compiled words.flex
-ferrolex check --compiled words.flex Straße
-ferrolex check --compiled dictionary.flexh books
 ferrolex dictionary list
 ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
-ferrolex analyze --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff src/lib.rs
 ferrolex suggest --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff --max-candidates 300000 --max-edit-cells 20000000 slowami
 ```
 
@@ -78,12 +75,6 @@ Plain-word-list files ignore blank lines, leading or trailing whitespace, and
 lines beginning with `#`. Exact matching is the default. Library users can
 opt into NFC or NFKC normalization explicitly; case folding remains a separate
 future policy.
-
-`analyze` is the generic source-code path. It splits camelCase, PascalCase,
-snake_case, kebab-case, and Unicode identifiers; ignores URLs, email addresses,
-numbers, and hashes by default; and recognizes `ferrolex:ignore`,
-`ferrolex:disable`, and `ferrolex:enable` only inside the declared comment
-syntax. See [source-code analysis](docs/source-code-analysis.md).
 
 `validate` imports a Hunspell-style pair under ferrolex's documented
 compatibility subset and reports structured diagnostics. It decodes UTF-8,
@@ -101,13 +92,10 @@ not expand affix or compound forms. `UserDictionary` project overlays can be
 used through the library API. The comparison and ranking contract is documented
 in [Suggestions](docs/suggestions.md).
 
-The current external-integration tiers are recorded in
-[Native integrations](docs/integrations.md): C ABI, Node.js, Python, the
-generic LSP, and VS Code are maintained experimental. The LSP is the first
-selected distribution surface; its release-artifact delivery is tracked by
-[Issue #91](https://github.com/sebastian-software/ferrolex/issues/91). These
-are product decisions, not claims that every package or binary is already
-available.
+The [Node.js binding](docs/bindings.md) is the only current foreign-runtime
+integration direction. The checked-in C ABI, Python, LSP, and VS Code work is
+prototype history rather than an active distribution or compatibility promise;
+see [Native integrations](docs/integrations.md).
 
 The optional, digest-pinned LibreOffice installer is documented in
 [Dictionary fetching](docs/dictionary-fetching.md). It fetches reviewed
@@ -139,6 +127,15 @@ and compatibility policy.
 the artifact format and version, source metadata where the format records it,
 and the recognition features the reader must support. This gives release and
 locale-matrix automation a stable, human-readable artifact report.
+
+## Product boundaries
+
+ferrolex owns dictionary acquisition, import, recognition, and suggestions. It
+does not own document parsing, editor protocols, or language semantics. In
+particular, parser-backed source analysis, an LSP, and editor extensions are not
+part of the current product scope. Existing experimental code may remain while
+the workspace is simplified, but it must not drive the public API, release
+matrix, or required CI.
 
 ## Benchmarks
 
