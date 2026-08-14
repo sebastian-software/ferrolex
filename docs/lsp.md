@@ -46,7 +46,6 @@ download. Dictionary selection remains caller-controlled under
 
 | Platform | Release asset |
 | --- | --- |
-| macOS x86_64 | `ferrolex-lsp-<VERSION>-x86_64-apple-darwin.tar.gz` |
 | macOS arm64 | `ferrolex-lsp-<VERSION>-aarch64-apple-darwin.tar.gz` |
 | Ubuntu x86_64 | `ferrolex-lsp-<VERSION>-x86_64-unknown-linux-gnu.tar.gz` |
 | Windows x86_64 | `ferrolex-lsp-<VERSION>-x86_64-pc-windows-msvc.zip` |
@@ -82,7 +81,7 @@ permissions:
 
 ```sh
 VERSION=<VERSION>
-TARGET=<x86_64-apple-darwin|aarch64-apple-darwin|x86_64-unknown-linux-gnu>
+TARGET=<aarch64-apple-darwin|x86_64-unknown-linux-gnu>
 tar -xzf "ferrolex-lsp-$VERSION-$TARGET.tar.gz"
 mkdir -p "$HOME/.local/bin"
 install -m 755 "ferrolex-lsp-$VERSION-$TARGET/ferrolex-lsp" "$HOME/.local/bin/ferrolex-lsp"
