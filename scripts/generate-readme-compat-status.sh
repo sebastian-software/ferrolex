@@ -21,7 +21,7 @@ status_table=$(
         meaning = "The pinned dictionary imports strictly and its reviewed word forms work."
       } else if ($11 == "lenient") {
         status = "🟡 In progress"
-        meaning = "Common reviewed words work, but known dictionary features still need support."
+        meaning = "Reviewed probes work with a documented lenient-import boundary; strict diagnostics are recorded."
       } else {
         status = "🔴 Blocked"
         meaning = "This exact dictionary cannot yet be imported reliably."
