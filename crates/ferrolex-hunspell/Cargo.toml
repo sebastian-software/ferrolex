@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-hunspell"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hunspell-compatible dictionary importer for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
@@ -12,15 +12,15 @@ categories.workspace = true
 
 [dependencies]
 encoding_rs = "=0.8.35"
-ferrolex-core = { path = "../ferrolex-core", version = "0.2.0" }
-ferrolex-compiler = { path = "../ferrolex-compiler", version = "0.2.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.2.0" }
+ferrolex-core = { path = "../ferrolex-core", version = "0.3.0" }
+ferrolex-compiler = { path = "../ferrolex-compiler", version = "0.3.0" }
+ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.3.0" }
 sha2 = "=0.10.9"
 
 [dev-dependencies]
 criterion = "0.5.1"
-ferrolex-code = { path = "../ferrolex-code", version = "0.2.0" }
-ferrolex-text = { path = "../ferrolex-text", version = "0.2.0" }
+ferrolex-code = { path = "../ferrolex-code", version = "0.3.0" }
+ferrolex-text = { path = "../ferrolex-text", version = "0.3.0" }
 proptest = "=1.6.0"
 
 [[bench]]

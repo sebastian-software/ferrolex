@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/sebastian-software/ferrolex/compare/ferrolex-v0.2.0...ferrolex-v0.3.0) (2026-08-14)
+
+
+### Features
+
+* **code:** add parser-backed Rust analysis ([51e2016](https://github.com/sebastian-software/ferrolex/commit/51e2016d7fc39fc75d544b34e9ab014ed03de2c2))
+
+
+### Bug Fixes
+
+* **ci:** restore cargo policy baseline ([8b18d02](https://github.com/sebastian-software/ferrolex/commit/8b18d020ec4519d19c417db3900b55b03178501d))
+* **cli:** preserve explicit Rust comment overrides ([a71e5ad](https://github.com/sebastian-software/ferrolex/commit/a71e5ad1bef335bac46f38e1906f866c79632db8))
+* **code:** exclude crate macro metavariable ([19bacb6](https://github.com/sebastian-software/ferrolex/commit/19bacb61a1cd76ec4cedd0409e839f515cdf93af))
+* **code:** preserve Rust analysis contracts ([b2c2ae1](https://github.com/sebastian-software/ferrolex/commit/b2c2ae15250c811c0dc908e71ed3e519f155e824))
+* **hunspell:** bind scorecard corpus identity ([cac8384](https://github.com/sebastian-software/ferrolex/commit/cac8384a14e5baeed85e4e84c9167c0b56e26747))
+* **hunspell:** harden scorecard evidence ([d2d8766](https://github.com/sebastian-software/ferrolex/commit/d2d8766f6512d0df1625de1c5c70868b4eb746f1))
+
 ## [0.2.0](https://github.com/sebastian-software/ferrolex/compare/ferrolex-v0.1.0...ferrolex-v0.2.0) (2026-08-13)
 
 

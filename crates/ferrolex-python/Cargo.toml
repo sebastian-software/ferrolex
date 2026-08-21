@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-python"
-version = "0.2.0"
+version = "0.3.0"
 description = "Experimental Python binding spike for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
@@ -17,8 +17,8 @@ crate-type = ["cdylib", "rlib"]
 test = false
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.2.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.2.0" }
+ferrolex-core = { path = "../ferrolex-core", version = "0.3.0" }
+ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.3.0" }
 pyo3 = "=0.29.2"
 
 [lints]
