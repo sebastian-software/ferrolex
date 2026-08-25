@@ -44,7 +44,7 @@ const EXIT_CODES: &str =
 const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Installed Hunspell AFF path (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
 const HELP_SUGGEST: &str = "Usage: ferrolex suggest (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH>) [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt ferolex";
 const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
-const HELP_ANALYZE: &str = "Usage: ferrolex analyze [DICTIONARY OPTIONS] [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
+const HELP_ANALYZE: &str = "Usage: ferrolex analyze (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>) [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Installed Hunspell AFF path (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
 const HELP_COMPILE: &str = "Usage: ferrolex compile (--dictionary <PATH> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n\nCompiles a plain word list or Hunspell pair to a native artifact.\n  -o <ARTIFACT>  Output artifact path\n\nExample: ferrolex compile --dictionary words.txt -o words.flexdic";
 const HELP_INSPECT: &str = "Usage: ferrolex inspect <ARTIFACT>\n\nPrints native artifact metadata.\n\nExample: ferrolex inspect words.flexdic";
 const HELP_VALIDATE: &str = "Usage: ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n\nExample: ferrolex validate --strict dictionary.aff dictionary.dic";
@@ -1319,9 +1319,39 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
 }
 
 fn requests_help(arguments: &[String]) -> bool {
-    arguments
-        .iter()
-        .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+    let mut arguments = arguments.iter();
+
+    while let Some(argument) = arguments.next() {
+        if value_option(argument) {
+            arguments.next();
+        } else if matches!(argument.as_str(), "--help" | "-h") {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn value_option(argument: &str) -> bool {
+    matches!(
+        argument,
+        "--dictionary"
+            | "--compiled"
+            | "--hunspell"
+            | "--file"
+            | "--max-results"
+            | "--max-edit-distance"
+            | "--max-candidates"
+            | "--max-edit-cells"
+            | "--config"
+            | "--include"
+            | "--exclude"
+            | "--comment-prefix"
+            | "--comment-syntax"
+            | "--workspace"
+            | "--cache"
+            | "-o"
+    )
 }
 
 macro_rules! parse_or_help {
@@ -2549,6 +2579,38 @@ mod tests {
                 hunspell_affix_paths: Vec::new(),
                 config_path: None,
                 comment_syntax: Some(CommentSyntax::line("--")),
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
+                suggest: false,
+                path: PathBuf::from("query.sql"),
+            })
+        );
+    }
+
+    #[test]
+    fn treats_help_like_comment_prefixes_as_option_values() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "analyze",
+                "--dictionary",
+                "words.txt",
+                "--comment-prefix",
+                "-h",
+                "query.sql",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the command is valid");
+
+        assert_eq!(
+            command,
+            Command::Analyze(AnalyzeCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                config_path: None,
+                comment_syntax: Some(CommentSyntax::line("-h")),
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: false,
