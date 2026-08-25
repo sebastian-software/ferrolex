@@ -39,6 +39,16 @@ use ferrolex_text::check_text;
 
 const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
+const EXIT_CODES: &str =
+    "\nExit status: 0 success, 1 finding, 2 usage error, 3 operational failure.";
+const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Installed Hunspell AFF path (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
+const HELP_SUGGEST: &str = "Usage: ferrolex suggest (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH>) [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt ferolex";
+const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
+const HELP_ANALYZE: &str = "Usage: ferrolex analyze [DICTIONARY OPTIONS] [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
+const HELP_COMPILE: &str = "Usage: ferrolex compile (--dictionary <PATH> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n\nCompiles a plain word list or Hunspell pair to a native artifact.\n  -o <ARTIFACT>  Output artifact path\n\nExample: ferrolex compile --dictionary words.txt -o words.flexdic";
+const HELP_INSPECT: &str = "Usage: ferrolex inspect <ARTIFACT>\n\nPrints native artifact metadata.\n\nExample: ferrolex inspect words.flexdic";
+const HELP_VALIDATE: &str = "Usage: ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n\nExample: ferrolex validate --strict dictionary.aff dictionary.dic";
+const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | install | add-word> [OPTIONS]\n\nLists reviewed dictionaries, obtains a pinned source, installs a runtime cache, or records a user word.\n  fetch/install <LOCALE> --cache <PATH>  Use an explicit cache directory\n  add-word [--workspace <PATH> | --global] <WORD>\n\nExample: ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -60,8 +70,8 @@ fn main() -> ExitCode {
 
 fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliError> {
     match parse_arguments(arguments)? {
-        Command::Help => {
-            println!("{USAGE}");
+        Command::Help(help) => {
+            println!("{help}{EXIT_CODES}");
             Ok(RunOutcome::Success)
         }
         Command::Version => {
@@ -1290,23 +1300,58 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
     let _program_name = arguments.next();
 
     match arguments.next().as_deref() {
-        Some("--help" | "-h") => Ok(Command::Help),
+        Some("--help" | "-h") => Ok(Command::Help(USAGE)),
         Some("--version" | "-V") if arguments.next().is_none() => Ok(Command::Version),
         Some("--version" | "-V") => Err(CliError::Usage(
             "`--version` does not accept arguments".to_owned(),
         )),
-        Some("check") => parse_check_arguments(expand_long_option_values(arguments)),
-        Some("suggest") => parse_suggest_arguments(expand_long_option_values(arguments)),
-        Some("explain") => parse_explain_arguments(expand_long_option_values(arguments)),
-        Some("analyze") => parse_analyze_arguments(expand_long_option_values(arguments)),
-        Some("compile") => parse_compile_arguments(expand_long_option_values(arguments)),
-        Some("inspect") => parse_inspect_arguments(expand_long_option_values(arguments)),
-        Some("validate") => parse_validate_arguments(expand_long_option_values(arguments)),
-        Some("dictionary") => parse_dictionary_arguments(expand_long_option_values(arguments)),
+        Some("check") => parse_check_or_help(expand_long_option_values(arguments)),
+        Some("suggest") => parse_suggest_or_help(expand_long_option_values(arguments)),
+        Some("explain") => parse_explain_or_help(expand_long_option_values(arguments)),
+        Some("analyze") => parse_analyze_or_help(expand_long_option_values(arguments)),
+        Some("compile") => parse_compile_or_help(expand_long_option_values(arguments)),
+        Some("inspect") => parse_inspect_or_help(expand_long_option_values(arguments)),
+        Some("validate") => parse_validate_or_help(expand_long_option_values(arguments)),
+        Some("dictionary") => parse_dictionary_or_help(expand_long_option_values(arguments)),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
 }
+
+fn requests_help(arguments: &[String]) -> bool {
+    arguments
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+}
+
+macro_rules! parse_or_help {
+    ($name:ident, $parser:ident, $help:ident) => {
+        fn $name(arguments: Vec<String>) -> Result<Command, CliError> {
+            if requests_help(&arguments) {
+                Ok(Command::Help($help))
+            } else {
+                $parser(arguments)
+            }
+        }
+    };
+}
+
+parse_or_help!(parse_check_or_help, parse_check_arguments, HELP_CHECK);
+parse_or_help!(parse_suggest_or_help, parse_suggest_arguments, HELP_SUGGEST);
+parse_or_help!(parse_explain_or_help, parse_explain_arguments, HELP_EXPLAIN);
+parse_or_help!(parse_analyze_or_help, parse_analyze_arguments, HELP_ANALYZE);
+parse_or_help!(parse_compile_or_help, parse_compile_arguments, HELP_COMPILE);
+parse_or_help!(parse_inspect_or_help, parse_inspect_arguments, HELP_INSPECT);
+parse_or_help!(
+    parse_validate_or_help,
+    parse_validate_arguments,
+    HELP_VALIDATE
+);
+parse_or_help!(
+    parse_dictionary_or_help,
+    parse_dictionary_arguments,
+    HELP_DICTIONARY
+);
 
 fn parse_explain_arguments(
     arguments: impl IntoIterator<Item = String>,
@@ -1317,7 +1362,7 @@ fn parse_explain_arguments(
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--hunspell" => set_once_path(&mut hunspell_affix_path, &mut arguments, "--hunspell")?,
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1350,7 +1395,7 @@ fn parse_inspect_arguments(
         ));
     };
     if path == "--help" || path == "-h" {
-        return Ok(Command::Help);
+        return Ok(Command::Help(USAGE));
     }
     if path.starts_with('-') || arguments.next().is_some() {
         return Err(CliError::Usage(
@@ -1404,7 +1449,7 @@ fn parse_suggest_arguments(
                     true,
                 )?;
             }
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1456,7 +1501,7 @@ fn parse_dictionary_arguments(
         Some("fetch") => parse_dictionary_catalog_arguments(arguments, "fetch"),
         Some("install") => parse_dictionary_catalog_arguments(arguments, "install"),
         Some("add-word") => parse_add_word_arguments(arguments),
-        Some("--help" | "-h") => Ok(Command::Help),
+        Some("--help" | "-h") => Ok(Command::Help(HELP_DICTIONARY)),
         Some(subcommand) => Err(CliError::Usage(format!(
             "unknown dictionary subcommand `{subcommand}`"
         ))),
@@ -1477,7 +1522,7 @@ fn parse_add_word_arguments(
         match argument.as_str() {
             "--workspace" => set_once_path(&mut workspace, &mut arguments, "--workspace")?,
             "--global" => global = true,
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")))
             }
@@ -1530,7 +1575,7 @@ fn parse_dictionary_catalog_arguments(
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--cache" => set_once_path(&mut cache_path, &mut arguments, "--cache")?,
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1582,7 +1627,7 @@ fn parse_validate_arguments(
                     ));
                 }
             }
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1636,7 +1681,7 @@ fn parse_compile_arguments(
                     ));
                 }
             }
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1713,7 +1758,7 @@ fn parse_analyze_arguments(
                 })?;
                 set_comment_syntax(&mut comment_syntax, parse_comment_syntax(&syntax)?)?;
             }
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1806,7 +1851,7 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
                     CheckTarget::File(required_path(&mut arguments, "--file")?),
                 )?;
             }
-            "--help" | "-h" => return Ok(Command::Help),
+            "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
@@ -1950,7 +1995,7 @@ enum Command {
     Inspect(PathBuf),
     Validate(ValidateCommand),
     Dictionary(DictionaryCommand),
-    Help,
+    Help(&'static str),
     Version,
 }
 
@@ -2285,7 +2330,7 @@ mod tests {
         render_explanation, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
         CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
         DictionaryCommand, ExplainCommand, RunOutcome, SourceEncoding, SuggestCommand,
-        ValidateCommand,
+        ValidateCommand, HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -2382,7 +2427,7 @@ mod tests {
         let command = parse_arguments(["ferrolex", "check", "--help"].map(str::to_owned))
             .expect("help is always valid");
 
-        assert_eq!(command, Command::Help);
+        assert_eq!(command, Command::Help(HELP_CHECK));
     }
 
     #[test]
