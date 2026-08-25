@@ -739,8 +739,9 @@ fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
     })?;
     let mut misspelled = false;
 
+    let line_index = LineIndex::new(&text);
     for issue in check_text(checker, &text) {
-        print_finding(path, &text, issue.range().start, issue.word());
+        print_finding(path, &text, &line_index, issue.range().start, issue.word());
         misspelled = true;
     }
 
@@ -811,30 +812,33 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     let analyzer = builder.build();
     let paths = analysis_paths(&command.path, &include_patterns, &exclude_patterns)?;
     let mut has_diagnostic = false;
-
     for path in paths {
-        let source = fs::read_to_string(&path).map_err(|source| CliError::ReadInput {
-            path: path.clone(),
-            source,
-        })?;
-        let document = match command
-            .comment_syntax
-            .as_ref()
-            .or(project_comment_syntax.as_ref())
-        {
-            Some(syntax) => Document::new(&source).with_comment_syntax(syntax.clone()),
-            None => Document::new(&source).with_comment_syntax(comment_syntax_for_path(&path)),
+        let Some(source) = read_analysis_source(&path)? else {
+            continue;
         };
+        let line_index = LineIndex::new(&source);
+        let document = analysis_document(
+            &source,
+            &path,
+            command.comment_syntax.as_ref(),
+            project_comment_syntax.as_ref(),
+        );
         let analysis = analyzer.check(&document);
         for finding in analysis.findings() {
-            print_finding(&path, &source, finding.range().start, finding.word());
+            print_finding(
+                &path,
+                &source,
+                &line_index,
+                finding.range().start,
+                finding.word(),
+            );
             if command.suggest {
-                print_analysis_suggestions(&path, &source, finding, &dictionary);
+                print_analysis_suggestions(&path, &source, &line_index, finding, &dictionary);
             }
             has_diagnostic = true;
         }
         for diagnostic in analysis.directive_diagnostics() {
-            let (line, column) = line_and_column(&source, diagnostic.range().start);
+            let (line, column) = line_index.line_and_column(&source, diagnostic.range().start);
             println!(
                 "{}:{line}:{column}: malformed directive: {:?}",
                 path.display(),
@@ -843,12 +847,38 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
             has_diagnostic = true;
         }
     }
-
     Ok(if has_diagnostic {
         RunOutcome::Misspelled
     } else {
         RunOutcome::Success
     })
+}
+
+fn read_analysis_source(path: &Path) -> Result<Option<String>, CliError> {
+    match fs::read_to_string(path) {
+        Ok(source) => Ok(Some(source)),
+        Err(source) if source.kind() == io::ErrorKind::InvalidData => {
+            eprintln!("warning: skipping non-UTF-8 input '{}'", path.display());
+            Ok(None)
+        }
+        Err(source) => Err(CliError::ReadInput {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn analysis_document<'source>(
+    source: &'source str,
+    path: &Path,
+    command_syntax: Option<&CommentSyntax>,
+    project_syntax: Option<&CommentSyntax>,
+) -> Document<'source> {
+    let syntax = command_syntax
+        .or(project_syntax)
+        .cloned()
+        .unwrap_or_else(|| comment_syntax_for_path(path));
+    Document::new(source).with_comment_syntax(syntax)
 }
 
 fn comment_syntax_for_path(path: &Path) -> CommentSyntax {
@@ -909,7 +939,7 @@ fn collect_analysis_paths(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        if matches_any(&relative, excludes) {
+        if matches_any(&relative, excludes) || is_vcs_metadata_directory(&path) {
             continue;
         }
         if entry
@@ -938,6 +968,12 @@ fn collect_analysis_paths(
 
 fn matches_any(path: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|pattern| glob_matches(pattern, path))
+}
+
+fn is_vcs_metadata_directory(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name, ".git" | ".hg" | ".svn"))
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
@@ -972,10 +1008,11 @@ fn glob_starstar_directory(pattern: &[u8], rest: &[u8], path: &[u8]) -> bool {
 fn print_analysis_suggestions(
     path: &Path,
     source: &str,
+    line_index: &LineIndex,
     finding: &ferrolex_code::Finding<'_>,
     dictionary: &AnalysisDictionary,
 ) {
-    let (line, column) = line_and_column(source, finding.range().start);
+    let (line, column) = line_index.line_and_column(source, finding.range().start);
     let config = SuggestConfig {
         max_results: 3,
         ..SuggestConfig::default()
@@ -1260,22 +1297,37 @@ fn render_import_diagnostic(diagnostic: &ImportDiagnostic) -> String {
     )
 }
 
-fn print_finding(path: &Path, source: &str, byte_offset: usize, word: &str) {
-    let (line, column) = line_and_column(source, byte_offset);
+fn print_finding(
+    path: &Path,
+    source: &str,
+    line_index: &LineIndex,
+    byte_offset: usize,
+    word: &str,
+) {
+    let (line, column) = line_index.line_and_column(source, byte_offset);
     println!("{}:{line}:{column}: misspelled: {word}", path.display());
 }
 
-fn line_and_column(text: &str, byte_offset: usize) -> (usize, usize) {
-    let prefix = &text[..byte_offset];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let column = prefix
-        .rsplit_once('\n')
-        .map_or(prefix, |(_, current_line)| current_line)
-        .chars()
-        .count()
-        + 1;
+struct LineIndex {
+    starts: Vec<usize>,
+}
 
-    (line, column)
+impl LineIndex {
+    fn new(text: &str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(
+            text.bytes()
+                .enumerate()
+                .filter_map(|(offset, byte)| (byte == b'\n').then_some(offset + 1)),
+        );
+        Self { starts }
+    }
+
+    fn line_and_column(&self, text: &str, byte_offset: usize) -> (usize, usize) {
+        let line_index = self.starts.partition_point(|start| *start <= byte_offset) - 1;
+        let column = text[self.starts[line_index]..byte_offset].chars().count() + 1;
+        (line_index + 1, column)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2355,12 +2407,12 @@ mod tests {
     };
 
     use super::{
-        catalog_import_encodings, comment_syntax_for_path, glob_matches,
-        install_hunspell_runtime_cache, line_and_column, parse_arguments, read_compiled_artifact,
-        render_explanation, run, runtime_cache_path, validate_hunspell, AnalyzeCommand,
-        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
-        DictionaryCommand, ExplainCommand, RunOutcome, SourceEncoding, SuggestCommand,
-        ValidateCommand, HELP_CHECK,
+        analysis_paths, analyze, catalog_import_encodings, comment_syntax_for_path, glob_matches,
+        install_hunspell_runtime_cache, parse_arguments, read_analysis_source,
+        read_compiled_artifact, render_explanation, run, runtime_cache_path, validate_hunspell,
+        AnalyzeCommand, CheckCommand, CheckTarget, CliError, Command, CommentSyntax,
+        CompileCommand, CompileInput, DictionaryCommand, ExplainCommand, LineIndex, RunOutcome,
+        SourceEncoding, SuggestCommand, ValidateCommand, HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -3563,10 +3615,53 @@ mod tests {
 
     #[test]
     fn counts_columns_as_unicode_scalar_values() {
-        assert_eq!(line_and_column("Café\nStrasse", 6), (2, 1));
+        let text = "Café\nStrasse";
+        assert_eq!(LineIndex::new(text).line_and_column(text, 6), (2, 1));
+    }
+
+    #[test]
+    fn analyze_skips_vcs_metadata_and_non_utf8_files() {
+        let dictionary = temporary_dictionary("correct\n");
+        let directory = temporary_directory();
+        let source = directory.path.join("source.txt");
+        let binary = directory.path.join("binary.bin");
+        let git_index = directory.path.join(".git/index");
+        fs::create_dir_all(git_index.parent().expect("index has a parent"))
+            .expect("the temporary directory is writable");
+        fs::write(&source, "misspelt").expect("the temporary directory is writable");
+        fs::write(&binary, [0xff]).expect("the temporary directory is writable");
+        fs::write(&git_index, [0xff]).expect("the temporary directory is writable");
+
+        assert_eq!(
+            analysis_paths(&directory.path, &[], &[]).expect("paths are readable"),
+            vec![binary.clone(), source]
+        );
+        assert_eq!(
+            read_analysis_source(&binary).expect("binary files are skipped"),
+            None
+        );
+        assert_eq!(
+            analyze(&AnalyzeCommand {
+                dictionary_paths: vec![dictionary.path.clone()],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                config_path: None,
+                comment_syntax: None,
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
+                suggest: false,
+                path: directory.path.clone(),
+            })
+            .expect("analysis continues after a non-UTF-8 file"),
+            RunOutcome::Misspelled
+        );
     }
 
     struct TemporaryDictionary {
+        path: PathBuf,
+    }
+
+    struct TemporaryDirectory {
         path: PathBuf,
     }
 
@@ -3589,6 +3684,12 @@ mod tests {
         }
     }
 
+    impl Drop for TemporaryDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
     fn temporary_dictionary(contents: &str) -> TemporaryDictionary {
         temporary_file(contents)
     }
@@ -3605,6 +3706,16 @@ mod tests {
         ));
         fs::write(&path, contents).expect("the temporary directory is writable");
         TemporaryDictionary { path }
+    }
+
+    fn temporary_directory() -> TemporaryDirectory {
+        let sequence = NEXT_TEMPORARY_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ferrolex-cli-test-directory-{}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).expect("the temporary directory is writable");
+        TemporaryDirectory { path }
     }
 
     fn temporary_hunspell_sources(affix: &str, dictionary: &str) -> TemporaryHunspellSources {
