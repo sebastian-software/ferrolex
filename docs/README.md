@@ -17,6 +17,8 @@ point for installation, command-line use, and the public Rust API.
   [compiled dictionary format](binary-format.md), and
   [Hunspell runtime cache](hunspell-runtime-cache.md) document engine APIs and
   artifacts.
+- [Command-line workflow](command-line-workflow.md) records command-line
+  options, output streams, and exit statuses.
 - [Compatibility fixtures](compatibility-fixtures.md),
   [robustness testing](robustness-testing.md), and
   [performance](performance.md) describe verification and measured limits.
