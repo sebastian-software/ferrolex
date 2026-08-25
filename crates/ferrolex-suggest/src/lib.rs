@@ -11,6 +11,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -203,9 +204,13 @@ impl Suggestion {
 /// Whether a result includes every candidate permitted by configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Completeness {
+    /// Every candidate permitted by the configuration was considered.
     Complete,
+    /// The configured candidate count was reached before the search completed.
     CandidateLimitReached,
+    /// The configured edit-distance work budget was exhausted.
     EditBudgetReached,
+    /// The query exceeded the configured maximum length.
     QueryTooLong,
 }
 

@@ -20,7 +20,7 @@ The header is exactly 64 bytes.
 | 0 | 8 | Magic: `FLEXDIC\\0` |
 | 8 | 2 | Format version (`1`) |
 | 10 | 2 | Header size (`64`) |
-| 12 | 4 | Feature bits (zero in version 1) |
+| 12 | 4 | Feature bits (`0` for an exact-word artifact; bit `0` for a frequency table) |
 | 16 | 8 | FNV-1a 64 checksum |
 | 24 | 8 | Number of unique words |
 | 32 | 8 | Offset of the word-offset index |

@@ -17,7 +17,7 @@
 * **hunspell:** bind scorecard corpus identity ([cac8384](https://github.com/sebastian-software/ferrolex/commit/cac8384a14e5baeed85e4e84c9167c0b56e26747))
 * **hunspell:** harden scorecard evidence ([d2d8766](https://github.com/sebastian-software/ferrolex/commit/d2d8766f6512d0df1625de1c5c70868b4eb746f1))
 
-## [0.2.0](https://github.com/sebastian-software/ferrolex/compare/ferrolex-v0.1.0...ferrolex-v0.2.0) (2026-08-13)
+## [0.2.0](https://github.com/sebastian-software/ferrolex/releases/tag/ferrolex-v0.2.0) (2026-08-13)
 
 
 ### Features

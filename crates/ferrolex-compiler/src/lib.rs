@@ -17,6 +17,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 mod ir;
 
@@ -123,9 +124,15 @@ pub enum CompileError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FrequencyListError {
     /// A non-comment row was not exactly `word<TAB>unsigned-frequency`.
-    InvalidEntry { line: usize },
+    InvalidEntry {
+        /// One-based line number of the malformed row.
+        line: usize,
+    },
     /// The frequency field was not an unsigned decimal integer.
-    InvalidFrequency { line: usize },
+    InvalidFrequency {
+        /// One-based line number of the malformed row.
+        line: usize,
+    },
     /// The parsed entries cannot fit into the native artifact.
     Compile(CompileError),
 }
