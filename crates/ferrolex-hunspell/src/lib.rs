@@ -4824,7 +4824,9 @@ fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
     let characters = value.chars().collect::<Vec<_>>();
     (!characters.is_empty() && characters.len() % 2 == 0).then(|| {
         characters
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| Flag::Text(Box::<str>::from(chunk.iter().collect::<String>())))
             .collect()
     })
