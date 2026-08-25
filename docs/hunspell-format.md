@@ -6,7 +6,7 @@ implementation.
 
 ## Input and diagnostics
 
-[`import`] receives already-decoded Rust strings. [`import_bytes`] reads an
+`import` receives already-decoded Rust strings. `import_bytes` reads an
 ASCII `SET` declaration from the affix bytes and decodes both files as UTF-8,
 ISO-8859-1, or ISO-8859-2. A missing `SET` uses the established UTF-8 default;
 a UTF-8 BOM before `SET` is ignored. UTF-8 is decoded without replacement, and
@@ -15,7 +15,7 @@ declared encoding or malformed UTF-8 becomes a source-aware error diagnostic.
 For example, `SET KOI8-R` is deliberately unsupported until a reviewed source
 requires it, and reports that error without importing a partial dictionary.
 
-[`import_bytes_with_encodings`] accepts independently reviewed affix and
+`import_bytes_with_encodings` accepts independently reviewed affix and
 dictionary encodings for exceptional mixed pairs. Its affix encoding must still
 match a present `SET` declaration. All public paths retain decoded UTF-8 text
 inside the runtime dictionary and record a source name and one-based line

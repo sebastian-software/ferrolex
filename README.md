@@ -14,6 +14,9 @@ call ferrolex through its Rust or Node.js API. This keeps language ownership in
 projects such as Ferromark for Markdown, Ferrocat for PO catalogs, and OXC for
 TypeScript instead of turning ferrolex into a general analysis framework.
 
+See the [documentation index](docs/README.md) for product contracts,
+compatibility evidence, and retained prototype history.
+
 ## Status
 
 The project is pre-1.0. The Rust engine, Hunspell compatibility, suggestions,
@@ -55,6 +58,19 @@ scorecard artifact contains the current differential evidence.
 | `pl_PL` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 <!-- compat-status:end -->
 
+## Install
+
+Install the command-line tool from crates.io, or build it from a checkout:
+
+```sh
+cargo install ferrolex-cli
+# or, from this repository:
+cargo build -p ferrolex-cli
+```
+
+The build places the binary at `target/debug/ferrolex`; `cargo install` adds
+`ferrolex` to Cargo's bin directory.
+
 ## Try it
 
 Create a UTF-8 plain-word-list file with one word per line, then check either
@@ -85,12 +101,23 @@ invokes an external spell-checking engine; see the
 [affix semantics](docs/affix-semantics.md).
 
 `suggest` exposes bounded, deterministic edit-distance suggestions for one
-plain-word-list dictionary or one installed Hunspell runtime cache. It reports
-when its configured work limits prevent a complete search, but still returns
-any stable partial results. Hunspell suggestions use stored stems only and do
-not expand affix or compound forms. `UserDictionary` project overlays can be
-used through the library API. The comparison and ranking contract is documented
-in [Suggestions](docs/suggestions.md).
+plain-word-list dictionary, one installed Hunspell runtime cache, or one
+compiled artifact. It reports when its configured work limits prevent a
+complete search, but still returns any stable partial results. Hunspell
+suggestions enumerate stored stems and additionally derive bounded affixed and
+compound forms near the query; they never pre-expand the dictionary.
+`UserDictionary` project overlays can be used through the library API. The
+comparison and ranking contract is documented in [Suggestions](docs/suggestions.md).
+
+## Rust library quick start
+
+```rust
+use ferrolex::{Dictionary, WordList};
+
+let dictionary = WordList::new(["ferrolex"])?;
+assert!(dictionary.contains("ferrolex"));
+# Ok::<(), ferrolex::WordListError>(())
+```
 
 The [Node.js binding](docs/bindings.md) is the only current foreign-runtime
 integration direction. The checked-in C ABI, Python, LSP, and VS Code work is

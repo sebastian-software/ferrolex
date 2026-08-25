@@ -66,11 +66,14 @@ claim that all dictionaries share one redistributable license. Consumers must
 review and accept the linked terms for every locale they distribute.
 
 `list` also prints the source encoding. Installation preserves upstream bytes:
-`de_DE` is ISO-8859-1, `pl_PL` is ISO-8859-2, and `id_ID` has an
-ISO-8859-1-compatible affix file with a UTF-8 word list; the other initial
-entries are UTF-8. `validate` and `install` decode shared UTF-8, ISO-8859-1,
-and ISO-8859-2 pairs losslessly from their AFF `SET` declaration. `install`
-also supplies the reviewed per-file override needed by mixed-encoding `id_ID`.
+`de_DE` is ISO-8859-1, `pl_PL` is ISO-8859-2, `id_ID` has an
+ISO-8859-1-compatible affix file with a UTF-8 word list, and `hu_HU` has a
+UTF-8-declared affix file with reviewed ISO-8859-2 fallback bytes plus a UTF-8
+word list; the other initial entries are UTF-8. `validate` and `install`
+decode shared UTF-8, ISO-8859-1, and ISO-8859-2 pairs losslessly from their
+AFF `SET` declaration. `install` also supplies the reviewed per-file or
+fallback decoding policy needed by the mixed-encoding `id_ID` and `hu_HU`
+pairs.
 Arabic and Turkish are deliberately available for compatibility evaluation;
 recognition support remains dependent on the diagnostics from `validate --strict`.
 The [locale compatibility matrix](locale-compatibility.md) records this
@@ -82,7 +85,7 @@ The pinned LibreOffice collection has no Urdu (`ur`) Hunspell pair, so Urdu is
 not silently substituted with another upstream source; adding it needs a
 separate provenance and license review.
 
-## Install workflow
+## Fetch workflow
 
 First inspect the available immutable source and its notice:
 

@@ -80,47 +80,18 @@ AFF file, so its strict fixture records a stem and an affixed clitic form only.
 
 ## Preparing fixtures locally
 
-Create the following outside the repository or under the ignored
-`.compat-fixtures` directory. Obtain the files from the revision-pinned URLs in
-the manifest; the test harness intentionally has no downloader.
-
-```text
-.compat-fixtures/
-├── en_US/
-│   ├── en_US.aff
-│   └── en_US.dic
-├── de_DE/
-│   ├── de_DE_frami.aff
-│   └── de_DE_frami.dic
-├── fr_FR/
-│   ├── fr.aff
-│   └── fr.dic
-├── nl_NL/
-│   ├── nl_NL.aff
-│   └── nl_NL.dic
-├── hu_HU/
-│   ├── hu_HU.aff
-│   └── hu_HU.dic
-├── ar/
-│   ├── ar.aff
-│   └── ar.dic
-└── tr_TR/
-    ├── tr_TR.aff
-    └── tr_TR.dic
-```
+Create the fixture directories outside the repository or under the ignored
+`.compat-fixtures` directory. The authoritative manifest lists the exact AFF
+and DIC filenames for every locale, so use its revision-pinned URLs rather
+than copying this page into a second registry. The test harness intentionally
+has no downloader.
 
 Before enabling the suite, compare both byte size and SHA-256 with the
-manifest. The harness repeats both checks before importing. On macOS and most
-Linux installations, the optional manual check is:
+manifest. The harness repeats both checks before importing. The supported way
+to obtain and verify a named set is the checked-in helper:
 
 ```sh
-shasum -a 256 .compat-fixtures/en_US/en_US.aff .compat-fixtures/en_US/en_US.dic
-shasum -a 256 .compat-fixtures/de_DE/de_DE_frami.aff .compat-fixtures/de_DE/de_DE_frami.dic
-shasum -a 256 .compat-fixtures/fr_FR/fr.aff .compat-fixtures/fr_FR/fr.dic
-shasum -a 256 .compat-fixtures/nl_NL/nl_NL.aff .compat-fixtures/nl_NL/nl_NL.dic
-shasum -a 256 .compat-fixtures/hu_HU/hu_HU.aff .compat-fixtures/hu_HU/hu_HU.dic
-shasum -a 256 .compat-fixtures/ar/ar.aff .compat-fixtures/ar/ar.dic
-shasum -a 256 .compat-fixtures/tr_TR/tr_TR.aff .compat-fixtures/tr_TR/tr_TR.dic
+scripts/fetch-compat-fixtures.sh --set all .compat-fixtures
 ```
 
 Then run the opt-in integration test:

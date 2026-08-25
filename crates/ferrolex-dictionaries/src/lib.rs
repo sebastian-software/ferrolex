@@ -12,6 +12,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use std::error::Error;
 use std::fmt;
@@ -750,29 +751,55 @@ pub enum FetchError {
     /// The HTTP client rejected or could not complete the request.
     Transport(String),
     /// The HTTP client exceeded a configured timeout while fetching a source.
-    Timeout { url: String, stage: String },
+    Timeout {
+        /// Source URL whose transfer did not complete in time.
+        url: String,
+        /// Transfer stage at which the timeout occurred.
+        stage: String,
+    },
     /// The response body could not be read.
     Read(io::Error),
     /// Response exceeded the caller's per-file bound.
     FileTooLarge {
+        /// Source URL whose response exceeded the configured bound.
         url: String,
+        /// Configured maximum response size in bytes.
         limit: usize,
+        /// Observed response size in bytes.
         actual: usize,
     },
     /// Bytes differed from the reviewed manifest.
     ChecksumMismatch {
+        /// Source URL whose bytes did not match the reviewed digest.
         url: String,
+        /// Reviewed SHA-256 digest.
         expected: String,
+        /// SHA-256 digest calculated from the received bytes.
         actual: String,
     },
     /// Cache root or locale directory could not be created.
-    CreateCache { path: PathBuf, source: io::Error },
+    CreateCache {
+        /// Cache path that could not be created.
+        path: PathBuf,
+        /// Underlying filesystem error.
+        source: io::Error,
+    },
     /// Existing cache data could not be read for conflict detection.
-    ReadCache { path: PathBuf, source: io::Error },
+    ReadCache {
+        /// Existing cache path that could not be read.
+        path: PathBuf,
+        /// Underlying filesystem error.
+        source: io::Error,
+    },
     /// A cache file already occupied the target path and was left untouched.
     CacheConflict(PathBuf),
     /// Temporary cache file could not be created, written, or atomically moved.
-    WriteCache { path: PathBuf, source: io::Error },
+    WriteCache {
+        /// Target cache path that could not be written or atomically moved.
+        path: PathBuf,
+        /// Underlying filesystem error.
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for FetchError {

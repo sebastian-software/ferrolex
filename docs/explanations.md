@@ -37,7 +37,6 @@ let dictionary = import(
 let explanation = dictionary.explain("words");
 let accepted = explanation.accepted().expect("the word is accepted");
 assert!(matches!(accepted.kind(), AcceptanceKind::Affixed { stem, .. } if stem == "word"));
-# Ok::<(), ferrolex_hunspell::ImportError>(())
 ```
 
 ## Stability and limits

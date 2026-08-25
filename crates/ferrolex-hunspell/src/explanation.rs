@@ -72,8 +72,11 @@ pub enum CasingPath {
     /// The supplied spelling was looked up directly.
     Exact,
     /// A Hunspell capitalization fallback matched this lower- or initial-case
-    /// spelling. `candidate` is the spelling supplied to the normal matcher.
-    CaseFallback { candidate: String },
+    /// spelling.
+    CaseFallback {
+        /// Spelling supplied to the normal matcher.
+        candidate: String,
+    },
 }
 
 /// The accepting semantic path.
@@ -81,17 +84,28 @@ pub enum CasingPath {
 #[non_exhaustive]
 pub enum AcceptanceKind {
     /// A stored stem was accepted without a derivation.
-    Stem { stem: String },
+    Stem {
+        /// The accepted stored stem.
+        stem: String,
+    },
     /// A stored stem accepted after the listed prefix/suffix transformations.
     Affixed {
+        /// The stored stem from which the spelling was derived.
         stem: String,
+        /// Transformations applied to the stored stem in order.
         rules: Vec<AppliedAffix>,
     },
     /// A compound was accepted after splitting it into these components.
-    Compound { components: Vec<CompoundComponent> },
+    Compound {
+        /// The stored components that make up the accepted compound.
+        components: Vec<CompoundComponent>,
+    },
     /// A narrow compatibility path accepted the spelling but does not yet have
     /// a richer source-level trace.
-    Compatibility { detail: String },
+    Compatibility {
+        /// Description of the compatibility path that accepted the spelling.
+        detail: String,
+    },
 }
 
 /// One prefix or suffix transformation in an affix derivation.
@@ -198,13 +212,25 @@ impl Rejection {
 #[non_exhaustive]
 pub enum RejectionReason {
     /// A matching stored stem is marked `FORBIDDENWORD`.
-    ForbiddenStem { stem: String },
+    ForbiddenStem {
+        /// The stored stem marked with `FORBIDDENWORD`.
+        stem: String,
+    },
     /// A matching stored stem is marked `NEEDAFFIX`.
-    NeedsAffix { stem: String },
+    NeedsAffix {
+        /// The stored stem marked with `NEEDAFFIX`.
+        stem: String,
+    },
     /// A matching stored stem is marked `ONLYINCOMPOUND`.
-    OnlyInCompound { stem: String },
+    OnlyInCompound {
+        /// The stored stem marked with `ONLYINCOMPOUND`.
+        stem: String,
+    },
     /// A matching stored stem requires its exact case.
-    KeepCase { stem: String },
+    KeepCase {
+        /// The stored stem marked with `KEEPCASE`.
+        stem: String,
+    },
     /// No accepted stem, derivation, or compound segmentation was found.
     NoDerivation,
 }

@@ -8,6 +8,25 @@ pull-request titles are checked in CI. Release Please creates one product
 release PR for the whole Rust workspace. All public workspace crates share a
 version and release record through the root `ferrolex` umbrella package.
 
+## Developing
+
+ferrolex supports Rust 1.88 and later. Install the pinned MSRV when you need
+to verify it locally, then run the same core checks as CI:
+
+```sh
+rustup toolchain install 1.88
+cargo +1.88 fmt --all -- --check
+cargo +1.88 clippy --workspace --all-targets -- -D warnings
+cargo +1.88 test --workspace
+RUSTDOCFLAGS="-D warnings" cargo +1.88 doc --workspace --no-deps
+```
+
+The real-world Hunspell fixture suite is opt-in because it needs separately
+obtained, licensed dictionary sources; see
+[Compatibility fixtures](docs/compatibility-fixtures.md). The `scripts/`
+directory contains the compatibility-fixture downloader and README-status
+generator used by CI, plus opt-in Node.js and Python binding benchmarks.
+
 ## Code provenance
 
 ferrolex is independently implemented and licensed `MIT OR Apache-2.0`.
