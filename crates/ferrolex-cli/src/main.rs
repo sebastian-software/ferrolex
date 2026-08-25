@@ -37,7 +37,8 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
+const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
+const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -47,8 +48,12 @@ fn main() -> ExitCode {
         Ok(outcome) => outcome.exit_code(),
         Err(error) => {
             eprintln!("error: {error}");
-            eprintln!("{USAGE}");
-            ExitCode::from(2)
+            if error.is_usage() {
+                eprintln!("{USAGE}");
+                ExitCode::from(2)
+            } else {
+                ExitCode::from(RUNTIME_ERROR_EXIT_CODE)
+            }
         }
     }
 }
@@ -57,6 +62,10 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
     match parse_arguments(arguments)? {
         Command::Help => {
             println!("{USAGE}");
+            Ok(RunOutcome::Success)
+        }
+        Command::Version => {
+            println!("ferrolex {}", env!("CARGO_PKG_VERSION"));
             Ok(RunOutcome::Success)
         }
         Command::Check(command) => check(&command),
@@ -404,9 +413,10 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
                 Ok(dictionary) => dictionary,
                 Err(error) => {
                     for diagnostic in error.diagnostics() {
-                        print_import_diagnostic(diagnostic);
+                        print_import_diagnostic_to_stderr(diagnostic);
                     }
-                    return Ok(RunOutcome::Misspelled);
+                    eprintln!("error: could not compile Hunspell dictionary");
+                    return Ok(RunOutcome::Failure);
                 }
             };
             for diagnostic in dictionary.diagnostics() {
@@ -1219,17 +1229,25 @@ fn read_compiled_artifact(path: &Path) -> Result<Vec<u8>, CliError> {
 }
 
 fn print_import_diagnostic(diagnostic: &ImportDiagnostic) {
+    println!("{}", render_import_diagnostic(diagnostic));
+}
+
+fn print_import_diagnostic_to_stderr(diagnostic: &ImportDiagnostic) {
+    eprintln!("{}", render_import_diagnostic(diagnostic));
+}
+
+fn render_import_diagnostic(diagnostic: &ImportDiagnostic) -> String {
     let severity = match diagnostic.severity() {
         Severity::Error => "error",
         Severity::Warning => "warning",
     };
-    println!(
+    format!(
         "{}:{}: {severity}[{}]: {}",
         diagnostic.source(),
         diagnostic.line(),
         diagnostic.directive(),
         diagnostic.message()
-    );
+    )
 }
 
 fn print_finding(path: &Path, source: &str, byte_offset: usize, word: &str) {
@@ -1254,6 +1272,7 @@ fn line_and_column(text: &str, byte_offset: usize) -> (usize, usize) {
 enum RunOutcome {
     Success,
     Misspelled,
+    Failure,
 }
 
 impl RunOutcome {
@@ -1261,6 +1280,7 @@ impl RunOutcome {
         match self {
             Self::Success => ExitCode::SUCCESS,
             Self::Misspelled => ExitCode::from(1),
+            Self::Failure => ExitCode::from(RUNTIME_ERROR_EXIT_CODE),
         }
     }
 }
@@ -1271,14 +1291,18 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Comman
 
     match arguments.next().as_deref() {
         Some("--help" | "-h") => Ok(Command::Help),
-        Some("check") => parse_check_arguments(arguments),
-        Some("suggest") => parse_suggest_arguments(arguments),
-        Some("explain") => parse_explain_arguments(arguments),
-        Some("analyze") => parse_analyze_arguments(arguments),
-        Some("compile") => parse_compile_arguments(arguments),
-        Some("inspect") => parse_inspect_arguments(arguments),
-        Some("validate") => parse_validate_arguments(arguments),
-        Some("dictionary") => parse_dictionary_arguments(arguments),
+        Some("--version" | "-V") if arguments.next().is_none() => Ok(Command::Version),
+        Some("--version" | "-V") => Err(CliError::Usage(
+            "`--version` does not accept arguments".to_owned(),
+        )),
+        Some("check") => parse_check_arguments(expand_long_option_values(arguments)),
+        Some("suggest") => parse_suggest_arguments(expand_long_option_values(arguments)),
+        Some("explain") => parse_explain_arguments(expand_long_option_values(arguments)),
+        Some("analyze") => parse_analyze_arguments(expand_long_option_values(arguments)),
+        Some("compile") => parse_compile_arguments(expand_long_option_values(arguments)),
+        Some("inspect") => parse_inspect_arguments(expand_long_option_values(arguments)),
+        Some("validate") => parse_validate_arguments(expand_long_option_values(arguments)),
+        Some("dictionary") => parse_dictionary_arguments(expand_long_option_values(arguments)),
         Some(command) => Err(CliError::Usage(format!("unknown command `{command}`"))),
         None => Err(CliError::Usage("missing command".to_owned())),
     }
@@ -1794,7 +1818,8 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
         target.ok_or_else(|| CliError::Usage("check requires a word or `--file`".to_owned()))?;
     if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
         return Err(CliError::Usage(
-            "check requires at least one `--dictionary` or `--hunspell` path".to_owned(),
+            "check requires at least one `--dictionary`, `--compiled`, or `--hunspell` path"
+                .to_owned(),
         ));
     }
 
@@ -1813,11 +1838,44 @@ fn required_path(
     let path = arguments
         .next()
         .ok_or_else(|| CliError::Usage(format!("`{option}` requires a path")))?;
-    if path.starts_with('-') {
+    if path.is_empty() || path.starts_with('-') {
         return Err(CliError::Usage(format!("`{option}` requires a path")));
     }
 
     Ok(PathBuf::from(path))
+}
+
+fn expand_long_option_values(arguments: impl IntoIterator<Item = String>) -> Vec<String> {
+    arguments
+        .into_iter()
+        .flat_map(|argument| {
+            let Some((option, value)) = argument.split_once('=') else {
+                return vec![argument];
+            };
+            if matches!(
+                option,
+                "--dictionary"
+                    | "--hunspell"
+                    | "--compiled"
+                    | "--file"
+                    | "--max-results"
+                    | "--max-edit-distance"
+                    | "--max-candidates"
+                    | "--max-edit-cells"
+                    | "--workspace"
+                    | "--cache"
+                    | "--config"
+                    | "--include"
+                    | "--exclude"
+                    | "--comment-prefix"
+                    | "--comment-syntax"
+            ) {
+                vec![option.to_owned(), value.to_owned()]
+            } else {
+                vec![argument]
+            }
+        })
+        .collect()
 }
 
 fn required_string(
@@ -1893,6 +1951,7 @@ enum Command {
     Validate(ValidateCommand),
     Dictionary(DictionaryCommand),
     Help,
+    Version,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -2040,6 +2099,12 @@ enum CliError {
     },
     DictionaryManifest(DictionaryManifestError),
     FetchDictionary(DictionaryFetchError),
+}
+
+impl CliError {
+    const fn is_usage(&self) -> bool {
+        matches!(self, Self::Usage(_))
+    }
 }
 
 impl fmt::Display for CliError {
@@ -2203,7 +2268,9 @@ impl Error for CliError {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::path::{Path, PathBuf};
+    use std::process::ExitCode;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
@@ -2316,6 +2383,70 @@ mod tests {
             .expect("help is always valid");
 
         assert_eq!(command, Command::Help);
+    }
+
+    #[test]
+    fn parses_version_flags_without_arguments() {
+        for flag in ["--version", "-V"] {
+            assert_eq!(
+                parse_arguments(["ferrolex", flag].map(str::to_owned))
+                    .expect("version flag is valid"),
+                Command::Version
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_equals_form_for_value_options() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "suggest",
+                "--dictionary=words.txt",
+                "--max-results=4",
+                "word",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("equals form is valid");
+
+        assert_eq!(
+            command,
+            Command::Suggest(SuggestCommand {
+                dictionary_path: Some(PathBuf::from("words.txt")),
+                compiled_path: None,
+                hunspell_affix_path: None,
+                max_results: Some(4),
+                max_edit_distance: None,
+                max_candidates: None,
+                max_edit_cells: None,
+                word: "word".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_equals_form_paths_as_usage_errors() {
+        for arguments in [
+            ["ferrolex", "check", "--dictionary=", "word"].as_slice(),
+            ["ferrolex", "dictionary", "add-word", "--workspace=", "word"].as_slice(),
+        ] {
+            assert!(matches!(
+                parse_arguments(arguments.iter().map(|argument| (*argument).to_owned())),
+                Err(CliError::Usage(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn distinguishes_usage_and_runtime_errors() {
+        assert!(CliError::Usage("invalid invocation".to_owned()).is_usage());
+        assert!(!CliError::ReadInput {
+            path: PathBuf::from("missing.txt"),
+            source: io::Error::new(io::ErrorKind::NotFound, "missing"),
+        }
+        .is_usage());
+        assert_eq!(RunOutcome::Failure.exit_code(), ExitCode::from(3));
     }
 
     #[test]
