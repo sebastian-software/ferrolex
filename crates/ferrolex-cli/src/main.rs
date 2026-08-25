@@ -939,27 +939,18 @@ fn collect_analysis_paths(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        if matches_any(&relative, excludes) || is_vcs_metadata_directory(&path) {
+        let file_type = entry.file_type().map_err(|source| CliError::ReadInput {
+            path: path.clone(),
+            source,
+        })?;
+        if matches_any(&relative, excludes)
+            || (file_type.is_dir() && is_vcs_metadata_directory(&path))
+        {
             continue;
         }
-        if entry
-            .file_type()
-            .map_err(|source| CliError::ReadInput {
-                path: path.clone(),
-                source,
-            })?
-            .is_dir()
-        {
+        if file_type.is_dir() {
             collect_analysis_paths(root, &path, includes, excludes, paths)?;
-        } else if entry
-            .file_type()
-            .map_err(|source| CliError::ReadInput {
-                path: path.clone(),
-                source,
-            })?
-            .is_file()
-            && (includes.is_empty() || matches_any(&relative, includes))
-        {
+        } else if file_type.is_file() && (includes.is_empty() || matches_any(&relative, includes)) {
             paths.push(path);
         }
     }
@@ -3626,15 +3617,17 @@ mod tests {
         let source = directory.path.join("source.txt");
         let binary = directory.path.join("binary.bin");
         let git_index = directory.path.join(".git/index");
+        let metadata_file = directory.path.join(".hg");
         fs::create_dir_all(git_index.parent().expect("index has a parent"))
             .expect("the temporary directory is writable");
         fs::write(&source, "misspelt").expect("the temporary directory is writable");
         fs::write(&binary, [0xff]).expect("the temporary directory is writable");
         fs::write(&git_index, [0xff]).expect("the temporary directory is writable");
+        fs::write(&metadata_file, "correct").expect("the temporary directory is writable");
 
         assert_eq!(
             analysis_paths(&directory.path, &[], &[]).expect("paths are readable"),
-            vec![binary.clone(), source]
+            vec![metadata_file, binary.clone(), source]
         );
         assert_eq!(
             read_analysis_source(&binary).expect("binary files are skipped"),
