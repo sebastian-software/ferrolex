@@ -81,6 +81,7 @@ ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
 ferrolex suggest --dictionary words.txt Strase
 ferrolex validate --strict dictionary.aff dictionary.dic
+ferrolex check --hunspell dictionary.aff derived-form
 ferrolex dictionary list
 ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
@@ -99,6 +100,12 @@ mixed-encoding catalog pairs are handled by `dictionary install`. It never
 invokes an external spell-checking engine; see the
 [import contract](docs/hunspell-format.md) and
 [affix semantics](docs/affix-semantics.md).
+
+`--hunspell` accepts an ordinary `.aff` path and derives the adjacent `.dic`.
+It verifies and uses an installed runtime cache when present; otherwise it
+imports the sources directly with a slower-path notice and does not write next
+to them. For frequent use or read-only source directories, compile the pair to
+a writable standalone artifact and pass it with `--compiled`.
 
 `suggest` exposes bounded, deterministic edit-distance suggestions across any
 number of layered plain-word-list dictionaries, installed Hunspell runtime

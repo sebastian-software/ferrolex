@@ -1,4 +1,18 @@
+use std::fs;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+
+fn temporary_directory(label: &str) -> std::path::PathBuf {
+    let directory = std::env::temp_dir().join(format!(
+        "ferrolex-cli-{label}-{}-{}",
+        std::process::id(),
+        NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&directory).expect("temporary directory is created");
+    directory
+}
 
 fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ferrolex"))
@@ -46,4 +60,66 @@ fn version_and_error_contract_cross_the_process_boundary() {
     let stderr = String::from_utf8(runtime.stderr).expect("runtime diagnostic is UTF-8");
     assert!(stderr.contains("could not read dictionary"));
     assert!(!stderr.contains("Usage: ferrolex"));
+}
+
+#[test]
+fn hunspell_sources_without_a_cache_are_imported_with_actionable_guidance() {
+    let directory = temporary_directory("hunspell");
+    let aff_path = directory.join("en.aff");
+    let dic_path = directory.join("en.dic");
+    let cache_path = directory.join("en.ferrolex-hunspell-v1.flexh");
+    fs::write(&aff_path, "SET UTF-8\nSFX S N 1\nSFX S 0 s .\n").expect("affix fixture is written");
+    fs::write(&dic_path, "1\nword/S\n").expect("dictionary fixture is written");
+
+    let output = run(&[
+        "check",
+        "--hunspell",
+        aff_path.to_str().expect("temporary path is UTF-8"),
+        "words",
+    ]);
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        "accepted: words\n"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert!(stderr.contains("no Hunspell runtime cache found"));
+    assert!(stderr.contains("importing"));
+    assert!(stderr.contains("directly (slower)"));
+    assert!(stderr.contains("ferrolex compile"));
+    assert!(stderr.contains("--compiled"));
+    assert!(
+        !cache_path.exists(),
+        "direct import does not need to write beside read-only sources"
+    );
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn cacheless_catalog_sources_retain_their_reviewed_mixed_encoding() {
+    let directory = temporary_directory("mixed-encoding");
+    let aff_path = directory.join("id_ID.aff");
+    let dic_path = directory.join("id_ID.dic");
+    fs::write(&aff_path, "SET ISO-8859-1\n").expect("affix fixture is written");
+    fs::write(&dic_path, "1\ncafé\n").expect("UTF-8 dictionary fixture is written");
+
+    let output = run(&[
+        "check",
+        "--hunspell",
+        aff_path.to_str().expect("temporary path is UTF-8"),
+        "café",
+    ]);
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        "accepted: café\n"
+    );
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr is UTF-8")
+        .contains("directly (slower)"));
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
 }
