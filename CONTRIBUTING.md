@@ -6,7 +6,10 @@ All durable repository artifacts use US English. Commit messages follow the
 [Conventional Commits](https://www.conventionalcommits.org/) specification;
 pull-request titles are checked in CI. Release Please creates one product
 release PR for the whole Rust workspace. All public workspace crates share a
-version and release record through the root `ferrolex` umbrella package.
+version and release record through the root `ferrolex` umbrella package. The
+`Release version contract` CI gate verifies member versions, internal Cargo
+requirements, the release manifest, and the explicit Cargo-workspace release
+plugin configuration on every change.
 
 ## Developing
 

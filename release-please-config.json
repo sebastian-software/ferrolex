@@ -3,6 +3,12 @@
   "bootstrap-sha": "677e61027108f91ab226bd5ab854d5466a60049c",
   "release-type": "rust",
   "include-component-in-tag": true,
+  "plugins": [
+    {
+      "type": "cargo-workspace",
+      "updateAllPackages": true
+    }
+  ],
   "packages": {
     ".": {
       "component": "ferrolex",
