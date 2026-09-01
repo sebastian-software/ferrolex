@@ -1,5 +1,6 @@
 use std::fs;
-use std::process::{Command, Output};
+use std::io::Write as _;
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -42,6 +43,24 @@ fn run_with_config_home(
         .expect("CLI binary runs")
 }
 
+fn run_with_stdin(directory: &std::path::Path, arguments: &[&str], input: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ferrolex"))
+        .current_dir(directory)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("CLI binary starts");
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(input.as_bytes())
+        .expect("stdin fixture is written");
+    child.wait_with_output().expect("CLI binary exits")
+}
+
 #[test]
 fn every_command_has_a_focused_help_screen() {
     for command in [
@@ -81,6 +100,82 @@ fn version_and_error_contract_cross_the_process_boundary() {
     let stderr = String::from_utf8(runtime.stderr).expect("runtime diagnostic is UTF-8");
     assert!(stderr.contains("could not read dictionary"));
     assert!(!stderr.contains("Usage: ferrolex"));
+}
+
+#[test]
+fn check_accepts_stdin_and_reports_its_source() {
+    let directory = temporary_directory("check-stdin");
+    fs::write(directory.join("words.txt"), "correct\n").expect("dictionary fixture is written");
+
+    let output = run_with_stdin(
+        &directory,
+        &["check", "--dictionary", "words.txt", "--file", "-"],
+        "correct mispelt\n",
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        "-:1:9: misspelled: mispelt\n"
+    );
+    assert!(output.stderr.is_empty());
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn check_reuses_one_dictionary_for_multiple_files() {
+    let directory = temporary_directory("check-multiple-files");
+    fs::write(directory.join("words.txt"), "correct\n").expect("dictionary fixture is written");
+    fs::write(directory.join("first.txt"), "correct\n").expect("first input is written");
+    fs::write(directory.join("second.txt"), "mispelt\n").expect("second input is written");
+    fs::write(directory.join("third.txt"), "correct\n").expect("third input is written");
+
+    let output = run_in(
+        &directory,
+        &[
+            "check",
+            "--dictionary",
+            "words.txt",
+            "--file",
+            "first.txt",
+            "--file",
+            "second.txt",
+            "third.txt",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        "second.txt:1:1: misspelled: mispelt\n"
+    );
+    assert!(output.stderr.is_empty());
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn check_accepts_option_shaped_words_after_the_option_separator() {
+    let directory = temporary_directory("check-option-separator");
+    fs::write(directory.join("words.txt"), "-ish\n--file=x\n")
+        .expect("dictionary fixture is written");
+
+    for word in ["-ish", "--file=x"] {
+        let output = run_in(
+            &directory,
+            &["check", "--dictionary", "words.txt", "--", word],
+        );
+
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+            format!("accepted: {word}\n")
+        );
+        assert!(output.stderr.is_empty());
+    }
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
 }
 
 #[test]
