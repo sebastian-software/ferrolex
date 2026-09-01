@@ -16,6 +16,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
@@ -1205,7 +1206,13 @@ fn is_generated_token(token: &str) -> bool {
 }
 
 fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
-    dictionary.contains(token) || dictionary.contains(Normalization::Nfc.normalize(token).as_ref())
+    if dictionary.contains(token) {
+        return true;
+    }
+    match Normalization::Nfc.normalize(token) {
+        Cow::Borrowed(_) => false,
+        Cow::Owned(normalized) => dictionary.contains(&normalized),
+    }
 }
 
 fn is_word_character(character: char) -> bool {
@@ -1272,13 +1279,46 @@ fn shift_range(range: Range<usize>, offset: usize) -> Range<usize> {
 
 #[cfg(test)]
 mod tests {
-    use ferrolex_core::{Checker, Normalization, UserDictionary, WordList};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ferrolex_core::{Checker, Dictionary, Normalization, UserDictionary, WordList};
 
     use super::{
         classify, recombine_identifier_suggestion, split_identifier, Analyzer, CommentSyntax,
         DirectiveProblem, Document, IdentifierSplitConfig, ProjectConfig, ProjectConfigError,
         SingleLetterPrefix, TokenClass,
     };
+
+    struct CountingDictionary {
+        accepted: &'static str,
+        lookups: AtomicUsize,
+    }
+
+    impl CountingDictionary {
+        const fn new(accepted: &'static str) -> Self {
+            Self {
+                accepted,
+                lookups: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Dictionary for CountingDictionary {
+        fn contains(&self, word: &str) -> bool {
+            self.lookups.fetch_add(1, Ordering::Relaxed);
+            word == self.accepted
+        }
+    }
+
+    struct ChangingDictionary {
+        lookups: AtomicUsize,
+    }
+
+    impl Dictionary for ChangingDictionary {
+        fn contains(&self, word: &str) -> bool {
+            word == "typo" && self.lookups.fetch_add(1, Ordering::Relaxed) > 0
+        }
+    }
 
     #[test]
     fn splits_rfc_identifiers_with_unicode_and_digits() {
@@ -1299,6 +1339,31 @@ mod tests {
         assert_eq!(segments("StraßeÜberblick"), ["Straße", "Überblick"]);
         assert_eq!(segments("version2Parser"), ["version", "2", "Parser"]);
         assert_eq!(segments("cafe\u{301}"), ["cafe\u{301}"]);
+    }
+
+    #[test]
+    fn avoids_duplicate_nfc_lookups_without_hiding_live_updates() {
+        let misses = CountingDictionary::new("");
+        let analyzer = Analyzer::builder(&misses).build();
+        assert_eq!(analyzer.check(&Document::new("typo")).findings().len(), 1);
+        assert_eq!(misses.lookups.load(Ordering::Relaxed), 1);
+
+        let normalized = CountingDictionary::new("café");
+        let analyzer = Analyzer::builder(&normalized).build();
+        assert!(analyzer
+            .check(&Document::new("cafe\u{301}"))
+            .findings()
+            .is_empty());
+        assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
+
+        let changing = ChangingDictionary {
+            lookups: AtomicUsize::new(0),
+        };
+        let analyzer = Analyzer::builder(&changing).build();
+        assert_eq!(
+            analyzer.check(&Document::new("typo typo")).findings().len(),
+            1
+        );
     }
 
     #[test]

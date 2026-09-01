@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use ferrolex_core::{Dictionary, Normalization};
@@ -123,7 +124,13 @@ impl<'text> Iterator for WordTokens<'text> {
 }
 
 fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
-    dictionary.contains(token) || dictionary.contains(Normalization::Nfc.normalize(token).as_ref())
+    if dictionary.contains(token) {
+        return true;
+    }
+    match Normalization::Nfc.normalize(token) {
+        Cow::Borrowed(_) => false,
+        Cow::Owned(normalized) => dictionary.contains(&normalized),
+    }
 }
 
 fn is_word_character(character: char) -> bool {
@@ -132,9 +139,32 @@ fn is_word_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use ferrolex_core::WordList;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ferrolex_core::{Dictionary, Normalization, UserDictionary, WordList};
 
     use super::check_text;
+
+    struct CountingDictionary {
+        accepted: &'static str,
+        lookups: AtomicUsize,
+    }
+
+    impl CountingDictionary {
+        const fn new(accepted: &'static str) -> Self {
+            Self {
+                accepted,
+                lookups: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Dictionary for CountingDictionary {
+        fn contains(&self, word: &str) -> bool {
+            self.lookups.fetch_add(1, Ordering::Relaxed);
+            word == self.accepted
+        }
+    }
 
     #[test]
     fn reports_unknown_unicode_words_with_utf8_ranges() {
@@ -164,6 +194,26 @@ mod tests {
         assert_eq!(misspellings.len(), 1);
         assert_eq!(misspellings[0].word(), "typo");
         assert_eq!(&text[misspellings[0].range()], "typo");
+    }
+
+    #[test]
+    fn avoids_duplicate_nfc_lookups_without_hiding_live_updates() {
+        let misses = CountingDictionary::new("");
+        assert_eq!(check_text(&misses, "typo").count(), 1);
+        assert_eq!(misses.lookups.load(Ordering::Relaxed), 1);
+
+        let normalized = CountingDictionary::new("café");
+        assert_eq!(check_text(&normalized, "cafe\u{301}").count(), 0);
+        assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
+
+        let overlay = UserDictionary::new(Normalization::Exact);
+        let mut misspellings = check_text(&overlay, "typo typo");
+        assert_eq!(
+            misspellings.next().map(|finding| finding.word()),
+            Some("typo")
+        );
+        overlay.insert("typo").expect("test word is valid");
+        assert!(misspellings.next().is_none());
     }
 
     #[test]
