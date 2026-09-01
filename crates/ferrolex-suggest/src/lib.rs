@@ -250,6 +250,8 @@ pub enum Completeness {
     EditBudgetReached,
     /// The query exceeded the configured maximum length.
     QueryTooLong,
+    /// A related seed exceeded the bounded normalization length.
+    RelatedSeedTooLong,
 }
 
 /// Bounded suggestion output.
@@ -434,14 +436,19 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
         };
         let mut related_completeness = Completeness::Complete;
         let mut related_reservation_exhausted = false;
+        let maximum_related_seed_scalars = self
+            .config
+            .max_word_scalars
+            .saturating_add(self.config.max_edit_distance.saturating_mul(2));
         self.source.visit_related_seeds(&mut |seed| {
-            if is_related_seed(
+            match related_seed_match(
                 query_chars,
                 seed,
                 self.config.max_edit_distance,
+                maximum_related_seed_scalars,
                 related_candidate_chars,
             ) {
-                self.source.visit_related_candidates(
+                RelatedSeedMatch::Related => self.source.visit_related_candidates(
                     query,
                     seed,
                     self.config.max_edit_distance,
@@ -476,7 +483,13 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                             false
                         }
                     },
-                );
+                ),
+                RelatedSeedMatch::Unrelated => {}
+                RelatedSeedMatch::TooLong => {
+                    if matches!(related_completeness, Completeness::Complete) {
+                        related_completeness = Completeness::RelatedSeedTooLong;
+                    }
+                }
             }
             !related_reservation_exhausted
         });
@@ -612,20 +625,28 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     true
 }
 
-fn is_related_seed(
+enum RelatedSeedMatch {
+    Related,
+    Unrelated,
+    TooLong,
+}
+
+fn related_seed_match(
     query: &[char],
     candidate: &str,
-    maximum: usize,
+    maximum_edit_distance: usize,
+    maximum_seed_scalars: usize,
     candidate_chars: &mut Vec<char>,
-) -> bool {
-    let Some(candidate) = lowercase_chars_bounded_into(candidate, usize::MAX, candidate_chars)
+) -> RelatedSeedMatch {
+    let Some(candidate) =
+        lowercase_chars_bounded_into(candidate, maximum_seed_scalars, candidate_chars)
     else {
-        return false;
+        return RelatedSeedMatch::TooLong;
     };
     let required_common = query
         .len()
         .min(candidate.len())
-        .saturating_sub(maximum.saturating_mul(2));
+        .saturating_sub(maximum_edit_distance.saturating_mul(2));
     let common_prefix = query
         .iter()
         .zip(candidate)
@@ -637,7 +658,11 @@ fn is_related_seed(
         .zip(candidate.iter().rev())
         .take_while(|(left, right)| left == right)
         .count();
-    common_prefix >= required_common || common_suffix >= required_common
+    if common_prefix >= required_common || common_suffix >= required_common {
+        RelatedSeedMatch::Related
+    } else {
+        RelatedSeedMatch::Unrelated
+    }
 }
 
 fn rank_suggestions(suggestions: &mut [Suggestion]) {
@@ -874,6 +899,28 @@ mod tests {
 
         fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
             visitor("seed");
+        }
+    }
+
+    struct OversizedRelatedSeedSource {
+        seed: String,
+    }
+
+    impl CandidateSource for OversizedRelatedSeedSource {
+        fn visit_candidates(&self, _visitor: &mut dyn FnMut(&str) -> bool) {}
+
+        fn visit_related_candidates(
+            &self,
+            _query: &str,
+            _seed: &str,
+            _max_edit_distance: usize,
+            _visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            panic!("an oversized seed must not reach related-form expansion");
+        }
+
+        fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            visitor(&self.seed);
         }
     }
 
@@ -1301,6 +1348,30 @@ mod tests {
                 .suggestions()[0]
                 .word(),
             "word"
+        );
+    }
+
+    #[test]
+    fn oversized_related_seeds_stop_at_the_configured_length_bound() {
+        let source = OversizedRelatedSeedSource {
+            seed: "İ".repeat(100_000),
+        };
+        let config = SuggestConfig {
+            max_word_scalars: 4,
+            max_edit_distance: 1,
+            ..SuggestConfig::default()
+        };
+        let mut suggestions = Vec::new();
+        let mut scratch = SuggestScratch::default();
+
+        let completeness =
+            Suggester::new(&source, config).suggest_into("word", &mut suggestions, &mut scratch);
+
+        assert_eq!(completeness, Completeness::RelatedSeedTooLong);
+        assert!(suggestions.is_empty());
+        assert_eq!(
+            scratch.related_candidate_chars.len(),
+            config.max_word_scalars + 2 * config.max_edit_distance
         );
     }
 }

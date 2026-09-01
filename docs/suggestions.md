@@ -14,8 +14,11 @@ query-aligned near-miss stem, ferrolex also performs a bounded local affix
 expansion and checks bounded query split positions for valid compounds. It
 never pre-expands a dictionary: both the number of generated forms per seed and
 the number of compound splits are fixed internal limits, and emitted forms use
-the caller's ordinary candidate and edit-cell budgets. Thus an incomplete
-result remains explicit through `Completeness`.
+the caller's ordinary candidate and edit-cell budgets. Seed normalization stops
+after `max_word_scalars + 2 * max_edit_distance` scalar values and reports
+`RelatedSeedTooLong` when a skipped seed could conceal a valid shortened form.
+Sources without morphological expansion skip seed traversal entirely. Thus an
+incomplete result remains explicit through `Completeness`.
 
 Before ranking, a Hunspell source filters stored stems through its recognition
 rules. `FORBIDDENWORD`, `NEEDAFFIX`, and `ONLYINCOMPOUND` pseudo-stems are not

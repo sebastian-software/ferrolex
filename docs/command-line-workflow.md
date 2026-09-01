@@ -50,9 +50,9 @@ not implied. Paths use the same display representation as text output.
 | `validation` | `validate` | `path`, `status` (`valid` or `invalid`) |
 
 Suggestion completeness codes are `complete`, `candidate-limit`,
-`edit-budget`, and `query-too-long`. Directive problem codes are
-`missing-ignored-words`, `unexpected-arguments`, `unknown-directive`, and
-`unsupported` for a future problem unknown to this CLI version.
+`edit-budget`, `query-too-long`, and `related-seed-too-long`. Directive problem
+codes are `missing-ignored-words`, `unexpected-arguments`, `unknown-directive`,
+and `unsupported` for a future problem unknown to this CLI version.
 
 JSON mode does not change exit statuses. Usage and operational errors remain
 human-readable on standard error, so stdout is never mixed with a partial

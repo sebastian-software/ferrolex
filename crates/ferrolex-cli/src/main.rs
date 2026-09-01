@@ -276,6 +276,7 @@ const fn completeness_code(completeness: Completeness) -> &'static str {
         Completeness::CandidateLimitReached => "candidate-limit",
         Completeness::EditBudgetReached => "edit-budget",
         Completeness::QueryTooLong => "query-too-long",
+        Completeness::RelatedSeedTooLong => "related-seed-too-long",
     }
 }
 
@@ -286,7 +287,9 @@ fn incomplete_suggestion_hint(completeness: Completeness, config: SuggestConfig)
             config.max_candidates.saturating_mul(2),
             config.max_edit_cells.saturating_mul(2),
         )),
-        Completeness::Complete | Completeness::QueryTooLong => None,
+        Completeness::Complete | Completeness::QueryTooLong | Completeness::RelatedSeedTooLong => {
+            None
+        }
     }
 }
 
@@ -296,6 +299,7 @@ const fn completeness_label(completeness: Completeness) -> &'static str {
         Completeness::CandidateLimitReached => "candidate limit reached",
         Completeness::EditBudgetReached => "edit-distance budget reached",
         Completeness::QueryTooLong => "query exceeds the scalar limit",
+        Completeness::RelatedSeedTooLong => "related seed exceeds the scalar limit",
     }
 }
 
@@ -3674,6 +3678,13 @@ mod tests {
         assert!(hint.contains("--max-candidates 600"));
         assert!(hint.contains("--max-edit-cells 24000"));
         assert!(incomplete_suggestion_hint(super::Completeness::QueryTooLong, config).is_none());
+        assert_eq!(
+            super::completeness_code(super::Completeness::RelatedSeedTooLong),
+            "related-seed-too-long"
+        );
+        assert!(
+            incomplete_suggestion_hint(super::Completeness::RelatedSeedTooLong, config).is_none()
+        );
     }
 
     #[test]
