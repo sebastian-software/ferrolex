@@ -279,11 +279,13 @@ pub struct HunspellDictionary {
     flag_mode: FlagMode,
     case_fallback: bool,
     case_language: CaseLanguage,
-    stem_indices: BTreeMap<Box<str>, Vec<usize>>,
+    unique_stem_indices: Vec<u32>,
     morphology: MorphologyTable,
     lexemes: Vec<Lexeme>,
     prefixes: Vec<AffixRule>,
     suffixes: Vec<AffixRule>,
+    prefix_rules_by_add_edge: AffixRuleIndex,
+    suffix_rules_by_add_edge: AffixRuleIndex,
     prefix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
     suffix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
     lexeme_indices_by_flag: BTreeMap<Flag, Vec<usize>>,
@@ -333,11 +335,23 @@ impl HunspellDictionary {
                 .into_iter()
                 .map(str::to_owned)
                 .collect(),
-            lexemes: self.lexemes.iter().map(lexeme_to_ir).collect(),
-            prefixes: self.prefixes.iter().map(affix_rule_to_ir).collect(),
-            suffixes: self.suffixes.iter().map(affix_rule_to_ir).collect(),
-            special_flags: special_flags_to_ir(&self.special_flags),
-            compound: compound_to_ir(&self.compound),
+            lexemes: self
+                .lexemes
+                .iter()
+                .map(|lexeme| lexeme_to_ir(lexeme, self.flag_mode))
+                .collect(),
+            prefixes: self
+                .prefixes
+                .iter()
+                .map(|rule| affix_rule_to_ir(rule, self.flag_mode))
+                .collect(),
+            suffixes: self
+                .suffixes
+                .iter()
+                .map(|rule| affix_rule_to_ir(rule, self.flag_mode))
+                .collect(),
+            special_flags: special_flags_to_ir(&self.special_flags, self.flag_mode),
+            compound: compound_to_ir(&self.compound, self.flag_mode),
             break_patterns: self
                 .break_patterns
                 .iter()
@@ -417,9 +431,11 @@ impl HunspellDictionary {
         full_strip: bool,
         complex_prefixes: bool,
     ) -> Self {
-        let stem_indices = stem_indices(&lexemes);
+        let unique_stem_indices = unique_stem_indices(&lexemes);
         let prefix_rules_by_flag = rule_indices_by_flag(&prefixes);
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
+        let prefix_rules_by_add_edge = AffixRuleIndex::new(&prefixes, AffixKind::Prefix);
+        let suffix_rules_by_add_edge = AffixRuleIndex::new(&suffixes, AffixKind::Suffix);
         let lexeme_indices_by_flag = lexeme_indices_by_flag(&lexemes);
         let prefix_parent_flags = parent_flags_by_continuation(&prefixes);
         let suffix_parent_flags = parent_flags_by_continuation(&suffixes);
@@ -428,11 +444,13 @@ impl HunspellDictionary {
             flag_mode,
             case_fallback,
             case_language,
-            stem_indices,
+            unique_stem_indices,
             morphology,
             lexemes,
             prefixes,
             suffixes,
+            prefix_rules_by_add_edge,
+            suffix_rules_by_add_edge,
             prefix_rules_by_flag,
             suffix_rules_by_flag,
             lexeme_indices_by_flag,
@@ -470,7 +488,15 @@ impl HunspellDictionary {
     /// such as suggestions can use the stable base vocabulary without turning
     /// a lookup dictionary into an unbounded expansion engine.
     pub fn stems(&self) -> impl Iterator<Item = &str> + '_ {
-        self.stem_indices.keys().map(Box::as_ref)
+        self.unique_stem_indices
+            .iter()
+            .map(|index| self.stem_at_index(*index))
+    }
+
+    fn stem_at_index(&self, index: u32) -> &str {
+        self.lexemes[usize::try_from(index).expect("stem index fits usize")]
+            .stem
+            .as_ref()
     }
 
     /// Returns the imported `REP` rules in source order.
@@ -520,8 +546,8 @@ impl HunspellDictionary {
             while let Some(state) = states.pop() {
                 if state.depth > 0
                     && self.is_accepted_state(&state)
-                    && !self.is_no_suggest(&state.origin_flags)
-                    && !self.is_no_suggest(&state.flags)
+                    && !self.is_no_suggest(state.origin_flags)
+                    && !self.is_no_suggest(state.flags)
                 {
                     emitted += 1;
                     if emitted > MAX_SUGGESTION_FORMS_PER_SEED || !visitor(&state.form) {
@@ -590,11 +616,12 @@ impl HunspellDictionary {
     }
 
     fn lexemes_for_stem(&self, stem: &str) -> impl Iterator<Item = &Lexeme> {
-        self.stem_indices
-            .get(stem)
-            .into_iter()
-            .flatten()
-            .map(|index| &self.lexemes[*index])
+        let start = self
+            .lexemes
+            .partition_point(|lexeme| lexeme.stem.as_ref() < stem);
+        let end =
+            self.lexemes[start..].partition_point(|lexeme| lexeme.stem.as_ref() == stem) + start;
+        self.lexemes[start..end].iter()
     }
 
     /// Applies declared `OCONV` rules to a suggestion spelling.
@@ -633,23 +660,46 @@ impl HunspellDictionary {
     }
 
     fn matches_single_affix_word(&self, word: &str, allow_keep_case: bool) -> bool {
-        self.prefixes.iter().chain(&self.suffixes).any(|rule| {
+        self.candidate_affix_rules(word).any(|rule| {
             rule.could_generate(word)
                 && rule
                     .reverse_apply(word, self.full_strip)
                     .is_some_and(|stem| {
                         self.lexemes_for_stem(&stem).any(|lexeme| {
                             !self.is_forbidden(&lexeme.flags)
-                                && lexeme.flags.contains(&rule.flag)
+                                && has_flag(&lexeme.flags, rule.flag)
                                 && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
-                                && self.is_accepted_state(&FormState::new(lexeme).apply(
-                                    rule,
-                                    word.to_owned(),
-                                    &self.special_flags,
-                                ))
+                                && self.is_accepted_single_affix(lexeme, rule)
                         })
                     })
         })
+    }
+
+    fn is_accepted_single_affix(&self, lexeme: &Lexeme, rule: &AffixRule) -> bool {
+        let flags = &rule.continuation_flags;
+        let has_circumfix = self
+            .special_flags
+            .circumfix
+            .as_ref()
+            .is_some_and(|flag| has_flag(flags, *flag));
+        !self.is_forbidden(flags)
+            && !self.requires_affix(flags)
+            && !self.is_only_in_compound(&lexeme.flags)
+            && !self.is_only_in_compound(flags)
+            && !has_circumfix
+    }
+
+    fn candidate_affix_rules<'source>(
+        &'source self,
+        word: &str,
+    ) -> impl Iterator<Item = &'source AffixRule> + 'source {
+        self.prefix_rules_by_add_edge
+            .matching_rules(&self.prefixes, word, AffixKind::Prefix)
+            .chain(self.suffix_rules_by_add_edge.matching_rules(
+                &self.suffixes,
+                word,
+                AffixKind::Suffix,
+            ))
     }
 
     fn derived_candidate_indices(&self, word: &str) -> Option<BTreeSet<usize>> {
@@ -657,12 +707,16 @@ impl HunspellDictionary {
         self.extend_derived_candidates(
             word,
             &self.prefixes,
+            &self.prefix_rules_by_add_edge,
+            AffixKind::Prefix,
             &self.prefix_parent_flags,
             &mut candidates,
         )?;
         self.extend_derived_candidates(
             word,
             &self.suffixes,
+            &self.suffix_rules_by_add_edge,
+            AffixKind::Suffix,
             &self.suffix_parent_flags,
             &mut candidates,
         )?;
@@ -673,11 +727,16 @@ impl HunspellDictionary {
         &self,
         word: &str,
         rules: &[AffixRule],
+        rules_by_add_edge: &AffixRuleIndex,
+        kind: AffixKind,
         parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
         candidates: &mut BTreeSet<usize>,
     ) -> Option<()> {
-        for rule in rules.iter().filter(|rule| rule.could_generate(word)) {
-            for flag in origin_flags_for(&rule.flag, parent_flags) {
+        for rule in rules_by_add_edge
+            .matching_rules(rules, word, kind)
+            .filter(|rule| rule.could_generate(word))
+        {
+            for flag in origin_flags_for(rule.flag, parent_flags) {
                 if let Some(indices) = self.lexeme_indices_by_flag.get(&flag) {
                     for index in indices {
                         candidates.insert(*index);
@@ -691,7 +750,12 @@ impl HunspellDictionary {
         Some(())
     }
 
-    fn matches_derived_word(&self, lexeme: &Lexeme, word: &str, allow_keep_case: bool) -> bool {
+    fn matches_derived_word<'source>(
+        &'source self,
+        lexeme: &'source Lexeme,
+        word: &str,
+        allow_keep_case: bool,
+    ) -> bool {
         if self.is_forbidden(&lexeme.flags)
             || (!allow_keep_case && self.is_keep_case(&lexeme.flags))
         {
@@ -733,7 +797,7 @@ impl HunspellDictionary {
             .compound
             .permit
             .as_ref()
-            .is_some_and(|flag| rule.continuation_flags.contains(flag));
+            .is_some_and(|flag| has_flag(&rule.continuation_flags, *flag));
         match position {
             CompoundPosition::Begin => rule.kind == AffixKind::Prefix || permit,
             CompoundPosition::Middle => permit,
@@ -741,13 +805,13 @@ impl HunspellDictionary {
         }
     }
 
-    fn expand_matching_rules(
-        &self,
-        state: &FormState,
+    fn expand_matching_rules<'source>(
+        &'source self,
+        state: &FormState<'source>,
         kind: AffixKind,
-        rules: &[AffixRule],
+        rules: &'source [AffixRule],
         rule_indices_by_flag: &BTreeMap<Flag, Vec<usize>>,
-        states: &mut Vec<FormState>,
+        states: &mut Vec<FormState<'source>>,
         derivations: &mut usize,
     ) -> bool {
         let flags = state.flags_for(kind);
@@ -772,62 +836,62 @@ impl HunspellDictionary {
         true
     }
 
-    fn is_accepted_state(&self, state: &FormState) -> bool {
-        !self.is_forbidden(&state.flags)
-            && !self.requires_affix(&state.flags)
-            && !self.is_only_in_compound(&state.origin_flags)
-            && !self.is_only_in_compound(&state.flags)
+    fn is_accepted_state(&self, state: &FormState<'_>) -> bool {
+        !self.is_forbidden(state.flags)
+            && !self.requires_affix(state.flags)
+            && !self.is_only_in_compound(state.origin_flags)
+            && !self.is_only_in_compound(state.flags)
             && state.has_complete_circumfix()
     }
 
-    fn is_accepted_compound_state(&self, state: &FormState) -> bool {
-        !self.is_forbidden(&state.flags)
-            && !self.is_compound_forbidden(&state.origin_flags)
-            && !self.is_compound_forbidden(&state.flags)
-            && !self.requires_affix(&state.flags)
+    fn is_accepted_compound_state(&self, state: &FormState<'_>) -> bool {
+        !self.is_forbidden(state.flags)
+            && !self.is_compound_forbidden(state.origin_flags)
+            && !self.is_compound_forbidden(state.flags)
+            && !self.requires_affix(state.flags)
             && state.has_complete_circumfix()
     }
 
-    fn is_forbidden(&self, flags: &BTreeSet<Flag>) -> bool {
+    fn is_forbidden(&self, flags: &[Flag]) -> bool {
         self.special_flags
             .forbidden_word
             .as_ref()
-            .is_some_and(|flag| flags.contains(flag))
+            .is_some_and(|flag| has_flag(flags, *flag))
     }
 
-    fn is_compound_forbidden(&self, flags: &BTreeSet<Flag>) -> bool {
+    fn is_compound_forbidden(&self, flags: &[Flag]) -> bool {
         self.compound
             .forbid
             .as_ref()
-            .is_some_and(|flag| flags.contains(flag))
+            .is_some_and(|flag| has_flag(flags, *flag))
     }
 
-    fn requires_affix(&self, flags: &BTreeSet<Flag>) -> bool {
+    fn requires_affix(&self, flags: &[Flag]) -> bool {
         self.special_flags
             .need_affix
             .as_ref()
-            .is_some_and(|flag| flags.contains(flag))
+            .is_some_and(|flag| has_flag(flags, *flag))
     }
 
-    fn is_only_in_compound(&self, flags: &BTreeSet<Flag>) -> bool {
+    fn is_only_in_compound(&self, flags: &[Flag]) -> bool {
         self.special_flags
             .only_in_compound
             .as_ref()
-            .is_some_and(|flag| flags.contains(flag))
+            .is_some_and(|flag| has_flag(flags, *flag))
     }
 
-    fn is_no_suggest(&self, flags: &BTreeSet<Flag>) -> bool {
+    fn is_no_suggest(&self, flags: &[Flag]) -> bool {
         self.special_flags
             .no_suggest
             .as_ref()
-            .is_some_and(|flag| flags.contains(flag))
+            .is_some_and(|flag| has_flag(flags, *flag))
     }
 
-    fn is_keep_case(&self, flags: &BTreeSet<Flag>) -> bool {
+    fn is_keep_case(&self, flags: &[Flag]) -> bool {
         self.special_flags
             .keep_case
             .as_ref()
-            .is_some_and(|flag| flags.contains(flag))
+            .is_some_and(|flag| has_flag(flags, *flag))
     }
 
     fn matches_simple_compound(&self, word: &str, allow_keep_case: bool) -> bool {
@@ -928,7 +992,7 @@ impl HunspellDictionary {
                 word,
                 boundaries,
                 &reachable,
-                flag,
+                *flag,
                 allow_keep_case,
                 allow_boundary_triples,
             );
@@ -964,7 +1028,7 @@ impl HunspellDictionary {
                 word,
                 boundaries,
                 &reachable,
-                flag,
+                *flag,
                 allow_keep_case,
                 allow_boundary_triples,
             );
@@ -982,7 +1046,7 @@ impl HunspellDictionary {
         word: &str,
         boundaries: &[usize],
         reachable: &[bool],
-        flag: &Flag,
+        flag: Flag,
         allow_keep_case: bool,
         allow_boundary_triples: bool,
     ) -> Vec<bool> {
@@ -1015,14 +1079,14 @@ impl HunspellDictionary {
     fn matches_compound_component(
         &self,
         word: &str,
-        required_flag: &Flag,
+        required_flag: Flag,
         is_final_component: bool,
         allow_keep_case: bool,
     ) -> bool {
         self.lexemes_for_stem(word).any(|lexeme| {
             !self.is_forbidden(&lexeme.flags)
                 && (is_final_component || !self.is_compound_forbidden(&lexeme.flags))
-                && lexeme.flags.contains(required_flag)
+                && has_flag(&lexeme.flags, required_flag)
                 && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
         })
     }
@@ -1043,7 +1107,7 @@ impl HunspellDictionary {
             word,
             boundaries,
             &reachable,
-            begin,
+            *begin,
             CompoundPosition::Begin,
             allow_keep_case,
             allow_boundary_triples,
@@ -1053,7 +1117,7 @@ impl HunspellDictionary {
                 word,
                 boundaries,
                 &reachable,
-                end,
+                *end,
                 CompoundPosition::End,
                 allow_keep_case,
                 allow_boundary_triples,
@@ -1073,7 +1137,7 @@ impl HunspellDictionary {
                 word,
                 boundaries,
                 &reachable,
-                middle,
+                *middle,
                 CompoundPosition::Middle,
                 allow_keep_case,
                 allow_boundary_triples,
@@ -1091,7 +1155,7 @@ impl HunspellDictionary {
         word: &str,
         boundaries: &[usize],
         reachable: &[bool],
-        position_flag: &Flag,
+        position_flag: Flag,
         position: CompoundPosition,
         allow_keep_case: bool,
         allow_boundary_triples: bool,
@@ -1125,7 +1189,7 @@ impl HunspellDictionary {
     fn matches_positioned_component(
         &self,
         word: &str,
-        position_flag: &Flag,
+        position_flag: Flag,
         position: CompoundPosition,
         allow_keep_case: bool,
     ) -> bool {
@@ -1133,12 +1197,12 @@ impl HunspellDictionary {
             !self.is_forbidden(&lexeme.flags)
                 && (position == CompoundPosition::End || !self.is_compound_forbidden(&lexeme.flags))
                 && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
-                && (lexeme.flags.contains(position_flag)
+                && (has_flag(&lexeme.flags, position_flag)
                     || self
                         .compound
                         .flag
                         .as_ref()
-                        .is_some_and(|flag| lexeme.flags.contains(flag)))
+                        .is_some_and(|flag| has_flag(&lexeme.flags, *flag)))
         }) || self.matches_one_affix_compound_component(
             word,
             position_flag,
@@ -1150,13 +1214,11 @@ impl HunspellDictionary {
     fn matches_one_affix_compound_component(
         &self,
         word: &str,
-        position_flag: &Flag,
+        position_flag: Flag,
         position: CompoundPosition,
         allow_keep_case: bool,
     ) -> bool {
-        self.prefixes
-            .iter()
-            .chain(&self.suffixes)
+        self.candidate_affix_rules(word)
             .filter(|rule| self.compound_rule_is_allowed(rule, position))
             .any(|rule| {
                 rule.reverse_apply(word, self.full_strip)
@@ -1164,13 +1226,13 @@ impl HunspellDictionary {
                         self.lexemes_for_stem(&stem).any(|lexeme| {
                             !self.is_forbidden(&lexeme.flags)
                                 && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
-                                && lexeme.flags.contains(&rule.flag)
-                                && (lexeme.flags.contains(position_flag)
+                                && has_flag(&lexeme.flags, rule.flag)
+                                && (has_flag(&lexeme.flags, position_flag)
                                     || self
                                         .compound
                                         .flag
                                         .as_ref()
-                                        .is_some_and(|flag| lexeme.flags.contains(flag)))
+                                        .is_some_and(|flag| has_flag(&lexeme.flags, *flag)))
                                 && self.is_accepted_compound_state(&FormState::new(lexeme).apply(
                                     rule,
                                     word.to_owned(),
@@ -1232,7 +1294,7 @@ impl HunspellDictionary {
         if end == word.len()
             && self.compound.force_uppercase.as_ref().is_some_and(|flag| {
                 self.lexemes_for_stem(component)
-                    .any(|lexeme| lexeme.flags.contains(flag))
+                    .any(|lexeme| has_flag(&lexeme.flags, *flag))
             })
             && !word.chars().next().is_some_and(char::is_uppercase)
         {
@@ -1307,11 +1369,11 @@ impl HunspellDictionary {
                 && right.starts_with(pattern.beginning.as_ref())
                 && pattern.ending_flag.as_ref().is_none_or(|flag| {
                     self.lexemes_for_stem(&word[..start])
-                        .any(|lexeme| lexeme.flags.contains(flag))
+                        .any(|lexeme| has_flag(&lexeme.flags, *flag))
                 })
                 && pattern.beginning_flag.as_ref().is_none_or(|flag| {
                     self.lexemes_for_stem(right)
-                        .any(|lexeme| lexeme.flags.contains(flag))
+                        .any(|lexeme| has_flag(&lexeme.flags, *flag))
                 })
         })
     }
@@ -1456,15 +1518,17 @@ fn sharp_uppercase_forms(lexemes: &[Lexeme], special_flags: &SpecialFlags) -> BT
     };
     lexemes
         .iter()
-        .filter(|lexeme| lexeme.flags.contains(keep_case) && lexeme.stem.contains('ß'))
+        .filter(|lexeme| has_flag(&lexeme.flags, *keep_case) && lexeme.stem.contains('ß'))
         .map(|lexeme| Box::<str>::from(lexeme.stem.to_uppercase()))
         .collect()
 }
 
-fn stem_indices(lexemes: &[Lexeme]) -> BTreeMap<Box<str>, Vec<usize>> {
-    let mut indices = BTreeMap::<Box<str>, Vec<usize>>::new();
+fn unique_stem_indices(lexemes: &[Lexeme]) -> Vec<u32> {
+    let mut indices = Vec::new();
     for (index, lexeme) in lexemes.iter().enumerate() {
-        indices.entry(lexeme.stem.clone()).or_default().push(index);
+        if index == 0 || lexemes[index - 1].stem != lexeme.stem {
+            indices.push(u32::try_from(index).expect("dictionary entry count is bounded"));
+        }
     }
     indices
 }
@@ -1472,7 +1536,7 @@ fn stem_indices(lexemes: &[Lexeme]) -> BTreeMap<Box<str>, Vec<usize>> {
 fn rule_indices_by_flag(rules: &[AffixRule]) -> BTreeMap<Flag, Vec<usize>> {
     let mut indices = BTreeMap::<Flag, Vec<usize>>::new();
     for (index, rule) in rules.iter().enumerate() {
-        indices.entry(rule.flag.clone()).or_default().push(index);
+        indices.entry(rule.flag).or_default().push(index);
     }
     indices
 }
@@ -1481,7 +1545,7 @@ fn lexeme_indices_by_flag(lexemes: &[Lexeme]) -> BTreeMap<Flag, Vec<usize>> {
     let mut indices = BTreeMap::<Flag, Vec<usize>>::new();
     for (index, lexeme) in lexemes.iter().enumerate() {
         for flag in &lexeme.flags {
-            indices.entry(flag.clone()).or_default().push(index);
+            indices.entry(*flag).or_default().push(index);
         }
     }
     indices
@@ -1491,26 +1555,23 @@ fn parent_flags_by_continuation(rules: &[AffixRule]) -> BTreeMap<Flag, BTreeSet<
     let mut parents = BTreeMap::<Flag, BTreeSet<Flag>>::new();
     for rule in rules {
         for continuation in &rule.continuation_flags {
-            parents
-                .entry(continuation.clone())
-                .or_default()
-                .insert(rule.flag.clone());
+            parents.entry(*continuation).or_default().insert(rule.flag);
         }
     }
     parents
 }
 
 fn origin_flags_for(
-    terminal_flag: &Flag,
+    terminal_flag: Flag,
     parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
 ) -> BTreeSet<Flag> {
-    let mut origins = BTreeSet::from([terminal_flag.clone()]);
-    let mut pending = vec![terminal_flag.clone()];
+    let mut origins = BTreeSet::from([terminal_flag]);
+    let mut pending = vec![terminal_flag];
     while let Some(flag) = pending.pop() {
         if let Some(parents) = parent_flags.get(&flag) {
             for parent in parents {
-                if origins.insert(parent.clone()) {
-                    pending.push(parent.clone());
+                if origins.insert(*parent) {
+                    pending.push(*parent);
                 }
             }
         }
@@ -1521,11 +1582,16 @@ fn origin_flags_for(
 #[derive(Clone, Debug)]
 struct Lexeme {
     stem: Box<str>,
-    flags: BTreeSet<Flag>,
+    flags: FlagSet,
     morphology: Morphology,
 }
 
 type Morphology = Box<[MorphologyId]>;
+type FlagSet = Box<[Flag]>;
+
+fn has_flag(flags: &[Flag], flag: Flag) -> bool {
+    flags.binary_search(&flag).is_ok()
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct MorphologyId(u32);
@@ -1563,18 +1629,50 @@ impl MorphologyTable {
     }
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum Flag {
-    Numeric(u32),
-    Text(Box<str>),
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct Flag(u64);
+
+fn encode_text_flag(value: &str) -> Option<u64> {
+    let mut characters = value.chars();
+    let first = u64::from(u32::from(characters.next()?));
+    let second = characters
+        .next()
+        .map_or(0, |character| u64::from(u32::from(character)) + 1);
+    characters
+        .next()
+        .is_none()
+        .then_some((first << 32) | second)
+}
+
+fn decode_text_flag(value: u64) -> Option<String> {
+    let (first, second) = decode_text_flag_chars(value)?;
+    let mut decoded = String::with_capacity(8);
+    decoded.push(first);
+    if let Some(second) = second {
+        decoded.push(second);
+    }
+    Some(decoded)
+}
+
+fn decode_text_flag_chars(value: u64) -> Option<(char, Option<char>)> {
+    let first = char::from_u32(u32::try_from(value >> 32).ok()?)?;
+    let encoded_second = u32::try_from(value & u64::from(u32::MAX)).ok()?;
+    let second = (encoded_second != 0)
+        .then(|| char::from_u32(encoded_second - 1))
+        .flatten();
+    (encoded_second == 0 || second.is_some()).then_some((first, second))
 }
 
 impl Flag {
-    fn is_valid_for(&self, mode: FlagMode) -> bool {
-        match (self, mode) {
-            (Self::Numeric(_), FlagMode::Numeric) => true,
-            (Self::Text(value), mode) => mode.flag_count(value) == Some(1),
-            _ => false,
+    fn is_valid_for(self, mode: FlagMode) -> bool {
+        match mode {
+            FlagMode::Numeric => u32::try_from(self.0).is_ok(),
+            FlagMode::Unicode => decode_text_flag_chars(self.0).is_some_and(|(first, second)| {
+                !is_variation_selector(first) && second.is_none_or(is_variation_selector)
+            }),
+            FlagMode::Long => {
+                decode_text_flag_chars(self.0).is_some_and(|(_, second)| second.is_some())
+            }
         }
     }
 }
@@ -1717,8 +1815,51 @@ struct AffixRule {
     add: Box<str>,
     condition: Condition,
     cross_product: bool,
-    continuation_flags: BTreeSet<Flag>,
+    continuation_flags: FlagSet,
     morphology: Morphology,
+}
+
+#[derive(Clone, Debug, Default)]
+struct AffixRuleIndex {
+    empty_add: Vec<usize>,
+    by_add_edge: BTreeMap<char, Vec<usize>>,
+}
+
+impl AffixRuleIndex {
+    fn new(rules: &[AffixRule], kind: AffixKind) -> Self {
+        let mut index = Self::default();
+        for (rule_index, rule) in rules.iter().enumerate() {
+            let edge = match kind {
+                AffixKind::Prefix => rule.add.chars().next(),
+                AffixKind::Suffix => rule.add.chars().next_back(),
+            };
+            if let Some(edge) = edge {
+                index.by_add_edge.entry(edge).or_default().push(rule_index);
+            } else {
+                index.empty_add.push(rule_index);
+            }
+        }
+        index
+    }
+
+    fn matching_rules<'source>(
+        &'source self,
+        rules: &'source [AffixRule],
+        word: &str,
+        kind: AffixKind,
+    ) -> impl Iterator<Item = &'source AffixRule> + 'source {
+        let edge = match kind {
+            AffixKind::Prefix => word.chars().next(),
+            AffixKind::Suffix => word.chars().next_back(),
+        };
+        let matching = edge
+            .and_then(|edge| self.by_add_edge.get(&edge))
+            .map_or(&[][..], Vec::as_slice);
+        self.empty_add
+            .iter()
+            .chain(matching)
+            .map(|index| &rules[*index])
+    }
 }
 
 impl AffixRule {
@@ -1758,61 +1899,74 @@ impl AffixRule {
         }
     }
 
-    fn reverse_apply(&self, form: &str, full_strip: bool) -> Option<String> {
-        let stem = match self.kind {
+    fn reverse_apply<'form>(&self, form: &'form str, full_strip: bool) -> Option<Cow<'form, str>> {
+        let (remaining, stem) = match self.kind {
             AffixKind::Prefix => {
                 let remaining = form.strip_prefix(self.add.as_ref())?;
-                let mut stem = String::with_capacity(self.strip.len() + remaining.len());
-                stem.push_str(&self.strip);
-                stem.push_str(remaining);
-                stem
+                let stem = if self.strip.is_empty() {
+                    Cow::Borrowed(remaining)
+                } else {
+                    let mut stem = String::with_capacity(self.strip.len() + remaining.len());
+                    stem.push_str(&self.strip);
+                    stem.push_str(remaining);
+                    Cow::Owned(stem)
+                };
+                (remaining, stem)
             }
             AffixKind::Suffix => {
                 let remaining = form.strip_suffix(self.add.as_ref())?;
-                let mut stem = String::with_capacity(remaining.len() + self.strip.len());
-                stem.push_str(remaining);
-                stem.push_str(&self.strip);
-                stem
+                let stem = if self.strip.is_empty() {
+                    Cow::Borrowed(remaining)
+                } else {
+                    let mut stem = String::with_capacity(remaining.len() + self.strip.len());
+                    stem.push_str(remaining);
+                    stem.push_str(&self.strip);
+                    Cow::Owned(stem)
+                };
+                (remaining, stem)
             }
         };
-        (self.apply(&stem, full_strip).as_deref() == Some(form)).then_some(stem)
+        (full_strip || !remaining.is_empty())
+            .then_some(())
+            .filter(|()| self.condition.matches(&stem, self.kind))
+            .map(|()| stem)
     }
 }
 
 #[derive(Clone, Debug)]
-struct FormState {
+struct FormState<'source> {
     form: String,
-    flags: BTreeSet<Flag>,
-    origin_flags: BTreeSet<Flag>,
+    flags: &'source [Flag],
+    origin_flags: &'source [Flag],
     depth: usize,
     prefix_count: usize,
     suffix_count: usize,
     last_kind: Option<AffixKind>,
     last_cross_product: bool,
-    used_rules: BTreeSet<usize>,
+    used_rules: [usize; MAX_AFFIX_CHAIN],
     circumfix_prefix: bool,
     circumfix_suffix: bool,
 }
 
-impl FormState {
-    fn new(lexeme: &Lexeme) -> Self {
+impl<'source> FormState<'source> {
+    fn new(lexeme: &'source Lexeme) -> Self {
         Self {
             form: lexeme.stem.to_string(),
-            flags: lexeme.flags.clone(),
-            origin_flags: lexeme.flags.clone(),
+            flags: &lexeme.flags,
+            origin_flags: &lexeme.flags,
             depth: 0,
             prefix_count: 0,
             suffix_count: 0,
             last_kind: None,
             last_cross_product: true,
-            used_rules: BTreeSet::new(),
+            used_rules: [usize::MAX; MAX_AFFIX_CHAIN],
             circumfix_prefix: false,
             circumfix_suffix: false,
         }
     }
 
     fn can_apply(&self, rule: &AffixRule, complex_prefixes: bool) -> bool {
-        !self.used_rules.contains(&rule.id)
+        !self.used_rules[..self.depth].contains(&rule.id)
             && match rule.kind {
                 // COMPLEXPREFIXES permits a second prefix. Prefixes still
                 // precede every suffix so the derived form remains bounded.
@@ -1824,34 +1978,34 @@ impl FormState {
                 AffixKind::Suffix => self.suffix_count < 2,
             }
             && match self.last_kind {
-                None => self.flags.contains(&rule.flag),
-                Some(kind) if kind == rule.kind => self.flags.contains(&rule.flag),
+                None => has_flag(self.flags, rule.flag),
+                Some(kind) if kind == rule.kind => has_flag(self.flags, rule.flag),
                 Some(_) => {
                     self.last_cross_product
                         && rule.cross_product
-                        && self.origin_flags.contains(&rule.flag)
+                        && has_flag(self.origin_flags, rule.flag)
                 }
             }
     }
 
-    fn flags_for(&self, kind: AffixKind) -> &BTreeSet<Flag> {
+    fn flags_for(&self, kind: AffixKind) -> &[Flag] {
         match self.last_kind {
-            Some(previous_kind) if previous_kind != kind => &self.origin_flags,
-            Some(_) | None => &self.flags,
+            Some(previous_kind) if previous_kind != kind => self.origin_flags,
+            Some(_) | None => self.flags,
         }
     }
 
-    fn apply(&self, rule: &AffixRule, form: String, special_flags: &SpecialFlags) -> Self {
+    fn apply(&self, rule: &'source AffixRule, form: String, special_flags: &SpecialFlags) -> Self {
         let circumfix = special_flags
             .circumfix
             .as_ref()
-            .is_some_and(|flag| rule.continuation_flags.contains(flag));
-        let mut used_rules = self.used_rules.clone();
-        used_rules.insert(rule.id);
+            .is_some_and(|flag| has_flag(&rule.continuation_flags, *flag));
+        let mut used_rules = self.used_rules;
+        used_rules[self.depth] = rule.id;
         Self {
             form,
-            flags: rule.continuation_flags.clone(),
-            origin_flags: self.origin_flags.clone(),
+            flags: &rule.continuation_flags,
+            origin_flags: self.origin_flags,
             depth: self.depth + 1,
             prefix_count: self.prefix_count + usize::from(rule.kind == AffixKind::Prefix),
             suffix_count: self.suffix_count + usize::from(rule.kind == AffixKind::Suffix),
@@ -1967,24 +2121,25 @@ impl Condition {
     }
 
     fn matches(&self, stem: &str, kind: AffixKind) -> bool {
-        let characters = stem.chars().collect::<Vec<_>>();
-        if characters.len() < self.atoms.len() {
-            return false;
+        if kind == AffixKind::Prefix || self.anchored_at_start {
+            let mut characters = stem.chars();
+            return self.atoms.iter().all(|atom| {
+                characters
+                    .next()
+                    .is_some_and(|character| atom.matches(character))
+            });
         }
-        let start = match kind {
-            AffixKind::Prefix => 0,
-            AffixKind::Suffix => characters.len() - self.atoms.len(),
-        };
-        let start = if self.anchored_at_start { 0 } else { start };
 
-        self.atoms
-            .iter()
-            .zip(&characters[start..])
-            .all(|(atom, character)| atom.matches(*character))
-            && self
-                .not_preceded_by
-                .as_ref()
-                .is_none_or(|atom| start == 0 || !atom.matches(characters[start - 1]))
+        let mut characters = stem.chars().rev();
+        self.atoms.iter().rev().all(|atom| {
+            characters
+                .next()
+                .is_some_and(|character| atom.matches(character))
+        }) && self.not_preceded_by.as_ref().is_none_or(|atom| {
+            characters
+                .next()
+                .is_none_or(|character| !atom.matches(character))
+        })
     }
 }
 
@@ -2023,43 +2178,51 @@ fn case_language_to_ir(language: CaseLanguage) -> CaseLanguageIr {
     }
 }
 
-fn flag_to_ir(flag: &Flag) -> FlagIr {
-    match flag {
-        Flag::Numeric(value) => FlagIr::Numeric(*value),
-        Flag::Text(value) => FlagIr::Text(value.to_string()),
+fn flag_to_ir(flag: Flag, mode: FlagMode) -> FlagIr {
+    match mode {
+        FlagMode::Numeric => {
+            FlagIr::Numeric(u32::try_from(flag.0).expect("validated numeric flags fit in a u32"))
+        }
+        FlagMode::Unicode | FlagMode::Long => FlagIr::Text(
+            decode_text_flag(flag.0).expect("validated text flags contain Unicode scalars"),
+        ),
     }
 }
 
-fn flags_to_ir(flags: &BTreeSet<Flag>) -> BTreeSet<FlagIr> {
-    flags.iter().map(flag_to_ir).collect()
+fn flags_to_ir(flags: &[Flag], mode: FlagMode) -> BTreeSet<FlagIr> {
+    flags
+        .iter()
+        .copied()
+        .map(|flag| flag_to_ir(flag, mode))
+        .collect()
 }
 
 fn morphology_to_ir(morphology: &Morphology) -> Vec<u32> {
     morphology.iter().map(|id| id.0).collect()
 }
 
-fn lexeme_to_ir(lexeme: &Lexeme) -> LexemeIr {
+fn lexeme_to_ir(lexeme: &Lexeme, flag_mode: FlagMode) -> LexemeIr {
     LexemeIr {
         stem: lexeme.stem.to_string(),
         frequency: None,
-        flags: flags_to_ir(&lexeme.flags),
+        flags: flags_to_ir(&lexeme.flags, flag_mode),
         morphology: morphology_to_ir(&lexeme.morphology),
     }
 }
 
-fn affix_rule_to_ir(rule: &AffixRule) -> AffixRuleIr {
+fn affix_rule_to_ir(rule: &AffixRule, flag_mode: FlagMode) -> AffixRuleIr {
     AffixRuleIr {
         id: u32::try_from(rule.id).expect("affix rule IDs are bounded by the importer"),
         kind: match rule.kind {
             AffixKind::Prefix => AffixKindIr::Prefix,
             AffixKind::Suffix => AffixKindIr::Suffix,
         },
-        flag: flag_to_ir(&rule.flag),
+        flag: flag_to_ir(rule.flag, flag_mode),
         strip: rule.strip.to_string(),
         add: rule.add.to_string(),
         condition: condition_to_ir(&rule.condition),
         cross_product: rule.cross_product,
-        continuation_flags: flags_to_ir(&rule.continuation_flags),
+        continuation_flags: flags_to_ir(&rule.continuation_flags, flag_mode),
         morphology: morphology_to_ir(&rule.morphology),
     }
 }
@@ -2083,27 +2246,66 @@ fn condition_atom_to_ir(atom: &ConditionAtom) -> ConditionAtomIr {
     }
 }
 
-fn special_flags_to_ir(flags: &SpecialFlags) -> SpecialFlagsIr {
+fn special_flags_to_ir(flags: &SpecialFlags, flag_mode: FlagMode) -> SpecialFlagsIr {
     SpecialFlagsIr {
-        circumfix: flags.circumfix.as_ref().map(flag_to_ir),
-        forbidden_word: flags.forbidden_word.as_ref().map(flag_to_ir),
-        keep_case: flags.keep_case.as_ref().map(flag_to_ir),
-        need_affix: flags.need_affix.as_ref().map(flag_to_ir),
-        only_in_compound: flags.only_in_compound.as_ref().map(flag_to_ir),
-        no_suggest: flags.no_suggest.as_ref().map(flag_to_ir),
+        circumfix: flags
+            .circumfix
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        forbidden_word: flags
+            .forbidden_word
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        keep_case: flags
+            .keep_case
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        need_affix: flags
+            .need_affix
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        only_in_compound: flags
+            .only_in_compound
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        no_suggest: flags
+            .no_suggest
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
         check_sharps: flags.check_sharps,
     }
 }
 
-fn compound_to_ir(compound: &CompoundConfig) -> CompoundConfigIr {
+fn compound_to_ir(compound: &CompoundConfig, flag_mode: FlagMode) -> CompoundConfigIr {
     CompoundConfigIr {
-        flag: compound.flag.as_ref().map(flag_to_ir),
-        begin: compound.begin.as_ref().map(flag_to_ir),
-        middle: compound.middle.as_ref().map(flag_to_ir),
-        end: compound.end.as_ref().map(flag_to_ir),
-        permit: compound.permit.as_ref().map(flag_to_ir),
-        forbid: compound.forbid.as_ref().map(flag_to_ir),
-        force_uppercase: compound.force_uppercase.as_ref().map(flag_to_ir),
+        flag: compound
+            .flag
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        begin: compound
+            .begin
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        middle: compound
+            .middle
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        end: compound
+            .end
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        permit: compound
+            .permit
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        forbid: compound
+            .forbid
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
+        force_uppercase: compound
+            .force_uppercase
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
         minimum_length: compound.minimum_length,
         maximum_words: compound.maximum_words,
         check_duplicate: compound.check_duplicate,
@@ -2114,7 +2316,7 @@ fn compound_to_ir(compound: &CompoundConfig) -> CompoundConfigIr {
         patterns: compound
             .patterns
             .iter()
-            .map(compound_pattern_to_ir)
+            .map(|pattern| compound_pattern_to_ir(pattern, flag_mode))
             .collect(),
         syllable_limit: compound
             .syllable_limit
@@ -2129,19 +2331,30 @@ fn compound_to_ir(compound: &CompoundConfig) -> CompoundConfigIr {
             .map(|rule| {
                 rule.patterns
                     .iter()
-                    .map(|pattern| pattern.iter().map(flag_to_ir).collect())
+                    .map(|pattern| {
+                        pattern
+                            .iter()
+                            .map(|flag| flag_to_ir(*flag, flag_mode))
+                            .collect()
+                    })
                     .collect()
             })
             .collect(),
     }
 }
 
-fn compound_pattern_to_ir(pattern: &CompoundPattern) -> CompoundPatternIr {
+fn compound_pattern_to_ir(pattern: &CompoundPattern, flag_mode: FlagMode) -> CompoundPatternIr {
     CompoundPatternIr {
         ending: pattern.ending.to_string(),
-        ending_flag: pattern.ending_flag.as_ref().map(flag_to_ir),
+        ending_flag: pattern
+            .ending_flag
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
         beginning: pattern.beginning.to_string(),
-        beginning_flag: pattern.beginning_flag.as_ref().map(flag_to_ir),
+        beginning_flag: pattern
+            .beginning_flag
+            .as_ref()
+            .map(|flag| flag_to_ir(*flag, flag_mode)),
         replacement: pattern.replacement.as_ref().map(ToString::to_string),
     }
 }
@@ -2616,7 +2829,7 @@ struct ParsedAff {
     replacement_rules: Vec<ReplacementRule>,
     keyboard: Option<Box<str>>,
     character_maps: Vec<String>,
-    flag_aliases: Vec<Option<BTreeSet<Flag>>>,
+    flag_aliases: Vec<Option<FlagSet>>,
     morphology_aliases: Vec<Option<Morphology>>,
     morphology: MorphologyTable,
     ignored_characters: BTreeSet<char>,
@@ -3010,7 +3223,7 @@ fn parse_flag_aliases(
         };
         let alias_fields = aff_fields(line);
         let flags = match alias_fields.as_slice() {
-            ["AF"] => Some(BTreeSet::new()),
+            ["AF"] => Some(Box::default()),
             ["AF", flags]
                 if parsed
                     .flag_mode
@@ -4106,7 +4319,11 @@ fn parse_compound_rule_patterns(
             }
             _ => (1, 1),
         };
-        parts.push((Flag::Text(Box::from(token)), minimum, maximum));
+        parts.push((
+            decode_flag(token, FlagMode::Unicode).ok_or("compound rule flag is invalid")?,
+            minimum,
+            maximum,
+        ));
     }
     let mut patterns = vec![Vec::new()];
     for (flag, minimum, maximum) in parts {
@@ -4114,7 +4331,7 @@ fn parse_compound_rule_patterns(
         for prefix in patterns {
             for count in minimum..=maximum.min(MAX_COMPOUND_RULE_COMPONENTS - prefix.len()) {
                 let mut next = prefix.clone();
-                next.extend(std::iter::repeat_n(flag.clone(), count));
+                next.extend(std::iter::repeat_n(flag, count));
                 expanded.push(next);
                 if expanded.len() > MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE {
                     return Err("compound rule expansions exceed the per-rule limit of 1,024");
@@ -4368,7 +4585,7 @@ fn parse_affix_group(
         match parse_affix_rule(
             parsed.rule_count,
             directive,
-            &flag,
+            flag,
             cross_product,
             parsed.flag_mode,
             &parsed.flag_aliases,
@@ -4409,10 +4626,10 @@ fn parse_affix_group(
 fn parse_affix_rule(
     id: usize,
     expected_directive: &str,
-    header_flag: &Flag,
+    header_flag: Flag,
     cross_product: bool,
     flag_mode: FlagMode,
-    flag_aliases: &[Option<BTreeSet<Flag>>],
+    flag_aliases: &[Option<FlagSet>],
     line: &str,
     morphology_table: &mut MorphologyTable,
 ) -> Result<AffixRule, String> {
@@ -4426,11 +4643,11 @@ fn parse_affix_rule(
     let Some(rule_flag) = decode_flag(fields[1], flag_mode) else {
         return Err("affix rule flag is invalid for the selected FLAG mode".to_owned());
     };
-    if &rule_flag != header_flag {
+    if rule_flag != header_flag {
         return Err("affix rule flag does not match its header".to_owned());
     }
     let (add, continuation_flags) = match fields[3].split_once('/') {
-        None => (fields[3], BTreeSet::new()),
+        None => (fields[3], Box::default()),
         Some((_, "")) => return Err("affix continuation flags must not be empty".to_owned()),
         Some((_, flags))
             if !is_flag_alias_reference(flags, flag_aliases)
@@ -4607,7 +4824,7 @@ fn parse_dic(
     source: &str,
     text: &str,
     flag_mode: FlagMode,
-    flag_aliases: &[Option<BTreeSet<Flag>>],
+    flag_aliases: &[Option<FlagSet>],
     morphology_aliases: &[Option<Morphology>],
     morphology_table: &mut MorphologyTable,
     ignored_characters: &BTreeSet<char>,
@@ -4666,11 +4883,11 @@ fn parse_dic(
             continue;
         }
         let entry_flags = match flags {
-            None => BTreeSet::new(),
+            None => Box::default(),
             // A handful of real-world dictionaries use `word/ morphology` to
             // attach morphology without assigning flags. Retain that metadata
             // while continuing to reject a bare trailing delimiter.
-            Some("") if fields.len() > 1 => BTreeSet::new(),
+            Some("") if fields.len() > 1 => Box::default(),
             Some("") => {
                 diagnostics.push(diagnostic(
                     source,
@@ -4744,8 +4961,8 @@ fn parse_dic(
 fn decode_entry_flags(
     value: &str,
     flag_mode: FlagMode,
-    aliases: &[Option<BTreeSet<Flag>>],
-) -> Option<BTreeSet<Flag>> {
+    aliases: &[Option<FlagSet>],
+) -> Option<FlagSet> {
     if is_flag_alias_reference(value, aliases) {
         let alias = value.parse::<usize>().ok()?.checked_sub(1)?;
         aliases.get(alias)?.clone()
@@ -4754,7 +4971,7 @@ fn decode_entry_flags(
     }
 }
 
-fn is_flag_alias_reference(value: &str, aliases: &[Option<BTreeSet<Flag>>]) -> bool {
+fn is_flag_alias_reference(value: &str, aliases: &[Option<FlagSet>]) -> bool {
     !aliases.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
@@ -4821,22 +5038,22 @@ fn intern_morphology_fields(
         .collect()
 }
 
-fn decode_flags(value: &str, flag_mode: FlagMode) -> Option<BTreeSet<Flag>> {
-    decode_flag_sequence(value, flag_mode).map(|flags| flags.into_iter().collect())
+fn decode_flags(value: &str, flag_mode: FlagMode) -> Option<FlagSet> {
+    decode_flag_sequence(value, flag_mode).map(flag_set)
 }
 
 fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
     if flag_mode == FlagMode::Numeric {
         return value
             .split(',')
-            .map(|flag| flag.parse::<u32>().ok().map(Flag::Numeric))
+            .map(|flag| flag.parse::<u32>().ok().map(|flag| Flag(u64::from(flag))))
             .collect();
     }
     if flag_mode == FlagMode::Unicode {
         return unicode_flag_tokens(value).map(|tokens| {
             tokens
                 .into_iter()
-                .map(|token| Flag::Text(Box::from(token)))
+                .map(|token| Flag(encode_text_flag(token).expect("one Unicode flag")))
                 .collect()
         });
     }
@@ -4846,9 +5063,20 @@ fn decode_flag_sequence(value: &str, flag_mode: FlagMode) -> Option<Vec<Flag>> {
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|chunk| Flag::Text(Box::<str>::from(chunk.iter().collect::<String>())))
+            .map(|chunk| {
+                let first = u64::from(u32::from(chunk[0]));
+                let second = u64::from(u32::from(chunk[1])) + 1;
+                Flag((first << 32) | second)
+            })
             .collect()
     })
+}
+
+fn flag_set(flags: impl IntoIterator<Item = Flag>) -> FlagSet {
+    let mut flags = flags.into_iter().collect::<Vec<_>>();
+    flags.sort_unstable();
+    flags.dedup();
+    flags.into_boxed_slice()
 }
 
 fn unicode_flag_tokens(value: &str) -> Option<Vec<&str>> {
@@ -5071,6 +5299,41 @@ mod tests {
 
     const AFFIXES: &str =
         "SET UTF-8\nFLAG UTF-8\nPFX A Y 1\nPFX A 0 un .\nSFX B Y 1\nSFX B y ies [^aeiou]y\n";
+
+    #[test]
+    fn runtime_flags_use_one_compact_machine_word() {
+        assert_eq!(std::mem::size_of::<super::Flag>(), 8);
+    }
+
+    #[test]
+    fn compact_text_flag_order_matches_serialized_text_order() {
+        let mut flags = ["B", "A\u{FE0F}", "Aa", "A", "Ab", "é", "😀"]
+            .map(|flag| super::encode_text_flag(flag).expect("test flag is bounded"));
+        flags.sort_unstable();
+        let decoded =
+            flags.map(|flag| super::decode_text_flag(flag).expect("encoded flag decodes"));
+
+        assert_eq!(decoded, ["A", "Aa", "Ab", "A\u{FE0F}", "B", "é", "😀"]);
+    }
+
+    #[test]
+    fn affix_edge_index_keeps_empty_and_matching_adds() {
+        let result = import(
+            "edges.aff",
+            "PFX A Y 3\nPFX A 0 re .\nPFX A 0 un .\nPFX A 0 0 .\nSFX B Y 2\nSFX B 0 ing .\nSFX B 0 ed .\n",
+            "edges.dic",
+            "1\ndo/AB\n",
+            ImportMode::Strict,
+        )
+        .expect("the edge-index fixture imports");
+        let adds = result
+            .dictionary()
+            .candidate_affix_rules("redoing")
+            .map(|rule| rule.add.as_ref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(adds, ["", "re", "ing"]);
+    }
 
     #[test]
     fn imports_utf8_stems_and_evaluates_affixes_lazily() {

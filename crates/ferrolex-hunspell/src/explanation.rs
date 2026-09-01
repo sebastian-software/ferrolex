@@ -237,8 +237,8 @@ pub enum RejectionReason {
     NoDerivation,
 }
 
-struct TracedFormState {
-    state: FormState,
+struct TracedFormState<'source> {
+    state: FormState<'source>,
     rules: Vec<AppliedAffix>,
 }
 
@@ -315,7 +315,7 @@ impl HunspellDictionary {
     }
 
     fn explain_single_affix(&self, word: &str, allow_keep_case: bool) -> Option<AcceptanceKind> {
-        for rule in self.prefixes.iter().chain(&self.suffixes) {
+        for rule in self.candidate_affix_rules(word) {
             if !rule.could_generate(word) {
                 continue;
             }
@@ -324,17 +324,13 @@ impl HunspellDictionary {
             };
             if let Some(lexeme) = self.lexemes_for_stem(&stem).find(|lexeme| {
                 !self.is_forbidden(&lexeme.flags)
-                    && lexeme.flags.contains(&rule.flag)
+                    && super::has_flag(&lexeme.flags, rule.flag)
                     && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
-                    && self.is_accepted_state(&FormState::new(lexeme).apply(
-                        rule,
-                        word.to_owned(),
-                        &self.special_flags,
-                    ))
+                    && self.is_accepted_single_affix(lexeme, rule)
             }) {
                 return Some(AcceptanceKind::Affixed {
                     stem: lexeme.stem.to_string(),
-                    rules: vec![applied_affix(rule)],
+                    rules: vec![applied_affix(rule, self.flag_mode)],
                 });
             }
         }
@@ -390,13 +386,13 @@ impl HunspellDictionary {
         None
     }
 
-    fn expand_traced_rules(
-        &self,
-        traced: &TracedFormState,
+    fn expand_traced_rules<'source>(
+        &'source self,
+        traced: &TracedFormState<'source>,
         kind: AffixKind,
-        rules: &[AffixRule],
+        rules: &'source [AffixRule],
         rule_indices_by_flag: &std::collections::BTreeMap<super::Flag, Vec<usize>>,
-        states: &mut Vec<TracedFormState>,
+        states: &mut Vec<TracedFormState<'source>>,
         derivations: &mut usize,
     ) -> bool {
         for flag in traced.state.flags_for(kind) {
@@ -414,7 +410,7 @@ impl HunspellDictionary {
                     }
                     *derivations += 1;
                     let mut path = traced.rules.clone();
-                    path.push(applied_affix(rule));
+                    path.push(applied_affix(rule, self.flag_mode));
                     states.push(TracedFormState {
                         state: traced.state.apply(rule, form, &self.special_flags),
                         rules: path,
@@ -540,7 +536,7 @@ impl HunspellDictionary {
             let Some(lexeme) = self.lexemes_for_stem(candidate).find(|lexeme| {
                 !self.is_forbidden(&lexeme.flags)
                     && (is_final || !self.is_compound_forbidden(&lexeme.flags))
-                    && lexeme.flags.contains(required_flag)
+                    && super::has_flag(&lexeme.flags, *required_flag)
                     && (allow_keep_case || !self.is_keep_case(&lexeme.flags))
             }) else {
                 continue;
@@ -637,7 +633,7 @@ impl HunspellDictionary {
     }
 }
 
-fn applied_affix(rule: &AffixRule) -> AppliedAffix {
+fn applied_affix(rule: &AffixRule, flag_mode: super::FlagMode) -> AppliedAffix {
     AppliedAffix {
         kind: match rule.kind {
             AffixKind::Prefix => AppliedAffixKind::Prefix,
@@ -645,13 +641,22 @@ fn applied_affix(rule: &AffixRule) -> AppliedAffix {
         },
         strip: rule.strip.to_string(),
         add: rule.add.to_string(),
-        continuation_flags: rule.continuation_flags.iter().map(flag_label).collect(),
+        continuation_flags: rule
+            .continuation_flags
+            .iter()
+            .copied()
+            .map(|flag| flag_label(flag, flag_mode))
+            .collect(),
     }
 }
 
-fn flag_label(flag: &Flag) -> String {
-    match flag {
-        Flag::Numeric(value) => value.to_string(),
-        Flag::Text(value) => value.to_string(),
+fn flag_label(flag: Flag, flag_mode: super::FlagMode) -> String {
+    match flag_mode {
+        super::FlagMode::Numeric => u32::try_from(flag.0)
+            .expect("validated numeric flags fit in a u32")
+            .to_string(),
+        super::FlagMode::Unicode | super::FlagMode::Long => {
+            super::decode_text_flag(flag.0).expect("validated text flags contain Unicode scalars")
+        }
     }
 }

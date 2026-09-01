@@ -15,14 +15,15 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    AffixKind, AffixRule, BreakPattern, CaseLanguage, CompoundConfig, CompoundPattern,
-    CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode,
-    HunspellDictionary, InputConversion, Lexeme, Morphology, MorphologyId, MorphologyTable,
-    SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS, MAX_CHARACTER_MAPS, MAX_COMPOUND_PATTERNS,
-    MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_COMPOUND_RULE_EXPANSIONS,
-    MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS, MAX_CONDITION_ATOMS,
-    MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES,
-    MAX_MORPHOLOGY_FIELDS_PER_RECORD, MAX_MORPHOLOGY_STRINGS, MAX_REPLACEMENT_RULES,
+    decode_text_flag, encode_text_flag, AffixKind, AffixRule, BreakPattern, CaseLanguage,
+    CompoundConfig, CompoundPattern, CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom,
+    Flag, FlagMode, FlagSet, HunspellDictionary, InputConversion, Lexeme, Morphology, MorphologyId,
+    MorphologyTable, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS, MAX_CHARACTER_MAPS,
+    MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
+    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS,
+    MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS,
+    MAX_LINE_BYTES, MAX_MORPHOLOGY_FIELDS_PER_RECORD, MAX_MORPHOLOGY_STRINGS,
+    MAX_REPLACEMENT_RULES,
 };
 use ferrolex_suggest::ReplacementRule;
 
@@ -302,7 +303,7 @@ pub fn compile_runtime_cache(
         for pattern in &rule.patterns {
             write_count(&mut output, pattern.len(), "compound rule component count")?;
             for flag in pattern {
-                write_flag(&mut output, flag, dictionary.flag_mode)?;
+                write_flag(&mut output, *flag, dictionary.flag_mode)?;
             }
         }
     }
@@ -645,17 +646,16 @@ fn validate_dictionary(
         validate_flags(&lexeme.flags, dictionary.flag_mode, error)?;
         validate_morphology(&lexeme.morphology, &dictionary.morphology, error)?;
     }
-    for (stem, indices) in &dictionary.stem_indices {
-        if indices.is_empty()
-            || indices
-                .iter()
-                .any(|index| match dictionary.lexemes.get(*index) {
-                    Some(lexeme) => lexeme.stem != *stem,
-                    None => true,
-                })
-        {
-            return Err(error.error("stem index does not match lexemes"));
-        }
+    let mut stored_unique_stems = dictionary.unique_stem_indices.iter();
+    let indices_match = dictionary
+        .lexemes
+        .iter()
+        .enumerate()
+        .filter(|(index, lexeme)| *index == 0 || dictionary.lexemes[*index - 1].stem != lexeme.stem)
+        .all(|(index, _)| stored_unique_stems.next().copied() == u32::try_from(index).ok())
+        && stored_unique_stems.next().is_none();
+    if !indices_match {
+        return Err(error.error("stem index does not match lexemes"));
     }
 
     let rule_count = dictionary
@@ -790,7 +790,7 @@ fn validate_dictionary(
                 return Err(error.error("compound rule has an invalid component count"));
             }
             for flag in pattern {
-                validate_flag(flag, dictionary.flag_mode, error)?;
+                validate_flag(*flag, dictionary.flag_mode, error)?;
             }
         }
     }
@@ -870,7 +870,7 @@ fn validate_rule(
     flag_mode: FlagMode,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
-    validate_flag(&rule.flag, flag_mode, error)?;
+    validate_flag(rule.flag, flag_mode, error)?;
     if rule.strip.len() > MAX_LINE_BYTES || rule.add.len() > MAX_LINE_BYTES {
         return Err(error.error("affix rule text exceeds importer line limit"));
     }
@@ -905,13 +905,13 @@ fn validate_optional_flag(
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
     if let Some(flag) = flag {
-        validate_flag(flag, flag_mode, error)?;
+        validate_flag(*flag, flag_mode, error)?;
     }
     Ok(())
 }
 
 fn validate_flags(
-    flags: &BTreeSet<Flag>,
+    flags: &[Flag],
     flag_mode: FlagMode,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
@@ -919,13 +919,13 @@ fn validate_flags(
         return Err(error.error("flag count exceeds importer limit"));
     }
     for flag in flags {
-        validate_flag(flag, flag_mode, error)?;
+        validate_flag(*flag, flag_mode, error)?;
     }
     Ok(())
 }
 
 fn validate_flag(
-    flag: &Flag,
+    flag: Flag,
     flag_mode: FlagMode,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
@@ -967,7 +967,7 @@ fn write_rules(
             AffixKind::Prefix => 0,
             AffixKind::Suffix => 1,
         });
-        write_flag(output, &rule.flag, flag_mode)?;
+        write_flag(output, rule.flag, flag_mode)?;
         write_string(output, &rule.strip, "affix strip")?;
         write_string(output, &rule.add, "affix add")?;
         write_condition(output, &rule.condition)?;
@@ -1000,7 +1000,7 @@ fn write_optional_flag(
 ) -> Result<(), RuntimeCacheError> {
     if let Some(flag) = flag {
         output.push(1);
-        write_flag(output, flag, flag_mode)
+        write_flag(output, *flag, flag_mode)
     } else {
         output.push(0);
         Ok(())
@@ -1009,12 +1009,12 @@ fn write_optional_flag(
 
 fn write_flags(
     output: &mut Vec<u8>,
-    flags: &BTreeSet<Flag>,
+    flags: &[Flag],
     flag_mode: FlagMode,
 ) -> Result<(), RuntimeCacheError> {
     write_count(output, flags.len(), "flag count")?;
     for flag in flags {
-        write_flag(output, flag, flag_mode)?;
+        write_flag(output, *flag, flag_mode)?;
     }
     Ok(())
 }
@@ -1054,20 +1054,28 @@ fn write_morphology(
 
 fn write_flag(
     output: &mut Vec<u8>,
-    flag: &Flag,
+    flag: Flag,
     flag_mode: FlagMode,
 ) -> Result<(), RuntimeCacheError> {
-    match (flag, flag_mode) {
-        (Flag::Numeric(value), FlagMode::Numeric) => {
-            write_u32(output, *value);
+    match flag_mode {
+        FlagMode::Numeric => {
+            write_u32(
+                output,
+                u32::try_from(flag.0).map_err(|_| {
+                    RuntimeCacheError::InvalidDictionary(
+                        "numeric flag does not fit in the cache representation",
+                    )
+                })?,
+            );
             Ok(())
         }
-        (Flag::Text(value), mode) if mode != FlagMode::Numeric => {
-            write_string(output, value, "flag")
-        }
-        _ => Err(RuntimeCacheError::InvalidDictionary(
-            "flag does not match the dictionary FLAG mode",
-        )),
+        FlagMode::Unicode | FlagMode::Long => write_string(
+            output,
+            &decode_text_flag(flag.0).ok_or(RuntimeCacheError::InvalidDictionary(
+                "flag contains an invalid Unicode scalar",
+            ))?,
+            "flag",
+        ),
     }
 }
 
@@ -1664,20 +1672,20 @@ fn read_character_maps(reader: &mut Reader<'_>) -> Result<Vec<String>, RuntimeCa
     Ok(character_maps)
 }
 
-fn read_flags(
-    reader: &mut Reader<'_>,
-    flag_mode: FlagMode,
-) -> Result<BTreeSet<Flag>, RuntimeCacheError> {
+fn read_flags(reader: &mut Reader<'_>, flag_mode: FlagMode) -> Result<FlagSet, RuntimeCacheError> {
     let count = reader.count(MAX_FLAGS_PER_ENTRY, "flag count")?;
     reader.require_minimum_items(count, 5, "flags")?;
-    let mut flags = BTreeSet::new();
+    let mut flags = Vec::with_capacity(count);
     for _ in 0..count {
         let flag = reader.flag(flag_mode)?;
-        if !flags.insert(flag) {
-            return Err(RuntimeCacheError::InvalidArtifact("duplicate flag"));
+        if flags.last().is_some_and(|previous| previous >= &flag) {
+            return Err(RuntimeCacheError::InvalidArtifact(
+                "flags are not strictly sorted",
+            ));
         }
+        flags.push(flag);
     }
-    Ok(flags)
+    Ok(flags.into_boxed_slice())
 }
 
 fn read_condition(reader: &mut Reader<'_>) -> Result<Condition, RuntimeCacheError> {
@@ -1813,6 +1821,14 @@ impl<'a> Reader<'a> {
     }
 
     fn string(&mut self, maximum: usize, name: &'static str) -> Result<String, RuntimeCacheError> {
+        self.borrowed_string(maximum, name).map(str::to_owned)
+    }
+
+    fn borrowed_string(
+        &mut self,
+        maximum: usize,
+        name: &'static str,
+    ) -> Result<&'a str, RuntimeCacheError> {
         let length = self.count(maximum, name)?;
         let end = self
             .position
@@ -1825,21 +1841,24 @@ impl<'a> Reader<'a> {
         };
         self.position = end;
         std::str::from_utf8(bytes)
-            .map(str::to_owned)
             .map_err(|_| RuntimeCacheError::InvalidArtifact("string is not valid UTF-8"))
     }
 
     fn flag(&mut self, flag_mode: FlagMode) -> Result<Flag, RuntimeCacheError> {
         if flag_mode == FlagMode::Numeric {
-            return Ok(Flag::Numeric(self.u32()?));
+            return Ok(Flag(u64::from(self.u32()?)));
         }
-        let value = self.string(MAX_LINE_BYTES, "flag")?;
-        if flag_mode.flag_count(&value) != Some(1) {
+        let value = self.borrowed_string(MAX_LINE_BYTES, "flag")?;
+        if flag_mode.flag_count(value) != Some(1) {
             return Err(RuntimeCacheError::InvalidArtifact(
                 "flag does not match the dictionary FLAG mode",
             ));
         }
-        Ok(Flag::Text(Box::<str>::from(value)))
+        encode_text_flag(value)
+            .map(Flag)
+            .ok_or(RuntimeCacheError::InvalidArtifact(
+                "flag contains too many Unicode scalars",
+            ))
     }
 
     fn character(&mut self) -> Result<char, RuntimeCacheError> {
