@@ -13,7 +13,8 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ferrolex_code::{
-    Analyzer, AnalyzerConfigError, CommentSyntax, Document, ProjectConfig, ProjectConfigError,
+    Analyzer, AnalyzerConfigError, CommentSyntax, DirectiveProblem, Document, ProjectConfig,
+    ProjectConfigError,
 };
 use ferrolex_compiler::{
     compile_frequency_word_list, compile_words, inspect_compiled_artifact, CompileError,
@@ -36,18 +37,19 @@ use ferrolex_hunspell::{
 };
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
+use serde_json::json;
 
-const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n       ferrolex suggest [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
+const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n       ferrolex suggest [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--format <text|json>] [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate [--format <text|json>] --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 const EXIT_CODES: &str =
     "\nExit status: 0 success, 1 finding, 2 usage error, 3 operational failure.";
-const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n\nChecks one word or every natural-language word in one or more UTF-8 inputs.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH|->      Check a UTF-8 file, or stdin with `-` (repeatable)\n  --                   End options, including before a word beginning with `-`\n\nAfter the first `--file`, positional arguments are additional file paths.\n\nExamples:\n  ferrolex check --dictionary words.txt -- --compound\n  printf 'some text' | ferrolex check --dictionary words.txt --file -";
-const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
+const HELP_CHECK: &str = "Usage: ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n\nChecks one word or every natural-language word in one or more UTF-8 inputs.\nAutomatically includes workspace and global user dictionaries when present.\n  --format <text|json>  Human-readable text or JSON Lines output (default: text)\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH|->      Check a UTF-8 file, or stdin with `-` (repeatable)\n  --                   End options, including before a word beginning with `-`\n\nAfter the first `--file`, positional arguments are additional file paths.\n\nExamples:\n  ferrolex check --dictionary words.txt -- --compound\n  printf 'some text' | ferrolex check --format json --dictionary words.txt --file -";
+const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--format <text|json>] [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\nAutomatically includes workspace and global user dictionaries when present.\n  --format <text|json>          Human-readable text or JSON Lines output (default: text)\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --format json --dictionary words.txt ferolex";
 const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
-const HELP_ANALYZE: &str = "Usage: ferrolex analyze [--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>] [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
+const HELP_ANALYZE: &str = "Usage: ferrolex analyze [--format <text|json>] [--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>] [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\nAutomatically includes workspace and global user dictionaries when present.\n  --format <text|json>   Human-readable text or JSON Lines output (default: text)\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Include suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --format json --dictionary words.txt src";
 const HELP_COMPILE: &str = "Usage: ferrolex compile (--dictionary <PATH> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n\nCompiles a plain word list or Hunspell pair to a native artifact.\n  -o <ARTIFACT>  Output artifact path\n\nExample: ferrolex compile --dictionary words.txt -o words.flexdic";
 const HELP_INSPECT: &str = "Usage: ferrolex inspect <ARTIFACT>\n\nPrints native artifact metadata.\n\nExample: ferrolex inspect words.flexdic";
-const HELP_VALIDATE: &str = "Usage: ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n\nExample: ferrolex validate --strict dictionary.aff dictionary.dic";
+const HELP_VALIDATE: &str = "Usage: ferrolex validate [--format <text|json>] [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate [--format <text|json>] --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n  --format <text|json>  Human-readable text or JSON Lines output (default: text)\n\nExample: ferrolex validate --format json --strict dictionary.aff dictionary.dic";
 const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | install | add-word> [OPTIONS]\n\nLists reviewed dictionaries, obtains a pinned source, installs a runtime cache, or records a user word.\nUser words are automatically included by check, suggest, and analyze.\n  fetch/install <LOCALE> --cache <PATH>  Use an explicit cache directory\n  add-word [--workspace <PATH> | --global] <WORD>\n\nExample: ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
@@ -234,13 +236,27 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
             .suggest(&command.word)
     };
     for suggestion in result.suggestions() {
-        println!(
-            "suggestion: {} (distance {})",
-            source.normalize_suggestion_output(suggestion.word()),
-            suggestion.distance()
-        );
+        let word = source.normalize_suggestion_output(suggestion.word());
+        match command.output_format {
+            OutputFormat::Text => {
+                println!("suggestion: {word} (distance {})", suggestion.distance());
+            }
+            OutputFormat::Json => print_json(json!({
+                "type": "suggestion",
+                "word": word,
+                "distance": suggestion.distance(),
+            })),
+        }
     }
-    if result.completeness() != Completeness::Complete {
+    if command.output_format == OutputFormat::Json {
+        print_json(json!({
+            "type": "suggestion-summary",
+            "word": command.word,
+            "completeness": completeness_code(result.completeness()),
+            "complete": result.completeness() == Completeness::Complete,
+            "hint": incomplete_suggestion_hint(result.completeness(), config),
+        }));
+    } else if result.completeness() != Completeness::Complete {
         eprintln!(
             "suggestion search incomplete: {}",
             completeness_label(result.completeness())
@@ -252,6 +268,15 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
         }
     }
     Ok(RunOutcome::Success)
+}
+
+const fn completeness_code(completeness: Completeness) -> &'static str {
+    match completeness {
+        Completeness::Complete => "complete",
+        Completeness::CandidateLimitReached => "candidate-limit",
+        Completeness::EditBudgetReached => "edit-budget",
+        Completeness::QueryTooLong => "query-too-long",
+    }
 }
 
 fn incomplete_suggestion_hint(completeness: Completeness, config: SuggestConfig) -> Option<String> {
@@ -456,8 +481,8 @@ fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
     )?;
 
     match &command.target {
-        CheckTarget::Word(word) => Ok(check_word(&checker, word)),
-        CheckTarget::Inputs(inputs) => check_inputs(&checker, inputs),
+        CheckTarget::Word(word) => Ok(check_word(&checker, word, command.output_format)),
+        CheckTarget::Inputs(inputs) => check_inputs(&checker, inputs, command.output_format),
     }
 }
 
@@ -931,23 +956,39 @@ fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDiction
     })
 }
 
-fn check_word(checker: &Checker, word: &str) -> RunOutcome {
-    if checker.contains(word) {
+fn check_word(checker: &Checker, word: &str, output_format: OutputFormat) -> RunOutcome {
+    let accepted = checker.contains(word);
+    if output_format == OutputFormat::Json {
+        print_json(json!({
+            "type": "word",
+            "command": "check",
+            "word": word,
+            "status": if accepted { "accepted" } else { "misspelled" },
+        }));
+    } else if accepted {
         println!("accepted: {word}");
-        RunOutcome::Success
     } else {
         println!("misspelled: {word}");
+    }
+
+    if accepted {
+        RunOutcome::Success
+    } else {
         RunOutcome::Misspelled
     }
 }
 
-fn check_inputs(checker: &Checker, inputs: &[CheckInput]) -> Result<RunOutcome, CliError> {
+fn check_inputs(
+    checker: &Checker,
+    inputs: &[CheckInput],
+    output_format: OutputFormat,
+) -> Result<RunOutcome, CliError> {
     let mut outcome = RunOutcome::Success;
 
     for input in inputs {
         let input_outcome = match input {
-            CheckInput::File(path) => check_file(checker, path)?,
-            CheckInput::Stdin => check_stdin(checker)?,
+            CheckInput::File(path) => check_file(checker, path, output_format)?,
+            CheckInput::Stdin => check_stdin(checker, output_format)?,
         };
         if input_outcome == RunOutcome::Misspelled {
             outcome = RunOutcome::Misspelled;
@@ -957,15 +998,19 @@ fn check_inputs(checker: &Checker, inputs: &[CheckInput]) -> Result<RunOutcome, 
     Ok(outcome)
 }
 
-fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
+fn check_file(
+    checker: &Checker,
+    path: &Path,
+    output_format: OutputFormat,
+) -> Result<RunOutcome, CliError> {
     let text = fs::read_to_string(path).map_err(|source| CliError::ReadInput {
         path: path.to_path_buf(),
         source,
     })?;
-    Ok(check_source(checker, path, &text))
+    Ok(check_source(checker, path, &text, output_format))
 }
 
-fn check_stdin(checker: &Checker) -> Result<RunOutcome, CliError> {
+fn check_stdin(checker: &Checker, output_format: OutputFormat) -> Result<RunOutcome, CliError> {
     let path = Path::new("-");
     let mut text = String::new();
     io::stdin()
@@ -974,15 +1019,28 @@ fn check_stdin(checker: &Checker) -> Result<RunOutcome, CliError> {
             path: path.to_path_buf(),
             source,
         })?;
-    Ok(check_source(checker, path, &text))
+    Ok(check_source(checker, path, &text, output_format))
 }
 
-fn check_source(checker: &Checker, path: &Path, text: &str) -> RunOutcome {
+fn check_source(
+    checker: &Checker,
+    path: &Path,
+    text: &str,
+    output_format: OutputFormat,
+) -> RunOutcome {
     let mut misspelled = false;
 
     let line_index = LineIndex::new(text);
     for issue in check_text(checker, text) {
-        print_finding(path, text, &line_index, issue.range().start, issue.word());
+        print_finding(
+            "check",
+            output_format,
+            path,
+            text,
+            &line_index,
+            issue.range().start,
+            issue.word(),
+        );
         misspelled = true;
     }
 
@@ -1067,24 +1125,24 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
         );
         let analysis = analyzer.check(&document);
         for finding in analysis.findings() {
-            print_finding(
+            print_analysis_finding(
+                command.output_format,
                 &path,
                 &source,
                 &line_index,
-                finding.range().start,
-                finding.word(),
+                finding,
+                &dictionary,
+                command.suggest,
             );
-            if command.suggest {
-                print_analysis_suggestions(&path, &source, &line_index, finding, &dictionary);
-            }
             has_diagnostic = true;
         }
         for diagnostic in analysis.directive_diagnostics() {
-            let (line, column) = line_index.line_and_column(&source, diagnostic.range().start);
-            println!(
-                "{}:{line}:{column}: malformed directive: {:?}",
-                path.display(),
-                diagnostic.problem()
+            print_directive_diagnostic(
+                command.output_format,
+                &path,
+                &source,
+                &line_index,
+                diagnostic,
             );
             has_diagnostic = true;
         }
@@ -1094,6 +1152,32 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     } else {
         RunOutcome::Success
     })
+}
+
+fn print_directive_diagnostic(
+    output_format: OutputFormat,
+    path: &Path,
+    source: &str,
+    line_index: &LineIndex,
+    diagnostic: &ferrolex_code::DirectiveDiagnostic,
+) {
+    let (line, column) = line_index.line_and_column(source, diagnostic.range().start);
+    match output_format {
+        OutputFormat::Text => println!(
+            "{}:{line}:{column}: malformed directive: {:?}",
+            path.display(),
+            diagnostic.problem()
+        ),
+        OutputFormat::Json => print_json(json!({
+            "type": "finding",
+            "kind": "directive",
+            "command": "analyze",
+            "path": path.display().to_string(),
+            "line": line,
+            "column": column,
+            "problem": directive_problem_code(diagnostic.problem()),
+        })),
+    }
 }
 
 fn read_analysis_source(path: &Path) -> Result<Option<String>, CliError> {
@@ -1238,30 +1322,86 @@ fn glob_starstar_directory(pattern: &[u8], rest: &[u8], path: &[u8]) -> bool {
     glob_starstar(pattern, rest, path)
 }
 
-fn print_analysis_suggestions(
+fn print_analysis_finding(
+    output_format: OutputFormat,
     path: &Path,
     source: &str,
     line_index: &LineIndex,
     finding: &ferrolex_code::Finding<'_>,
     dictionary: &AnalysisDictionary,
+    include_suggestions: bool,
 ) {
     let (line, column) = line_index.line_and_column(source, finding.range().start);
+    let suggestions = if include_suggestions {
+        analysis_suggestions(finding, dictionary)
+    } else {
+        Vec::new()
+    };
+
+    match output_format {
+        OutputFormat::Text => {
+            print_finding(
+                "analyze",
+                OutputFormat::Text,
+                path,
+                source,
+                line_index,
+                finding.range().start,
+                finding.word(),
+            );
+            for (replacement, distance) in suggestions {
+                println!(
+                    "{}:{line}:{column}: suggestion: {replacement} (distance {distance})",
+                    path.display()
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let suggestions = suggestions
+                .into_iter()
+                .map(|(word, distance)| json!({ "word": word, "distance": distance }))
+                .collect::<Vec<_>>();
+            print_json(json!({
+                "type": "finding",
+                "kind": "spelling",
+                "command": "analyze",
+                "path": path.display().to_string(),
+                "line": line,
+                "column": column,
+                "word": finding.word(),
+                "suggestions": suggestions,
+            }));
+        }
+    }
+}
+
+fn analysis_suggestions(
+    finding: &ferrolex_code::Finding<'_>,
+    dictionary: &AnalysisDictionary,
+) -> Vec<(String, usize)> {
     let config = SuggestConfig {
         max_results: 3,
         ..SuggestConfig::default()
     };
-    for suggestion in Suggester::new(dictionary, config)
+    Suggester::new(dictionary, config)
         .suggest(finding.word())
         .suggestions()
-    {
-        let replacement = finding
-            .whole_identifier_suggestion(suggestion.word())
-            .unwrap_or_else(|| suggestion.word().to_owned());
-        println!(
-            "{}:{line}:{column}: suggestion: {replacement} (distance {})",
-            path.display(),
-            suggestion.distance()
-        );
+        .iter()
+        .map(|suggestion| {
+            let replacement = finding
+                .whole_identifier_suggestion(suggestion.word())
+                .unwrap_or_else(|| suggestion.word().to_owned());
+            (replacement, suggestion.distance())
+        })
+        .collect()
+}
+
+const fn directive_problem_code(problem: DirectiveProblem) -> &'static str {
+    match problem {
+        DirectiveProblem::MissingIgnoredWords => "missing-ignored-words",
+        DirectiveProblem::UnexpectedArguments => "unexpected-arguments",
+        DirectiveProblem::UnknownDirective => "unknown-directive",
+        _ => "unsupported",
     }
 }
 
@@ -1271,8 +1411,12 @@ fn validate(command: &ValidateCommand) -> Result<RunOutcome, CliError> {
             strict,
             aff_path,
             dic_path,
-        } => validate_hunspell(*strict, aff_path, dic_path, None),
-        ValidateCommand::Compiled { path } => validate_compiled(path),
+            output_format,
+        } => validate_hunspell(*strict, aff_path, dic_path, None, *output_format),
+        ValidateCommand::Compiled {
+            path,
+            output_format,
+        } => validate_compiled(path, *output_format),
     }
 }
 
@@ -1281,9 +1425,10 @@ fn validate_hunspell(
     aff_path: &Path,
     dic_path: &Path,
     encodings: Option<ByteImportEncodings>,
+    output_format: OutputFormat,
 ) -> Result<RunOutcome, CliError> {
     let (import, _) = import_hunspell_files(aff_path, dic_path, encodings, strict)?;
-    Ok(report_hunspell_import(import, dic_path))
+    Ok(report_hunspell_import(import, dic_path, output_format))
 }
 
 fn install_hunspell_runtime_cache(
@@ -1375,6 +1520,7 @@ fn import_hunspell_source_bytes(
 fn report_hunspell_import(
     import: Result<ImportResult, ImportError>,
     dic_path: &Path,
+    output_format: OutputFormat,
 ) -> RunOutcome {
     match import {
         Ok(result) => {
@@ -1383,21 +1529,35 @@ fn report_hunspell_import(
                 .iter()
                 .any(|diagnostic| diagnostic.severity() == Severity::Error);
             for diagnostic in result.diagnostics() {
-                print_import_diagnostic(diagnostic);
+                print_import_diagnostic_with_format(diagnostic, output_format);
             }
             if has_errors {
+                print_validation_result(dic_path, false, output_format);
                 RunOutcome::Misspelled
             } else {
-                println!("valid: {}", dic_path.display());
+                print_validation_result(dic_path, true, output_format);
                 RunOutcome::Success
             }
         }
         Err(error) => {
             for diagnostic in error.diagnostics() {
-                print_import_diagnostic(diagnostic);
+                print_import_diagnostic_with_format(diagnostic, output_format);
             }
+            print_validation_result(dic_path, false, output_format);
             RunOutcome::Misspelled
         }
+    }
+}
+
+fn print_validation_result(path: &Path, valid: bool, output_format: OutputFormat) {
+    match output_format {
+        OutputFormat::Text if valid => println!("valid: {}", path.display()),
+        OutputFormat::Text => {}
+        OutputFormat::Json => print_json(json!({
+            "type": "validation",
+            "path": path.display().to_string(),
+            "status": if valid { "valid" } else { "invalid" },
+        })),
     }
 }
 
@@ -1439,7 +1599,7 @@ fn atomic_write_runtime_cache(path: &Path, bytes: &[u8]) -> Result<(), CliError>
     result
 }
 
-fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
+fn validate_compiled(path: &Path, output_format: OutputFormat) -> Result<RunOutcome, CliError> {
     match load_artifact(path)? {
         ArtifactDictionary::Exact(dictionary) => {
             dictionary
@@ -1451,7 +1611,7 @@ fn validate_compiled(path: &Path) -> Result<RunOutcome, CliError> {
         }
         ArtifactDictionary::Hunspell(_) => {}
     }
-    println!("valid: {}", path.display());
+    print_validation_result(path, true, output_format);
     Ok(RunOutcome::Success)
 }
 
@@ -1525,6 +1685,28 @@ fn print_import_diagnostic(diagnostic: &ImportDiagnostic) {
     println!("{}", render_import_diagnostic(diagnostic));
 }
 
+fn print_import_diagnostic_with_format(diagnostic: &ImportDiagnostic, output_format: OutputFormat) {
+    match output_format {
+        OutputFormat::Text => print_import_diagnostic(diagnostic),
+        OutputFormat::Json => print_json(json!({
+            "type": "diagnostic",
+            "command": "validate",
+            "source": diagnostic.source(),
+            "line": diagnostic.line(),
+            "directive": diagnostic.directive(),
+            "severity": severity_code(diagnostic.severity()),
+            "message": diagnostic.message(),
+        })),
+    }
+}
+
+const fn severity_code(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+    }
+}
+
 fn print_import_diagnostic_to_stderr(diagnostic: &ImportDiagnostic) {
     eprintln!("{}", render_import_diagnostic(diagnostic));
 }
@@ -1544,6 +1726,8 @@ fn render_import_diagnostic(diagnostic: &ImportDiagnostic) -> String {
 }
 
 fn print_finding(
+    command: &str,
+    output_format: OutputFormat,
     path: &Path,
     source: &str,
     line_index: &LineIndex,
@@ -1551,7 +1735,24 @@ fn print_finding(
     word: &str,
 ) {
     let (line, column) = line_index.line_and_column(source, byte_offset);
-    println!("{}:{line}:{column}: misspelled: {word}", path.display());
+    match output_format {
+        OutputFormat::Text => {
+            println!("{}:{line}:{column}: misspelled: {word}", path.display());
+        }
+        OutputFormat::Json => print_json(json!({
+            "type": "finding",
+            "kind": "spelling",
+            "command": command,
+            "path": path.display().to_string(),
+            "line": line,
+            "column": column,
+            "word": word,
+        })),
+    }
+}
+
+fn print_json(value: impl fmt::Display) {
+    println!("{value}");
 }
 
 struct LineIndex {
@@ -1581,6 +1782,13 @@ enum RunOutcome {
     Success,
     Misspelled,
     Failure,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum OutputFormat {
+    #[default]
+    Text,
+    Json,
 }
 
 impl RunOutcome {
@@ -1639,6 +1847,7 @@ fn value_option(argument: &str) -> bool {
             | "--compiled"
             | "--hunspell"
             | "--file"
+            | "--format"
             | "--max-results"
             | "--max-edit-distance"
             | "--max-candidates"
@@ -1745,6 +1954,7 @@ fn parse_suggest_arguments(
     let mut max_edit_distance = None;
     let mut max_candidates = None;
     let mut max_edit_cells = None;
+    let mut output_format = None;
     let mut word = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -1756,6 +1966,9 @@ fn parse_suggest_arguments(
                 hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
+            "--format" => {
+                set_once_output_format(&mut output_format, &mut arguments, "--format")?;
+            }
             "--max-results" => {
                 set_once_usize(&mut max_results, &mut arguments, "--max-results", true)?;
             }
@@ -1805,6 +2018,7 @@ fn parse_suggest_arguments(
         max_edit_distance,
         max_candidates,
         max_edit_cells,
+        output_format: output_format.unwrap_or_default(),
         word,
     }))
 }
@@ -1956,6 +2170,7 @@ fn parse_validate_arguments(
 ) -> Result<Command, CliError> {
     let mut strict = false;
     let mut compiled_path = None;
+    let mut output_format = None;
     let mut paths = Vec::new();
     let mut arguments = arguments.into_iter();
 
@@ -1970,6 +2185,9 @@ fn parse_validate_arguments(
                     ));
                 }
             }
+            "--format" => {
+                set_once_output_format(&mut output_format, &mut arguments, "--format")?;
+            }
             "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
@@ -1983,7 +2201,10 @@ fn parse_validate_arguments(
                 "`validate --compiled` accepts only one compiled artifact path".to_owned(),
             ));
         }
-        return Ok(Command::Validate(ValidateCommand::Compiled { path }));
+        return Ok(Command::Validate(ValidateCommand::Compiled {
+            path,
+            output_format: output_format.unwrap_or_default(),
+        }));
     }
     if paths.len() != 2 {
         return Err(CliError::Usage(
@@ -1995,6 +2216,7 @@ fn parse_validate_arguments(
         strict,
         aff_path: paths.remove(0),
         dic_path: paths.remove(0),
+        output_format: output_format.unwrap_or_default(),
     }))
 }
 
@@ -2066,6 +2288,7 @@ fn parse_analyze_arguments(
     let mut include_patterns = Vec::new();
     let mut exclude_patterns = Vec::new();
     let mut suggest = false;
+    let mut output_format = None;
     let mut path = None;
     let mut arguments = arguments.into_iter();
 
@@ -2079,6 +2302,9 @@ fn parse_analyze_arguments(
                 hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
+            "--format" => {
+                set_once_output_format(&mut output_format, &mut arguments, "--format")?;
+            }
             "--config" => set_once_path(&mut config_path, &mut arguments, "--config")?,
             "--include" => include_patterns.push(required_string(&mut arguments, "--include")?),
             "--exclude" => exclude_patterns.push(required_string(&mut arguments, "--exclude")?),
@@ -2125,6 +2351,7 @@ fn parse_analyze_arguments(
         include_patterns,
         exclude_patterns,
         suggest,
+        output_format: output_format.unwrap_or_default(),
         path,
     }))
 }
@@ -2168,6 +2395,7 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
     let mut compiled_paths = Vec::new();
     let mut hunspell_affix_paths = Vec::new();
     let mut target = None;
+    let mut output_format = None;
     let mut arguments = arguments.into_iter();
     let mut options_ended = false;
 
@@ -2185,6 +2413,9 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
                 hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
+            "--format" => {
+                set_once_output_format(&mut output_format, &mut arguments, "--format")?;
+            }
             "--file" => {
                 push_check_input(&mut target, required_check_input(&mut arguments)?)?;
             }
@@ -2204,6 +2435,7 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
         dictionary_paths,
         compiled_paths,
         hunspell_affix_paths,
+        output_format: output_format.unwrap_or_default(),
         target,
     }))
 }
@@ -2261,6 +2493,7 @@ fn expand_long_option_values(arguments: impl IntoIterator<Item = String>) -> Vec
                     | "--hunspell"
                     | "--compiled"
                     | "--file"
+                    | "--format"
                     | "--max-results"
                     | "--max-edit-distance"
                     | "--max-candidates"
@@ -2292,6 +2525,29 @@ fn required_string(
         return Err(CliError::Usage(format!("`{option}` requires a value")));
     }
     Ok(value)
+}
+
+fn set_once_output_format(
+    destination: &mut Option<OutputFormat>,
+    arguments: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<(), CliError> {
+    let value = required_string(arguments, option)?;
+    let format = match value.as_str() {
+        "text" => OutputFormat::Text,
+        "json" => OutputFormat::Json,
+        _ => {
+            return Err(CliError::Usage(format!(
+                "`{option}` supports only `text` or `json`"
+            )))
+        }
+    };
+    if destination.replace(format).is_some() {
+        return Err(CliError::Usage(format!(
+            "`{option}` may only be supplied once"
+        )));
+    }
+    Ok(())
 }
 
 fn set_once_path(
@@ -2389,6 +2645,7 @@ struct CheckCommand {
     dictionary_paths: Vec<PathBuf>,
     compiled_paths: Vec<PathBuf>,
     hunspell_affix_paths: Vec<PathBuf>,
+    output_format: OutputFormat,
     target: CheckTarget,
 }
 
@@ -2401,6 +2658,7 @@ struct SuggestCommand {
     max_edit_distance: Option<usize>,
     max_candidates: Option<usize>,
     max_edit_cells: Option<usize>,
+    output_format: OutputFormat,
     word: String,
 }
 
@@ -2432,6 +2690,7 @@ struct AnalyzeCommand {
     include_patterns: Vec<String>,
     exclude_patterns: Vec<String>,
     suggest: bool,
+    output_format: OutputFormat,
     path: PathBuf,
 }
 
@@ -2456,9 +2715,11 @@ enum ValidateCommand {
         strict: bool,
         aff_path: PathBuf,
         dic_path: PathBuf,
+        output_format: OutputFormat,
     },
     Compiled {
         path: PathBuf,
+        output_format: OutputFormat,
     },
 }
 
@@ -2737,8 +2998,9 @@ mod tests {
         parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
         runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource, AnalyzeCommand,
         CheckCommand, CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand,
-        CompileInput, DictionaryCommand, ExplainCommand, LineIndex, Normalization, RunOutcome,
-        SourceEncoding, SuggestCommand, SuggestConfig, ValidateCommand, WordList, HELP_CHECK,
+        CompileInput, DictionaryCommand, ExplainCommand, LineIndex, Normalization, OutputFormat,
+        RunOutcome, SourceEncoding, SuggestCommand, SuggestConfig, ValidateCommand, WordList,
+        HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -2765,6 +3027,7 @@ mod tests {
                 dictionary_paths: vec![PathBuf::from("en.txt"), PathBuf::from("technical.txt")],
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
+                output_format: OutputFormat::Text,
                 target: CheckTarget::Word("OAuth".to_owned()),
             })
         );
@@ -2793,6 +3056,7 @@ mod tests {
                 dictionary_paths: vec![PathBuf::from("words.txt")],
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
+                output_format: OutputFormat::Text,
                 target: CheckTarget::Inputs(vec![
                     CheckInput::File(PathBuf::from("first.txt")),
                     CheckInput::Stdin,
@@ -2816,6 +3080,7 @@ mod tests {
                     dictionary_paths: vec![PathBuf::from("words.txt")],
                     compiled_paths: Vec::new(),
                     hunspell_affix_paths: Vec::new(),
+                    output_format: OutputFormat::Text,
                     target: CheckTarget::Word(word.to_owned()),
                 })
             );
@@ -2898,6 +3163,7 @@ mod tests {
                 dictionary_paths: Vec::new(),
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: Vec::new(),
+                output_format: OutputFormat::Text,
                 target: CheckTarget::Word("word".to_owned()),
             })
         );
@@ -2929,6 +3195,7 @@ mod tests {
                 "ferrolex",
                 "suggest",
                 "--dictionary=words.txt",
+                "--format=json",
                 "--max-results=4",
                 "word",
             ]
@@ -2946,6 +3213,7 @@ mod tests {
                 max_edit_distance: None,
                 max_candidates: None,
                 max_edit_cells: None,
+                output_format: OutputFormat::Json,
                 word: "word".to_owned(),
             })
         );
@@ -2956,6 +3224,22 @@ mod tests {
         for arguments in [
             ["ferrolex", "check", "--dictionary=", "word"].as_slice(),
             ["ferrolex", "dictionary", "add-word", "--workspace=", "word"].as_slice(),
+        ] {
+            assert!(matches!(
+                parse_arguments(arguments.iter().map(|argument| (*argument).to_owned())),
+                Err(CliError::Usage(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_or_repeated_output_formats() {
+        for arguments in [
+            ["ferrolex", "check", "--format", "yaml", "word"].as_slice(),
+            [
+                "ferrolex", "check", "--format", "json", "--format", "text", "word",
+            ]
+            .as_slice(),
         ] {
             assert!(matches!(
                 parse_arguments(arguments.iter().map(|argument| (*argument).to_owned())),
@@ -3002,6 +3286,7 @@ mod tests {
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: false,
+                output_format: OutputFormat::Text,
                 path: PathBuf::from("lib.rs"),
             })
         );
@@ -3033,6 +3318,7 @@ mod tests {
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: false,
+                output_format: OutputFormat::Text,
                 path: PathBuf::from("query.sql"),
             })
         );
@@ -3065,6 +3351,7 @@ mod tests {
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: false,
+                output_format: OutputFormat::Text,
                 path: PathBuf::from("query.sql"),
             })
         );
@@ -3098,6 +3385,7 @@ mod tests {
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: true,
+                output_format: OutputFormat::Text,
                 path: PathBuf::from("README.md"),
             })
         );
@@ -3130,6 +3418,7 @@ mod tests {
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: false,
+                output_format: OutputFormat::Text,
                 path: PathBuf::from("src/lib.rs"),
             })
         );
@@ -3214,6 +3503,7 @@ mod tests {
                 dictionary_paths: Vec::new(),
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff"), PathBuf::from("en.aff")],
+                output_format: OutputFormat::Text,
                 target: CheckTarget::Word("Wort".to_owned()),
             })
         );
@@ -3223,6 +3513,7 @@ mod tests {
                 dictionary_paths: Vec::new(),
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
+                output_format: OutputFormat::Text,
                 config_path: None,
                 comment_syntax: None,
                 include_patterns: Vec::new(),
@@ -3246,6 +3537,7 @@ mod tests {
                 strict: true,
                 aff_path: PathBuf::from("de.aff"),
                 dic_path: PathBuf::from("de.dic"),
+                output_format: OutputFormat::Text,
             })
         );
     }
@@ -3326,6 +3618,7 @@ mod tests {
                 max_edit_distance: None,
                 max_candidates: None,
                 max_edit_cells: None,
+                output_format: OutputFormat::Text,
                 word: "recieve".to_owned(),
             })
         );
@@ -3357,6 +3650,7 @@ mod tests {
                 dictionary_paths: vec![PathBuf::from("base.txt"), PathBuf::from("technical.txt"),],
                 compiled_paths: vec![PathBuf::from("project.flex")],
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
+                output_format: OutputFormat::Text,
                 max_results: None,
                 max_edit_distance: None,
                 max_candidates: None,
@@ -3414,6 +3708,7 @@ mod tests {
                 max_edit_distance: Some(0),
                 max_candidates: Some(300),
                 max_edit_cells: Some(12_000),
+                output_format: OutputFormat::Text,
                 word: "recieve".to_owned(),
             })
         );
@@ -3432,6 +3727,7 @@ mod tests {
                 dictionary_paths: Vec::new(),
                 compiled_paths: Vec::new(),
                 hunspell_affix_paths: vec![PathBuf::from("de.aff")],
+                output_format: OutputFormat::Text,
                 max_results: None,
                 max_edit_distance: None,
                 max_candidates: None,
@@ -3493,6 +3789,7 @@ mod tests {
                 dictionary_paths: Vec::new(),
                 compiled_paths: vec![PathBuf::from("words.flex")],
                 hunspell_affix_paths: Vec::new(),
+                output_format: OutputFormat::Text,
                 target: CheckTarget::Word("Straße".to_owned()),
             })
         );
@@ -3895,6 +4192,7 @@ mod tests {
             command,
             Command::Validate(ValidateCommand::Compiled {
                 path: PathBuf::from("words.flex"),
+                output_format: OutputFormat::Text,
             })
         );
     }
@@ -3954,6 +4252,7 @@ mod tests {
                 &affix.path,
                 &dictionary.path,
                 catalog_import_encodings(SourceEncoding::MixedUtf8AndIso8859_1),
+                OutputFormat::Text,
             )
             .expect("mixed-encoding files are readable"),
             RunOutcome::Success
@@ -4138,6 +4437,7 @@ mod tests {
                 include_patterns: Vec::new(),
                 exclude_patterns: Vec::new(),
                 suggest: false,
+                output_format: OutputFormat::Text,
                 path: directory.path.clone(),
             })
             .expect("analysis continues after a non-UTF-8 file"),

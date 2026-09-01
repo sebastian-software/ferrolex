@@ -61,6 +61,14 @@ fn run_with_stdin(directory: &std::path::Path, arguments: &[&str], input: &str) 
     child.wait_with_output().expect("CLI binary exits")
 }
 
+fn json_lines(output: &Output) -> Vec<serde_json::Value> {
+    String::from_utf8(output.stdout.clone())
+        .expect("stdout is UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each stdout line is JSON"))
+        .collect()
+}
+
 #[test]
 fn every_command_has_a_focused_help_screen() {
     for command in [
@@ -174,6 +182,135 @@ fn check_accepts_option_shaped_words_after_the_option_separator() {
         );
         assert!(output.stderr.is_empty());
     }
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn machine_readable_check_and_suggest_emit_json_lines() {
+    let directory = temporary_directory("json-output");
+    fs::write(
+        directory.join("words.txt"),
+        "correct\nreceive\nrecipe\nquo\"te\n",
+    )
+    .expect("dictionary fixture is written");
+    let checked = run_in(
+        &directory,
+        &[
+            "check",
+            "--format=json",
+            "--dictionary",
+            "words.txt",
+            "quo\"te",
+        ],
+    );
+    assert!(checked.status.success());
+    assert_eq!(
+        json_lines(&checked),
+        vec![serde_json::json!({
+            "type": "word",
+            "command": "check",
+            "word": "quo\"te",
+            "status": "accepted",
+        })]
+    );
+
+    let suggested = run_in(
+        &directory,
+        &[
+            "suggest",
+            "--format",
+            "json",
+            "--dictionary",
+            "words.txt",
+            "recieve",
+        ],
+    );
+    assert!(suggested.status.success());
+    let suggestions = json_lines(&suggested);
+    assert!(suggestions.iter().any(|record| {
+        record["type"] == "suggestion" && record["word"] == "receive" && record["distance"] == 1
+    }));
+    assert_eq!(
+        suggestions.last().expect("summary exists")["type"],
+        "suggestion-summary"
+    );
+    assert_eq!(
+        suggestions.last().expect("summary exists")["complete"],
+        true
+    );
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn machine_readable_analyze_and_validate_emit_json_lines() {
+    let directory = temporary_directory("json-analysis-validation");
+    fs::write(directory.join("words.txt"), "correct\n").expect("dictionary fixture is written");
+    fs::write(directory.join("source.txt"), "mispelt\n").expect("source fixture is written");
+    fs::write(
+        directory.join("invalid.aff"),
+        "SET UTF-8\nICONV 1\nICONV only-source\n",
+    )
+    .expect("affix fixture is written");
+    fs::write(directory.join("invalid.dic"), "1\ncorrect\n")
+        .expect("Hunspell dictionary fixture is written");
+
+    let analyzed = run_in(
+        &directory,
+        &[
+            "analyze",
+            "--format",
+            "json",
+            "--dictionary",
+            "words.txt",
+            "source.txt",
+        ],
+    );
+    assert_eq!(analyzed.status.code(), Some(1));
+    assert_eq!(
+        json_lines(&analyzed),
+        vec![serde_json::json!({
+            "type": "finding",
+            "kind": "spelling",
+            "command": "analyze",
+            "path": "source.txt",
+            "line": 1,
+            "column": 1,
+            "word": "mispelt",
+            "suggestions": [],
+        })]
+    );
+
+    let validated = run_in(
+        &directory,
+        &[
+            "validate",
+            "--format",
+            "json",
+            "--strict",
+            "invalid.aff",
+            "invalid.dic",
+        ],
+    );
+    assert_eq!(validated.status.code(), Some(1));
+    let validation = json_lines(&validated);
+    assert_eq!(
+        validation.first().expect("diagnostic exists")["type"],
+        "diagnostic"
+    );
+    assert_eq!(
+        validation.first().expect("diagnostic exists")["severity"],
+        "error"
+    );
+    assert_eq!(
+        validation.last().expect("validation result exists"),
+        &serde_json::json!({
+            "type": "validation",
+            "path": "invalid.dic",
+            "status": "invalid",
+        })
+    );
 
     fs::remove_dir_all(directory).expect("temporary fixture is removed");
 }

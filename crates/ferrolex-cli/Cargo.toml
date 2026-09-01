@@ -22,6 +22,7 @@ ferrolex-dictionaries = { path = "../ferrolex-dictionaries", version = "0.3.0" }
 ferrolex-hunspell = { path = "../ferrolex-hunspell", version = "0.3.0" }
 ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.3.0" }
 ferrolex-text = { path = "../ferrolex-text", version = "0.3.0" }
+serde_json = "1.0.151"
 
 [lints]
 workspace = true
