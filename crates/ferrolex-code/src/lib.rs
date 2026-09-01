@@ -17,7 +17,7 @@
 #![forbid(unsafe_code)]
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 use std::ops::Range;
@@ -710,7 +710,6 @@ impl<'dictionary> Analyzer<'dictionary> {
         }
 
         let mut findings = Vec::new();
-        let mut recognition_cache = HashMap::new();
         for (line_index, line) in lines.iter().enumerate() {
             if let Some(directive) = parse_directive(line.text, &document.comment_syntax) {
                 directives.apply_switch(&directive);
@@ -725,7 +724,6 @@ impl<'dictionary> Analyzer<'dictionary> {
                     document.source,
                     &raw_token,
                     &directives.ignored_words,
-                    &mut recognition_cache,
                     &mut findings,
                 );
             }
@@ -742,16 +740,13 @@ impl<'dictionary> Analyzer<'dictionary> {
         source: &'source str,
         raw_token: &RawToken<'source>,
         directive_ignored_words: &BTreeSet<Box<str>>,
-        recognition_cache: &mut HashMap<&'source str, bool>,
         findings: &mut Vec<Finding<'source>>,
     ) {
         let mut class = classify(raw_token.text);
         // A project dictionary may deliberately contain an unprefixed
         // alphanumeric term that otherwise resembles a hexadecimal hash.
         // Recognition takes precedence over this lossy classifier heuristic.
-        if class == TokenClass::Hash
-            && contains_normalized_cached(self.dictionary, raw_token.text, recognition_cache)
-        {
+        if class == TokenClass::Hash && self.dictionary.contains(raw_token.text) {
             class = TokenClass::NaturalWord;
         }
         if self.config.ignored_classes.contains(&class)
@@ -773,7 +768,7 @@ impl<'dictionary> Analyzer<'dictionary> {
             }
             if self.config.ignored_words.contains(segment.text())
                 || directive_ignored_words.contains(segment.text())
-                || contains_normalized_cached(self.dictionary, segment.text(), recognition_cache)
+                || contains_normalized(self.dictionary, segment.text())
             {
                 continue;
             }
@@ -1220,19 +1215,6 @@ fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
     }
 }
 
-fn contains_normalized_cached<'source>(
-    dictionary: &dyn Dictionary,
-    token: &'source str,
-    cache: &mut HashMap<&'source str, bool>,
-) -> bool {
-    if let Some(&recognized) = cache.get(token) {
-        return recognized;
-    }
-    let recognized = contains_normalized(dictionary, token);
-    cache.insert(token, recognized);
-    recognized
-}
-
 fn is_word_character(character: char) -> bool {
     character.is_alphabetic() || canonical_combining_class(character) != 0
 }
@@ -1328,6 +1310,16 @@ mod tests {
         }
     }
 
+    struct ChangingDictionary {
+        lookups: AtomicUsize,
+    }
+
+    impl Dictionary for ChangingDictionary {
+        fn contains(&self, word: &str) -> bool {
+            word == "typo" && self.lookups.fetch_add(1, Ordering::Relaxed) > 0
+        }
+    }
+
     #[test]
     fn splits_rfc_identifiers_with_unicode_and_digits() {
         let segments = |identifier| {
@@ -1350,22 +1342,28 @@ mod tests {
     }
 
     #[test]
-    fn avoids_duplicate_normalization_and_repeated_segment_lookups() {
+    fn avoids_duplicate_nfc_lookups_without_hiding_live_updates() {
         let misses = CountingDictionary::new("");
         let analyzer = Analyzer::builder(&misses).build();
-        assert_eq!(
-            analyzer.check(&Document::new("typo typo")).findings().len(),
-            2
-        );
+        assert_eq!(analyzer.check(&Document::new("typo")).findings().len(), 1);
         assert_eq!(misses.lookups.load(Ordering::Relaxed), 1);
 
         let normalized = CountingDictionary::new("café");
         let analyzer = Analyzer::builder(&normalized).build();
         assert!(analyzer
-            .check(&Document::new("cafe\u{301} cafe\u{301}"))
+            .check(&Document::new("cafe\u{301}"))
             .findings()
             .is_empty());
         assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
+
+        let changing = ChangingDictionary {
+            lookups: AtomicUsize::new(0),
+        };
+        let analyzer = Analyzer::builder(&changing).build();
+        assert_eq!(
+            analyzer.check(&Document::new("typo typo")).findings().len(),
+            1
+        );
     }
 
     #[test]

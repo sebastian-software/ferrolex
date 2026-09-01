@@ -17,7 +17,6 @@
 #![warn(missing_docs)]
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::ops::Range;
 
 use ferrolex_core::{Dictionary, Normalization};
@@ -48,19 +47,15 @@ impl<'text> Misspelling<'text> {
 pub struct Misspellings<'dictionary, 'text> {
     dictionary: &'dictionary dyn Dictionary,
     tokens: WordTokens<'text>,
-    recognition_cache: HashMap<&'text str, bool>,
 }
 
 impl<'text> Iterator for Misspellings<'_, 'text> {
     type Item = Misspelling<'text>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for (range, word) in self.tokens.by_ref() {
-            if !contains_normalized_cached(self.dictionary, word, &mut self.recognition_cache) {
-                return Some(Misspelling { word, range });
-            }
-        }
-        None
+        self.tokens.find_map(|(range, word)| {
+            (!contains_normalized(self.dictionary, word)).then_some(Misspelling { word, range })
+        })
     }
 }
 
@@ -77,7 +72,6 @@ pub fn check_text<'dictionary, 'text>(
     Misspellings {
         dictionary,
         tokens: WordTokens::new(text),
-        recognition_cache: HashMap::new(),
     }
 }
 
@@ -139,19 +133,6 @@ fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
     }
 }
 
-fn contains_normalized_cached<'text>(
-    dictionary: &dyn Dictionary,
-    token: &'text str,
-    cache: &mut HashMap<&'text str, bool>,
-) -> bool {
-    if let Some(&recognized) = cache.get(token) {
-        return recognized;
-    }
-    let recognized = contains_normalized(dictionary, token);
-    cache.insert(token, recognized);
-    recognized
-}
-
 fn is_word_character(character: char) -> bool {
     character.is_alphabetic() || canonical_combining_class(character) != 0
 }
@@ -160,7 +141,7 @@ fn is_word_character(character: char) -> bool {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ferrolex_core::{Dictionary, WordList};
+    use ferrolex_core::{Dictionary, Normalization, UserDictionary, WordList};
 
     use super::check_text;
 
@@ -216,17 +197,23 @@ mod tests {
     }
 
     #[test]
-    fn avoids_duplicate_normalization_and_repeated_token_lookups() {
+    fn avoids_duplicate_nfc_lookups_without_hiding_live_updates() {
         let misses = CountingDictionary::new("");
-        assert_eq!(check_text(&misses, "typo typo").count(), 2);
+        assert_eq!(check_text(&misses, "typo").count(), 1);
         assert_eq!(misses.lookups.load(Ordering::Relaxed), 1);
 
         let normalized = CountingDictionary::new("café");
-        assert_eq!(
-            check_text(&normalized, "cafe\u{301} cafe\u{301}").count(),
-            0
-        );
+        assert_eq!(check_text(&normalized, "cafe\u{301}").count(), 0);
         assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
+
+        let overlay = UserDictionary::new(Normalization::Exact);
+        let mut misspellings = check_text(&overlay, "typo typo");
+        assert_eq!(
+            misspellings.next().map(|finding| finding.word()),
+            Some("typo")
+        );
+        overlay.insert("typo").expect("test word is valid");
+        assert!(misspellings.next().is_none());
     }
 
     #[test]
