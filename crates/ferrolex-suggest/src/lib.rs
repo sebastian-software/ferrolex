@@ -388,14 +388,16 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             },
         );
         let direct_reservation = SuggestConfig {
-            max_candidates: self.config.max_candidates / 2,
-            max_edit_cells: self.config.max_edit_cells / 2,
+            max_candidates: half_rounded_up(self.config.max_candidates),
+            max_edit_cells: half_rounded_up(self.config.max_edit_cells),
             ..self.config
         };
         let mut direct_cursor = 0;
         let mut direct_completeness = Completeness::Complete;
-        while direct_cursor < direct_candidates.len()
-            && consider_candidate(
+        while direct_cursor < direct_candidates.len() {
+            let examined_before_reservation = examined;
+            let cells_before_reservation = cells;
+            if !consider_candidate(
                 self.source,
                 &direct_candidates[direct_cursor],
                 query,
@@ -414,8 +416,11 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                 &mut examined,
                 &mut cells,
                 &mut direct_completeness,
-            )
-        {
+            ) {
+                examined = examined_before_reservation;
+                cells = cells_before_reservation;
+                break;
+            }
             direct_cursor += 1;
         }
         self.source.visit_related_seeds(&mut |seed| {
@@ -487,6 +492,10 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
         suggestions.truncate(self.config.max_results);
         completeness
     }
+}
+
+const fn half_rounded_up(value: usize) -> usize {
+    value / 2 + value % 2
 }
 
 #[allow(
@@ -918,6 +927,25 @@ mod tests {
 
         assert!(words.contains(&"cat"));
         assert!(words.contains(&"cot"));
+        assert_eq!(result.completeness(), Completeness::CandidateLimitReached);
+    }
+
+    #[test]
+    fn limit_one_preserves_the_direct_candidate() {
+        let config = SuggestConfig {
+            max_candidates: 1,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&DerivedSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert_eq!(words, ["cat"]);
         assert_eq!(result.completeness(), Completeness::CandidateLimitReached);
     }
 
