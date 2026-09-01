@@ -587,6 +587,7 @@ impl Fetcher for UreqFetcher {
             .get(url)
             .call()
             .map_err(|error| map_ureq_error(url, error))?;
+        reject_redirect(url, response.status())?;
         let mut reader = response.into_body().into_reader();
         let mut bytes = Vec::new();
         reader
@@ -746,6 +747,13 @@ pub enum FetchError {
     InsecureUrl(String),
     /// The HTTP client rejected or could not complete the request.
     Transport(String),
+    /// The source returned an HTTP redirect that was not followed.
+    Redirect {
+        /// Original source URL that returned the redirect.
+        url: String,
+        /// HTTP redirect status code.
+        status: u16,
+    },
     /// The HTTP client exceeded a configured timeout while fetching a source.
     Timeout {
         /// Source URL whose transfer did not complete in time.
@@ -803,6 +811,9 @@ impl fmt::Display for FetchError {
         match self {
             Self::InsecureUrl(url) => write!(formatter, "refusing non-HTTPS URL `{url}`"),
             Self::Transport(message) => write!(formatter, "dictionary download failed: {message}"),
+            Self::Redirect { url, status } => {
+                write!(formatter, "refusing HTTP redirect {status} from `{url}`")
+            }
             Self::Timeout { url, stage } => {
                 write!(
                     formatter,
@@ -863,6 +874,7 @@ impl Error for FetchError {
             | Self::WriteCache { source, .. } => Some(source),
             Self::InsecureUrl(_)
             | Self::Transport(_)
+            | Self::Redirect { .. }
             | Self::Timeout { .. }
             | Self::FileTooLarge { .. }
             | Self::ChecksumMismatch { .. }
@@ -931,6 +943,16 @@ fn map_ureq_error(url: &str, error: ureq::Error) -> FetchError {
         ureq::Error::Timeout(timeout) => timeout_error(url, timeout),
         other => FetchError::Transport(other.to_string()),
     }
+}
+
+fn reject_redirect(url: &str, status: ureq::http::StatusCode) -> Result<(), FetchError> {
+    if status.is_redirection() {
+        return Err(FetchError::Redirect {
+            url: url.to_owned(),
+            status: status.as_u16(),
+        });
+    }
+    Ok(())
 }
 
 fn map_response_read_error(url: &str, source: io::Error) -> FetchError {
@@ -1028,8 +1050,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        find_locale, map_response_read_error, map_ureq_error, DictionaryInstaller, FetchError,
-        Fetcher, LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher,
+        find_locale, map_response_read_error, map_ureq_error, reject_redirect, DictionaryInstaller,
+        FetchError, Fetcher, LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher,
         VerifiedDictionary, VerifiedFile, CONNECT_TIMEOUT, LIBREOFFICE_CATALOG,
         LIBREOFFICE_REVISION, REQUEST_TIMEOUT, RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT,
     };
@@ -1271,6 +1293,28 @@ mod tests {
             FetchError::Timeout { url: timeout_url, stage }
                 if timeout_url == url && stage == "receive body"
         ));
+    }
+
+    #[test]
+    fn redirect_statuses_are_refused_with_the_original_url() {
+        let url = "https://example.test/source.dic";
+        let error = reject_redirect(url, ureq::http::StatusCode::TEMPORARY_REDIRECT)
+            .expect_err("redirects are rejected before their response body is read");
+        let message = error.to_string();
+
+        assert!(matches!(
+            error,
+            FetchError::Redirect {
+                url: redirect_url,
+                status: 307
+            } if redirect_url == url
+        ));
+        assert_eq!(
+            message,
+            "refusing HTTP redirect 307 from `https://example.test/source.dic`"
+        );
+        reject_redirect(url, ureq::http::StatusCode::OK)
+            .expect("successful statuses continue to body processing");
     }
 
     #[test]

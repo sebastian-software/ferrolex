@@ -22,8 +22,9 @@ The optional `ferrolex dictionary` command is an installer, not an updater:
 - a cache file with different bytes is preserved and causes an error;
 - a cache file whose bytes match the pinned digest is reused without a network
   request;
-- redirects are refused; the command has no implicit retries, telemetry, or
-  background updates.
+- redirects are refused with a diagnostic that identifies the original URL and
+  HTTP status; the command has no implicit retries, telemetry, or background
+  updates.
 - requests time out after 10 seconds while connecting, 15 seconds while
   awaiting response headers, 60 seconds while receiving a response body, or
   75 seconds end-to-end; timeout failures identify the URL and stage.
