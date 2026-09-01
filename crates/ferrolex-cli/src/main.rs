@@ -37,12 +37,12 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest (--dictionary <PLAIN_WORD_LIST> | --compiled <ARTIFACT> | --hunspell <AFF_PATH>) [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
+const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 const EXIT_CODES: &str =
     "\nExit status: 0 success, 1 finding, 2 usage error, 3 operational failure.";
 const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Installed Hunspell AFF path (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
-const HELP_SUGGEST: &str = "Usage: ferrolex suggest (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH>) [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt ferolex";
+const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Installed Hunspell AFF path (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
 const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
 const HELP_ANALYZE: &str = "Usage: ferrolex analyze (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>) [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Installed Hunspell AFF path (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
 const HELP_COMPILE: &str = "Usage: ferrolex compile (--dictionary <PATH> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n\nCompiles a plain word list or Hunspell pair to a native artifact.\n  -o <ARTIFACT>  Output artifact path\n\nExample: ferrolex compile --dictionary words.txt -o words.flexdic";
@@ -198,39 +198,13 @@ const fn compound_role_label(role: CompoundComponentRole) -> &'static str {
 }
 
 fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
-    let (source, replacements, output_dictionary): (
-        Box<dyn CandidateSource>,
-        Vec<ReplacementRule>,
-        Option<HunspellDictionary>,
-    ) = match (
-        command.dictionary_path.as_ref(),
-        command.compiled_path.as_ref(),
-        command.hunspell_affix_path.as_ref(),
-    ) {
-        (Some(path), None, None) => {
-            let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
-                path: path.clone(),
-                source,
-            })?;
-            (
-                Box::new(WordList::from_text(Normalization::Exact, &text)),
-                Vec::new(),
-                None,
-            )
-        }
-        (None, Some(path), None) => {
-            let dictionary = load_artifact(path)?;
-            let replacements = dictionary.replacement_rules();
-            let output_dictionary = dictionary.hunspell_dictionary().cloned();
-            (Box::new(dictionary), replacements, output_dictionary)
-        }
-        (None, None, Some(path)) => {
-            let dictionary = load_installed_hunspell_dictionary(path)?;
-            let replacements = dictionary.replacement_rules().to_vec();
-            (Box::new(dictionary.clone()), replacements, Some(dictionary))
-        }
-        _ => unreachable!("suggest command parsing requires exactly one source"),
-    };
+    let source = load_analysis_dictionary(
+        &command.dictionary_paths,
+        &command.compiled_paths,
+        &command.hunspell_affix_paths,
+    )?;
+    let replacements = source.replacement_rules();
+    let ranking_dictionary = source.hunspell_ranking_dictionary();
     let mut config = SuggestConfig::default();
     if let Some(max_results) = command.max_results {
         config.max_results = max_results;
@@ -244,23 +218,20 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     if let Some(max_edit_cells) = command.max_edit_cells {
         config.max_edit_cells = max_edit_cells;
     }
-    let result = if let Some(dictionary) = output_dictionary.as_ref() {
-        Suggester::new(source.as_ref(), config)
+    let result = if let Some(dictionary) = ranking_dictionary {
+        Suggester::new(&source, config)
             .with_replacement_rules(&replacements)
             .with_ranking_signals(dictionary.ranking_signals())
             .suggest(&command.word)
     } else {
-        Suggester::new(source.as_ref(), config)
+        Suggester::new(&source, config)
             .with_replacement_rules(&replacements)
             .suggest(&command.word)
     };
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",
-            output_dictionary.as_ref().map_or_else(
-                || suggestion.word().to_owned(),
-                |dictionary| dictionary.normalize_output(suggestion.word()),
-            ),
+            source.normalize_suggestion_output(suggestion.word()),
             suggestion.distance()
         );
     }
@@ -269,8 +240,24 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
             "suggestion search incomplete: {}",
             completeness_label(result.completeness())
         );
+        if result.suggestions().is_empty() {
+            if let Some(hint) = incomplete_suggestion_hint(result.completeness(), config) {
+                eprintln!("hint: {hint}");
+            }
+        }
     }
     Ok(RunOutcome::Success)
+}
+
+fn incomplete_suggestion_hint(completeness: Completeness, config: SuggestConfig) -> Option<String> {
+    match completeness {
+        Completeness::CandidateLimitReached | Completeness::EditBudgetReached => Some(format!(
+            "retry with larger work budgets, for example `--max-candidates {} --max-edit-cells {}`",
+            config.max_candidates.saturating_mul(2),
+            config.max_edit_cells.saturating_mul(2),
+        )),
+        Completeness::Complete | Completeness::QueryTooLong => None,
+    }
 }
 
 const fn completeness_label(completeness: Completeness) -> &'static str {
@@ -493,6 +480,52 @@ struct AnalysisDictionary {
     sources: Vec<AnalysisSource>,
 }
 
+impl AnalysisDictionary {
+    fn replacement_rules(&self) -> Vec<ReplacementRule> {
+        self.sources
+            .iter()
+            .flat_map(|source| match source {
+                AnalysisSource::WordList(_) => Vec::new(),
+                AnalysisSource::Artifact(dictionary) => dictionary.replacement_rules(),
+                AnalysisSource::Hunspell(dictionary) => dictionary.replacement_rules().to_vec(),
+            })
+            .collect()
+    }
+
+    fn hunspell_ranking_dictionary(&self) -> Option<&HunspellDictionary> {
+        self.sources.iter().find_map(|source| match source {
+            AnalysisSource::WordList(_) => None,
+            AnalysisSource::Artifact(dictionary) => dictionary.hunspell_dictionary(),
+            AnalysisSource::Hunspell(dictionary) => Some(dictionary.as_ref()),
+        })
+    }
+
+    fn normalize_suggestion_output(&self, candidate: &str) -> String {
+        for source in &self.sources {
+            match source {
+                AnalysisSource::WordList(dictionary) if dictionary.contains(candidate) => {
+                    return candidate.to_owned();
+                }
+                AnalysisSource::Artifact(dictionary)
+                    if dictionary.contains(candidate)
+                        && dictionary.is_suggestion_candidate(candidate) =>
+                {
+                    return dictionary.normalize_suggestion_output(candidate);
+                }
+                AnalysisSource::Hunspell(dictionary)
+                    if dictionary.is_suggestion_candidate(candidate) =>
+                {
+                    return dictionary.normalize_output(candidate);
+                }
+                AnalysisSource::WordList(_)
+                | AnalysisSource::Artifact(_)
+                | AnalysisSource::Hunspell(_) => {}
+            }
+        }
+        candidate.to_owned()
+    }
+}
+
 enum AnalysisSource {
     WordList(WordList),
     Artifact(ArtifactDictionary),
@@ -576,8 +609,10 @@ impl CandidateSource for AnalysisDictionary {
 
     fn is_suggestion_candidate(&self, candidate: &str) -> bool {
         self.sources.iter().any(|source| match source {
-            AnalysisSource::WordList(_) => true,
-            AnalysisSource::Artifact(dictionary) => dictionary.is_suggestion_candidate(candidate),
+            AnalysisSource::WordList(dictionary) => dictionary.contains(candidate),
+            AnalysisSource::Artifact(dictionary) => {
+                dictionary.contains(candidate) && dictionary.is_suggestion_candidate(candidate)
+            }
             AnalysisSource::Hunspell(dictionary) => dictionary.is_suggestion_candidate(candidate),
         })
     }
@@ -696,6 +731,13 @@ impl ArtifactDictionary {
         match self {
             Self::Exact(_) => None,
             Self::Hunspell(dictionary) => Some(dictionary.as_ref()),
+        }
+    }
+
+    fn normalize_suggestion_output(&self, candidate: &str) -> String {
+        match self {
+            Self::Exact(_) => candidate.to_owned(),
+            Self::Hunspell(dictionary) => dictionary.normalize_output(candidate),
         }
     }
 }
@@ -1575,9 +1617,9 @@ fn parse_inspect_arguments(
 fn parse_suggest_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<Command, CliError> {
-    let mut dictionary_path = None;
-    let mut compiled_path = None;
-    let mut hunspell_affix_path = None;
+    let mut dictionary_paths = Vec::new();
+    let mut compiled_paths = Vec::new();
+    let mut hunspell_affix_paths = Vec::new();
     let mut max_results = None;
     let mut max_edit_distance = None;
     let mut max_candidates = None;
@@ -1586,9 +1628,13 @@ fn parse_suggest_arguments(
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
-            "--dictionary" => set_once_path(&mut dictionary_path, &mut arguments, "--dictionary")?,
-            "--hunspell" => set_once_path(&mut hunspell_affix_path, &mut arguments, "--hunspell")?,
-            "--compiled" => set_once_path(&mut compiled_path, &mut arguments, "--compiled")?,
+            "--dictionary" => {
+                dictionary_paths.push(required_path(&mut arguments, "--dictionary")?);
+            }
+            "--hunspell" => {
+                hunspell_affix_paths.push(required_path(&mut arguments, "--hunspell")?);
+            }
+            "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
             "--max-results" => {
                 set_once_usize(&mut max_results, &mut arguments, "--max-results", true)?;
             }
@@ -1628,22 +1674,18 @@ fn parse_suggest_arguments(
             _ => word = Some(argument),
         }
     }
-    if usize::from(dictionary_path.is_some())
-        + usize::from(compiled_path.is_some())
-        + usize::from(hunspell_affix_path.is_some())
-        != 1
-    {
+    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
         return Err(CliError::Usage(
-            "suggest requires exactly one `--dictionary`, `--compiled`, or `--hunspell` path"
+            "suggest requires at least one `--dictionary`, `--compiled`, or `--hunspell` path"
                 .to_owned(),
         ));
     }
     let word =
         word.ok_or_else(|| CliError::Usage("suggest requires exactly one word".to_owned()))?;
     Ok(Command::Suggest(SuggestCommand {
-        dictionary_path,
-        compiled_path,
-        hunspell_affix_path,
+        dictionary_paths,
+        compiled_paths,
+        hunspell_affix_paths,
         max_results,
         max_edit_distance,
         max_candidates,
@@ -2176,9 +2218,9 @@ struct CheckCommand {
 
 #[derive(Debug, Eq, PartialEq)]
 struct SuggestCommand {
-    dictionary_path: Option<PathBuf>,
-    compiled_path: Option<PathBuf>,
-    hunspell_affix_path: Option<PathBuf>,
+    dictionary_paths: Vec<PathBuf>,
+    compiled_paths: Vec<PathBuf>,
+    hunspell_affix_paths: Vec<PathBuf>,
     max_results: Option<usize>,
     max_edit_distance: Option<usize>,
     max_candidates: Option<usize>,
@@ -2493,11 +2535,12 @@ mod tests {
 
     use super::{
         analysis_paths, analyze, catalog_import_encodings, comment_syntax_for_path, glob_matches,
-        install_hunspell_runtime_cache, parse_arguments, read_analysis_source,
-        read_compiled_artifact, render_explanation, run, runtime_cache_path, validate_hunspell,
-        AnalyzeCommand, CheckCommand, CheckTarget, CliError, Command, CommentSyntax,
-        CompileCommand, CompileInput, DictionaryCommand, ExplainCommand, LineIndex, RunOutcome,
-        SourceEncoding, SuggestCommand, ValidateCommand, HELP_CHECK,
+        incomplete_suggestion_hint, install_hunspell_runtime_cache, load_analysis_dictionary,
+        parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
+        runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource, AnalyzeCommand,
+        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
+        DictionaryCommand, ExplainCommand, LineIndex, Normalization, RunOutcome, SourceEncoding,
+        SuggestCommand, SuggestConfig, ValidateCommand, WordList, HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -2625,9 +2668,9 @@ mod tests {
         assert_eq!(
             command,
             Command::Suggest(SuggestCommand {
-                dictionary_path: Some(PathBuf::from("words.txt")),
-                compiled_path: None,
-                hunspell_affix_path: None,
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
                 max_results: Some(4),
                 max_edit_distance: None,
                 max_candidates: None,
@@ -3005,9 +3048,9 @@ mod tests {
         assert_eq!(
             command,
             Command::Suggest(SuggestCommand {
-                dictionary_path: Some(PathBuf::from("words.txt")),
-                compiled_path: None,
-                hunspell_affix_path: None,
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
                 max_results: None,
                 max_edit_distance: None,
                 max_candidates: None,
@@ -3015,6 +3058,57 @@ mod tests {
                 word: "recieve".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn parses_layered_suggestion_sources() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "suggest",
+                "--dictionary",
+                "base.txt",
+                "--dictionary",
+                "technical.txt",
+                "--compiled",
+                "project.flex",
+                "--hunspell",
+                "de.aff",
+                "recieve",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("layered suggestion sources are valid");
+
+        assert_eq!(
+            command,
+            Command::Suggest(SuggestCommand {
+                dictionary_paths: vec![PathBuf::from("base.txt"), PathBuf::from("technical.txt"),],
+                compiled_paths: vec![PathBuf::from("project.flex")],
+                hunspell_affix_paths: vec![PathBuf::from("de.aff")],
+                max_results: None,
+                max_edit_distance: None,
+                max_candidates: None,
+                max_edit_cells: None,
+                word: "recieve".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn incomplete_empty_suggestions_offer_scaled_budget_flags() {
+        let config = SuggestConfig {
+            max_candidates: 300,
+            max_edit_cells: 12_000,
+            ..SuggestConfig::default()
+        };
+
+        let hint = incomplete_suggestion_hint(super::Completeness::EditBudgetReached, config)
+            .expect("budget exhaustion has an actionable hint");
+
+        assert!(hint.contains("--max-candidates 600"));
+        assert!(hint.contains("--max-edit-cells 24000"));
+        assert!(incomplete_suggestion_hint(super::Completeness::QueryTooLong, config).is_none());
     }
 
     #[test]
@@ -3042,9 +3136,9 @@ mod tests {
         assert_eq!(
             command,
             Command::Suggest(SuggestCommand {
-                dictionary_path: Some(PathBuf::from("words.txt")),
-                compiled_path: None,
-                hunspell_affix_path: None,
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
                 max_results: Some(3),
                 max_edit_distance: Some(0),
                 max_candidates: Some(300),
@@ -3064,9 +3158,9 @@ mod tests {
         assert_eq!(
             command,
             Command::Suggest(SuggestCommand {
-                dictionary_path: None,
-                compiled_path: None,
-                hunspell_affix_path: Some(PathBuf::from("de.aff")),
+                dictionary_paths: Vec::new(),
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: vec![PathBuf::from("de.aff")],
                 max_results: None,
                 max_edit_distance: None,
                 max_candidates: None,
@@ -3086,15 +3180,6 @@ mod tests {
                 "words.txt",
                 "--max-results",
                 "0",
-                "recieve",
-            ] as &[&str],
-            &[
-                "ferrolex",
-                "suggest",
-                "--dictionary",
-                "words.txt",
-                "--hunspell",
-                "de.aff",
                 "recieve",
             ] as &[&str],
             &[
@@ -3157,6 +3242,51 @@ mod tests {
             run(arguments).expect("dictionary is readable"),
             RunOutcome::Success
         );
+    }
+
+    #[test]
+    fn layered_word_lists_contribute_suggestion_candidates() {
+        let base = temporary_dictionary("recipe\n");
+        let technical = temporary_dictionary("receive\n");
+        let dictionary =
+            load_analysis_dictionary(&[base.path.clone(), technical.path.clone()], &[], &[])
+                .expect("both word lists load");
+
+        let result =
+            super::Suggester::new(&dictionary, SuggestConfig::default()).suggest("recieve");
+
+        assert!(result
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "receive"));
+    }
+
+    #[test]
+    fn layered_sources_preserve_hunspell_output_metadata() {
+        let hunspell = import(
+            "metadata.aff",
+            "OCONV 2\nOCONV ae æ\nOCONV plain rewritten\n",
+            "metadata.dic",
+            "1\naer\n",
+            ImportMode::Strict,
+        )
+        .expect("output metadata fixture imports")
+        .dictionary()
+        .clone();
+        let dictionary = AnalysisDictionary {
+            sources: vec![
+                AnalysisSource::WordList(WordList::from_text(Normalization::Exact, "plain\n")),
+                AnalysisSource::Hunspell(Box::new(hunspell)),
+            ],
+        };
+
+        let ranking = dictionary
+            .hunspell_ranking_dictionary()
+            .expect("adding a plain layer preserves Hunspell ranking metadata");
+
+        assert_eq!(ranking.normalize_output("aer"), "ær");
+        assert_eq!(dictionary.normalize_suggestion_output("aer"), "ær");
+        assert_eq!(dictionary.normalize_suggestion_output("plain"), "plain");
     }
 
     #[test]

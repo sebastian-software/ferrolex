@@ -84,7 +84,7 @@ ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex dictionary list
 ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries
 ferrolex check --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff słowami
-ferrolex suggest --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff --max-candidates 300000 --max-edit-cells 20000000 slowami
+ferrolex suggest --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff slowami
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
@@ -100,10 +100,12 @@ invokes an external spell-checking engine; see the
 [import contract](docs/hunspell-format.md) and
 [affix semantics](docs/affix-semantics.md).
 
-`suggest` exposes bounded, deterministic edit-distance suggestions for one
-plain-word-list dictionary, one installed Hunspell runtime cache, or one
-compiled artifact. It reports when its configured work limits prevent a
-complete search, but still returns any stable partial results. Hunspell
+`suggest` exposes bounded, deterministic edit-distance suggestions across any
+number of layered plain-word-list dictionaries, installed Hunspell runtime
+caches, and compiled artifacts. Each source flag is repeatable, just as it is
+for `check` and `analyze`. It reports when its configured work limits prevent a
+complete search, still returns any stable partial results, and prints a scaled
+retry hint when budget exhaustion produced no result. Hunspell
 suggestions enumerate stored stems and additionally derive bounded affixed and
 compound forms near the query; they never pre-expand the dictionary.
 `UserDictionary` project overlays can be used through the library API. The
