@@ -250,6 +250,8 @@ pub enum Completeness {
     EditBudgetReached,
     /// The query exceeded the configured maximum length.
     QueryTooLong,
+    /// A related seed exceeded the bounded normalization length.
+    RelatedSeedTooLong,
 }
 
 /// Bounded suggestion output.
@@ -439,14 +441,14 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             .max_word_scalars
             .saturating_add(self.config.max_edit_distance.saturating_mul(2));
         self.source.visit_related_seeds(&mut |seed| {
-            if is_related_seed(
+            match related_seed_match(
                 query_chars,
                 seed,
                 self.config.max_edit_distance,
                 maximum_related_seed_scalars,
                 related_candidate_chars,
             ) {
-                self.source.visit_related_candidates(
+                RelatedSeedMatch::Related => self.source.visit_related_candidates(
                     query,
                     seed,
                     self.config.max_edit_distance,
@@ -481,7 +483,13 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                             false
                         }
                     },
-                );
+                ),
+                RelatedSeedMatch::Unrelated => {}
+                RelatedSeedMatch::TooLong => {
+                    if matches!(related_completeness, Completeness::Complete) {
+                        related_completeness = Completeness::RelatedSeedTooLong;
+                    }
+                }
             }
             !related_reservation_exhausted
         });
@@ -617,17 +625,23 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     true
 }
 
-fn is_related_seed(
+enum RelatedSeedMatch {
+    Related,
+    Unrelated,
+    TooLong,
+}
+
+fn related_seed_match(
     query: &[char],
     candidate: &str,
     maximum_edit_distance: usize,
     maximum_seed_scalars: usize,
     candidate_chars: &mut Vec<char>,
-) -> bool {
+) -> RelatedSeedMatch {
     let Some(candidate) =
         lowercase_chars_bounded_into(candidate, maximum_seed_scalars, candidate_chars)
     else {
-        return false;
+        return RelatedSeedMatch::TooLong;
     };
     let required_common = query
         .len()
@@ -644,7 +658,11 @@ fn is_related_seed(
         .zip(candidate.iter().rev())
         .take_while(|(left, right)| left == right)
         .count();
-    common_prefix >= required_common || common_suffix >= required_common
+    if common_prefix >= required_common || common_suffix >= required_common {
+        RelatedSeedMatch::Related
+    } else {
+        RelatedSeedMatch::Unrelated
+    }
 }
 
 fn rank_suggestions(suggestions: &mut [Suggestion]) {
@@ -1349,7 +1367,7 @@ mod tests {
         let completeness =
             Suggester::new(&source, config).suggest_into("word", &mut suggestions, &mut scratch);
 
-        assert_eq!(completeness, Completeness::Complete);
+        assert_eq!(completeness, Completeness::RelatedSeedTooLong);
         assert!(suggestions.is_empty());
         assert_eq!(
             scratch.related_candidate_chars.len(),
