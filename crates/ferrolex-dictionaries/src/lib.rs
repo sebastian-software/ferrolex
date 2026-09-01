@@ -558,6 +558,25 @@ pub trait Fetcher {
     /// Implementations return [`FetchError`] when the transport or response
     /// cannot satisfy their acquisition policy.
     fn fetch(&self, url: &str) -> Result<Vec<u8>, FetchError>;
+
+    /// Gets response bytes while enforcing a caller-selected upper bound.
+    ///
+    /// The default implementation preserves compatibility with fetchers that
+    /// acquire the complete response before checking its length. Streaming
+    /// transports should override this method so they can stop reading after
+    /// `maximum_file_bytes + 1` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FetchError::FileTooLarge`] when the response exceeds
+    /// `maximum_file_bytes`, or another [`FetchError`] from [`Self::fetch`].
+    fn fetch_with_limit(
+        &self,
+        url: &str,
+        maximum_file_bytes: usize,
+    ) -> Result<Vec<u8>, FetchError> {
+        enforce_response_limit(url, self.fetch(url)?, maximum_file_bytes)
+    }
 }
 
 /// HTTPS fetcher backed by `ureq` and rustls root certificates.
@@ -580,6 +599,14 @@ impl UreqFetcher {
 
 impl Fetcher for UreqFetcher {
     fn fetch(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        self.fetch_with_limit(url, DEFAULT_MAX_FILE_BYTES)
+    }
+
+    fn fetch_with_limit(
+        &self,
+        url: &str,
+        maximum_file_bytes: usize,
+    ) -> Result<Vec<u8>, FetchError> {
         if !is_https_url(url) {
             return Err(FetchError::InsecureUrl(url.to_owned()));
         }
@@ -589,21 +616,37 @@ impl Fetcher for UreqFetcher {
             .map_err(|error| map_ureq_error(url, error))?;
         reject_redirect(url, response.status())?;
         let mut reader = response.into_body().into_reader();
-        let mut bytes = Vec::new();
-        reader
-            .by_ref()
-            .take(u64::try_from(DEFAULT_MAX_FILE_BYTES + 1).expect("constant fits in u64"))
-            .read_to_end(&mut bytes)
-            .map_err(|source| map_response_read_error(url, source))?;
-        if bytes.len() > DEFAULT_MAX_FILE_BYTES {
-            return Err(FetchError::FileTooLarge {
-                url: url.to_owned(),
-                limit: DEFAULT_MAX_FILE_BYTES,
-                actual: bytes.len(),
-            });
-        }
-        Ok(bytes)
+        read_response_with_limit(url, &mut reader, maximum_file_bytes)
     }
+}
+
+fn read_response_with_limit(
+    url: &str,
+    reader: &mut impl Read,
+    maximum_file_bytes: usize,
+) -> Result<Vec<u8>, FetchError> {
+    let read_limit = u64::try_from(maximum_file_bytes.saturating_add(1)).unwrap_or(u64::MAX);
+    let mut bytes = Vec::new();
+    reader
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|source| map_response_read_error(url, source))?;
+    enforce_response_limit(url, bytes, maximum_file_bytes)
+}
+
+fn enforce_response_limit(
+    url: &str,
+    bytes: Vec<u8>,
+    maximum_file_bytes: usize,
+) -> Result<Vec<u8>, FetchError> {
+    if bytes.len() > maximum_file_bytes {
+        return Err(FetchError::FileTooLarge {
+            url: url.to_owned(),
+            limit: maximum_file_bytes,
+            actual: bytes.len(),
+        });
+    }
+    Ok(bytes)
 }
 
 /// Installer which owns no cache location; callers provide it per operation.
@@ -666,7 +709,9 @@ impl<F: Fetcher> DictionaryInstaller<F> {
             return Err(FetchError::CacheConflict(destination));
         }
 
-        let bytes = self.fetcher.fetch(file.url())?;
+        let bytes = self
+            .fetcher
+            .fetch_with_limit(file.url(), self.maximum_file_bytes)?;
         if bytes.len() > self.maximum_file_bytes {
             return Err(FetchError::FileTooLarge {
                 url: file.url().to_owned(),
@@ -1043,16 +1088,19 @@ fn atomic_write_new(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::BTreeMap;
     use std::fs;
+    use std::io::Cursor;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use super::{
-        find_locale, map_response_read_error, map_ureq_error, reject_redirect, DictionaryInstaller,
-        FetchError, Fetcher, LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher,
-        VerifiedDictionary, VerifiedFile, CONNECT_TIMEOUT, LIBREOFFICE_CATALOG,
+        enforce_response_limit, find_locale, map_response_read_error, map_ureq_error,
+        read_response_with_limit, reject_redirect, DictionaryInstaller, FetchError, Fetcher,
+        LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher, VerifiedDictionary,
+        VerifiedFile, CONNECT_TIMEOUT, DEFAULT_MAX_FILE_BYTES, LIBREOFFICE_CATALOG,
         LIBREOFFICE_REVISION, REQUEST_TIMEOUT, RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT,
     };
 
@@ -1388,6 +1436,66 @@ mod tests {
         assert!(!cache.path().join("en_US/sample.aff").exists());
     }
 
+    #[test]
+    fn installer_threads_raised_and_lowered_limits_into_the_fetcher() {
+        let manifest = manifest();
+        let fetcher = LimitRecordingFetcher {
+            requested_limit: Cell::new(None),
+        };
+        let raised_limit = DEFAULT_MAX_FILE_BYTES * 4;
+        let installer = DictionaryInstaller::new(fetcher).with_maximum_file_bytes(raised_limit);
+        let cache = Cache::new();
+
+        installer
+            .install(&manifest, cache.path())
+            .expect("the raised caller limit reaches both fixture fetches");
+        assert_eq!(installer.fetcher.requested_limit.get(), Some(raised_limit));
+
+        let fetcher = LimitRecordingFetcher {
+            requested_limit: Cell::new(None),
+        };
+        let installer = DictionaryInstaller::new(fetcher).with_maximum_file_bytes(2);
+        let cache = Cache::new();
+        let error = installer
+            .install(&manifest, cache.path())
+            .expect_err("the lowered caller limit rejects the fixture response");
+        assert!(matches!(
+            error,
+            FetchError::FileTooLarge {
+                limit: 2,
+                actual: 3,
+                ..
+            }
+        ));
+        assert_eq!(installer.fetcher.requested_limit.get(), Some(2));
+    }
+
+    #[test]
+    fn streaming_response_reader_stops_after_limit_plus_one_bytes() {
+        let url = "https://example.test/source.dic";
+        let mut oversized = Cursor::new(b"abcdef");
+
+        let error = read_response_with_limit(url, &mut oversized, 2)
+            .expect_err("the third byte proves that the two-byte limit was exceeded");
+
+        assert!(matches!(
+            error,
+            FetchError::FileTooLarge {
+                limit: 2,
+                actual: 3,
+                ..
+            }
+        ));
+        assert_eq!(oversized.position(), 3);
+
+        let mut accepted = Cursor::new(b"abcdef");
+        assert_eq!(
+            read_response_with_limit(url, &mut accepted, 6)
+                .expect("a response exactly at the limit is accepted"),
+            b"abcdef"
+        );
+    }
+
     fn manifest() -> VerifiedDictionary {
         let aff = VerifiedFile::new("sample.aff", "https://example.test/sample.aff", SHA256_ABC)
             .expect("fixture aff is valid");
@@ -1425,6 +1533,25 @@ mod tests {
                 .ok_or_else(|| FetchError::Transport(format!("no fixture for {url}")))?
                 .clone()
                 .map_err(FetchError::Transport)
+        }
+    }
+
+    struct LimitRecordingFetcher {
+        requested_limit: Cell<Option<usize>>,
+    }
+
+    impl Fetcher for LimitRecordingFetcher {
+        fn fetch(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
+            Ok(b"abc".to_vec())
+        }
+
+        fn fetch_with_limit(
+            &self,
+            url: &str,
+            maximum_file_bytes: usize,
+        ) -> Result<Vec<u8>, FetchError> {
+            self.requested_limit.set(Some(maximum_file_bytes));
+            enforce_response_limit(url, self.fetch(url)?, maximum_file_bytes)
         }
     }
 
