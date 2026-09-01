@@ -23,6 +23,22 @@ pub trait CandidateSource: Send + Sync {
     /// Visits candidates in deterministic byte-lexicographic order.
     fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool);
 
+    /// Visits candidates that may be within the requested query distance.
+    ///
+    /// The default preserves compatibility for mutable or custom sources by
+    /// visiting the complete source. Immutable sources should override this
+    /// with a conservative index: omitting a genuinely nearby candidate would
+    /// change suggestion correctness.
+    fn visit_nearby_candidates(
+        &self,
+        _query: &[char],
+        _max_edit_distance: usize,
+        _max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.visit_candidates(visitor);
+    }
+
     /// Returns whether a stored candidate may be shown as a suggestion.
     ///
     /// Sources with richer recognition semantics can reject pseudo-stems or
@@ -50,6 +66,13 @@ pub trait CandidateSource: Send + Sync {
         _visitor: &mut dyn FnMut(&str) -> bool,
     ) {
     }
+
+    /// Visits stored seeds that can produce query-related derived forms.
+    ///
+    /// Sources without morphology keep the empty default. Morphological
+    /// sources may scan a wider seed vocabulary here; only forms emitted by
+    /// [`Self::visit_related_candidates`] consume suggestion budgets.
+    fn visit_related_seeds(&self, _visitor: &mut dyn FnMut(&str) -> bool) {}
 }
 
 impl CandidateSource for WordList {
@@ -59,6 +82,21 @@ impl CandidateSource for WordList {
                 break;
             }
         }
+    }
+
+    fn visit_nearby_candidates(
+        &self,
+        query: &[char],
+        max_edit_distance: usize,
+        max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.candidate_index(max_word_scalars).visit_nearby(
+            query,
+            max_edit_distance,
+            max_word_scalars,
+            visitor,
+        );
     }
 }
 
@@ -238,6 +276,7 @@ pub struct SuggestScratch {
     previous: Vec<usize>,
     current: Vec<usize>,
     presented: BTreeSet<String>,
+    direct_candidates: Vec<String>,
 }
 
 impl SuggestionResult {
@@ -306,6 +345,10 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
     /// Existing output is cleared. Reusing both `suggestions` and `scratch`
     /// amortizes all hot-loop allocations while preserving [`Self::suggest`]'s
     /// ordering and completeness contract.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one function coordinates the reserved direct, related-form, and remainder phases"
+    )]
     pub fn suggest_into(
         &self,
         query: &str,
@@ -324,6 +367,7 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             previous,
             current,
             presented,
+            direct_candidates,
         } = scratch;
         let Some(query_chars) =
             lowercase_chars_bounded_into(query, self.config.max_word_scalars, query_chars)
@@ -333,10 +377,113 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
         let mut examined = 0;
         let mut cells = 0_usize;
         let mut completeness = Completeness::Complete;
-        self.source.visit_candidates(&mut |candidate| {
+        direct_candidates.clear();
+        self.source.visit_nearby_candidates(
+            query_chars,
+            self.config.max_edit_distance,
+            self.config.max_word_scalars,
+            &mut |candidate| {
+                direct_candidates.push(candidate.to_owned());
+                true
+            },
+        );
+        let direct_reservation = SuggestConfig {
+            max_candidates: half_rounded_up(self.config.max_candidates),
+            max_edit_cells: half_rounded_up(self.config.max_edit_cells),
+            ..self.config
+        };
+        let mut direct_cursor = 0;
+        let mut direct_completeness = Completeness::Complete;
+        while direct_cursor < direct_candidates.len() {
+            let examined_before_reservation = examined;
+            let cells_before_reservation = cells;
             if !consider_candidate(
                 self.source,
-                candidate,
+                &direct_candidates[direct_cursor],
+                query,
+                query_chars,
+                direct_reservation,
+                self.replacements,
+                self.ranking_signals,
+                suggestions,
+                candidate_chars,
+                transformed_chars,
+                replacement_from_chars,
+                replacement_to_chars,
+                previous_previous,
+                previous,
+                current,
+                &mut examined,
+                &mut cells,
+                &mut direct_completeness,
+            ) {
+                examined = examined_before_reservation;
+                cells = cells_before_reservation;
+                break;
+            }
+            direct_cursor += 1;
+        }
+        let related_reservation = SuggestConfig {
+            max_candidates: examined
+                .saturating_add(self.config.max_candidates / 2)
+                .min(self.config.max_candidates),
+            max_edit_cells: cells
+                .saturating_add(self.config.max_edit_cells / 2)
+                .min(self.config.max_edit_cells),
+            ..self.config
+        };
+        let mut related_completeness = Completeness::Complete;
+        let mut related_reservation_exhausted = false;
+        self.source.visit_related_seeds(&mut |seed| {
+            if is_related_seed(
+                query_chars,
+                seed,
+                self.config.max_edit_distance,
+                related_candidate_chars,
+            ) {
+                self.source.visit_related_candidates(
+                    query,
+                    seed,
+                    self.config.max_edit_distance,
+                    &mut |derived| {
+                        let examined_before_reservation = examined;
+                        let cells_before_reservation = cells;
+                        if consider_candidate(
+                            self.source,
+                            derived,
+                            query,
+                            query_chars,
+                            related_reservation,
+                            self.replacements,
+                            self.ranking_signals,
+                            suggestions,
+                            candidate_chars,
+                            transformed_chars,
+                            replacement_from_chars,
+                            replacement_to_chars,
+                            previous_previous,
+                            previous,
+                            current,
+                            &mut examined,
+                            &mut cells,
+                            &mut related_completeness,
+                        ) {
+                            true
+                        } else {
+                            examined = examined_before_reservation;
+                            cells = cells_before_reservation;
+                            related_reservation_exhausted = true;
+                            false
+                        }
+                    },
+                );
+            }
+            !related_reservation_exhausted
+        });
+        while direct_cursor < direct_candidates.len()
+            && consider_candidate(
+                self.source,
+                &direct_candidates[direct_cursor],
                 query,
                 query_chars,
                 self.config,
@@ -353,51 +500,25 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                 &mut examined,
                 &mut cells,
                 &mut completeness,
-            ) {
-                return false;
-            }
-            if is_related_seed(
-                query_chars,
-                candidate,
-                self.config.max_edit_distance,
-                related_candidate_chars,
-            ) {
-                self.source.visit_related_candidates(
-                    query,
-                    candidate,
-                    self.config.max_edit_distance,
-                    &mut |derived| {
-                        consider_candidate(
-                            self.source,
-                            derived,
-                            query,
-                            query_chars,
-                            self.config,
-                            self.replacements,
-                            self.ranking_signals,
-                            suggestions,
-                            candidate_chars,
-                            transformed_chars,
-                            replacement_from_chars,
-                            replacement_to_chars,
-                            previous_previous,
-                            previous,
-                            current,
-                            &mut examined,
-                            &mut cells,
-                            &mut completeness,
-                        )
-                    },
-                );
-            }
-            matches!(completeness, Completeness::Complete)
-        });
+            )
+        {
+            direct_cursor += 1;
+        }
+        if matches!(completeness, Completeness::Complete)
+            && !matches!(related_completeness, Completeness::Complete)
+        {
+            completeness = related_completeness;
+        }
         rank_suggestions(suggestions);
         presented.clear();
         suggestions.retain(|suggestion| presented.insert(suggestion.word.clone()));
         suggestions.truncate(self.config.max_results);
         completeness
     }
+}
+
+const fn half_rounded_up(value: usize) -> usize {
+    value / 2 + value % 2
 }
 
 #[allow(
@@ -424,35 +545,42 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     cells: &mut usize,
     completeness: &mut Completeness,
 ) -> bool {
-    if *examined == config.max_candidates {
-        *completeness = Completeness::CandidateLimitReached;
-        return false;
-    }
-    *examined += 1;
-    if !source.is_suggestion_candidate(candidate) {
-        return true;
-    }
     let Some(candidate_chars) =
         lowercase_chars_bounded_into(candidate, config.max_word_scalars, candidate_chars)
     else {
         return true;
     };
-    let distance = if let Some(distance) = replacement_distance(
+    let replacement_distance = replacement_distance(
         query_chars,
         candidate_chars,
         replacements,
         transformed_chars,
         replacement_from_chars,
         replacement_to_chars,
-    ) {
-        Some(distance)
-    } else {
+    );
+    if replacement_distance.is_none() {
         // A length difference beyond the permitted distance cannot reach the
         // dynamic-programming matrix. It must not spend the edit-cell budget
         // merely because it appeared early in lexical candidate order.
         if query_chars.len().abs_diff(candidate_chars.len()) > config.max_edit_distance {
             return true;
         }
+    }
+    // Admission is deliberately deferred until the candidate index and cheap
+    // length checks have narrowed the source. Policy-rejected pseudo-stems are
+    // not suggestion candidates and therefore must not consume either work
+    // budget or a reserved direct-candidate slot.
+    if !source.is_suggestion_candidate(candidate) {
+        return true;
+    }
+    if *examined == config.max_candidates {
+        *completeness = Completeness::CandidateLimitReached;
+        return false;
+    }
+    *examined += 1;
+    let distance = if let Some(distance) = replacement_distance {
+        Some(distance)
+    } else {
         let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
         if cells.saturating_add(required) > config.max_edit_cells {
             *completeness = Completeness::EditBudgetReached;
@@ -713,6 +841,122 @@ mod tests {
         }
     }
 
+    struct DerivedSource;
+
+    impl CandidateSource for DerivedSource {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            for candidate in ["cat", "cut"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_nearby_candidates(
+            &self,
+            _query: &[char],
+            _max_edit_distance: usize,
+            _max_word_scalars: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            self.visit_candidates(visitor);
+        }
+
+        fn visit_related_candidates(
+            &self,
+            _query: &str,
+            _seed: &str,
+            _max_edit_distance: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            visitor("cot");
+        }
+
+        fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            visitor("seed");
+        }
+    }
+
+    struct RejectingDerivedSource;
+
+    impl CandidateSource for RejectingDerivedSource {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            for candidate in ["bat", "cat"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_nearby_candidates(
+            &self,
+            _query: &[char],
+            _max_edit_distance: usize,
+            _max_word_scalars: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            self.visit_candidates(visitor);
+        }
+
+        fn is_suggestion_candidate(&self, candidate: &str) -> bool {
+            candidate != "bat"
+        }
+
+        fn visit_related_candidates(
+            &self,
+            _query: &str,
+            _seed: &str,
+            _max_edit_distance: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            visitor("cot");
+        }
+
+        fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            visitor("seed");
+        }
+    }
+
+    struct CompetingPhaseSource;
+
+    impl CandidateSource for CompetingPhaseSource {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            for candidate in ["cat", "cut"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_nearby_candidates(
+            &self,
+            _query: &[char],
+            _max_edit_distance: usize,
+            _max_word_scalars: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            self.visit_candidates(visitor);
+        }
+
+        fn visit_related_candidates(
+            &self,
+            _query: &str,
+            _seed: &str,
+            _max_edit_distance: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            for candidate in ["cot", "bit"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            visitor("seed");
+        }
+    }
+
     #[test]
     fn suggests_missing_letters_and_transpositions_deterministically() {
         let words = WordList::new(["authentication", "receive", "recipe"]).expect("valid words");
@@ -758,6 +1002,102 @@ mod tests {
 
         assert_eq!(result.completeness(), Completeness::Complete);
         assert_eq!(result.suggestions()[0].word(), "zzword");
+    }
+
+    #[test]
+    fn indexed_word_lists_find_late_neighbors_with_tiny_budgets() {
+        let words = WordList::new(["aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd", "receive"])
+            .expect("valid words");
+        let config = SuggestConfig {
+            max_candidates: 1,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&words, config).suggest("recieve");
+
+        assert_eq!(result.completeness(), Completeness::Complete);
+        assert_eq!(result.suggestions()[0].word(), "receive");
+    }
+
+    #[test]
+    fn direct_candidates_reserve_budget_for_related_forms() {
+        let config = SuggestConfig {
+            max_candidates: 2,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&DerivedSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert!(words.contains(&"cat"));
+        assert!(words.contains(&"cot"));
+        assert_eq!(result.completeness(), Completeness::CandidateLimitReached);
+    }
+
+    #[test]
+    fn limit_one_preserves_the_direct_candidate() {
+        let config = SuggestConfig {
+            max_candidates: 1,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&DerivedSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert_eq!(words, ["cat"]);
+        assert_eq!(result.completeness(), Completeness::CandidateLimitReached);
+    }
+
+    #[test]
+    fn rejected_stems_do_not_consume_the_direct_reservation() {
+        let config = SuggestConfig {
+            max_candidates: 2,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&RejectingDerivedSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert!(words.contains(&"cat"));
+        assert!(words.contains(&"cot"));
+        assert_eq!(result.completeness(), Completeness::Complete);
+    }
+
+    #[test]
+    fn related_forms_do_not_consume_the_direct_remainder() {
+        let config = SuggestConfig {
+            max_candidates: 10,
+            max_edit_cells: 48,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&CompetingPhaseSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert!(words.contains(&"cat"));
+        assert!(words.contains(&"cot"));
+        assert!(words.contains(&"cut"));
+        assert_eq!(result.completeness(), Completeness::EditBudgetReached);
     }
 
     #[test]

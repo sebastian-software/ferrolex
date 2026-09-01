@@ -15,10 +15,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod candidate_index;
 mod composition;
 mod lexicon;
 mod overlay;
 
+pub use candidate_index::CandidateIndex;
 pub use composition::{Checker, CheckerBuilder};
 pub use lexicon::{Dictionary, Normalization, WordList, WordListError};
 pub use overlay::UserDictionary;

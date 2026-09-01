@@ -1,7 +1,10 @@
 use std::borrow::Cow;
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 use unicode_normalization::{is_nfc, is_nfkc, UnicodeNormalization};
+
+use crate::CandidateIndex;
 
 /// An immutable collection that can recognize words.
 ///
@@ -71,11 +74,20 @@ impl std::error::Error for WordListError {}
 ///
 /// Entries are deduplicated at construction time. The sorted contiguous
 /// representation keeps exact lookup deterministic and allocation-free.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct WordList {
     words: Vec<Box<str>>,
     normalization: Normalization,
+    candidate_index: Arc<OnceLock<CandidateIndex>>,
 }
+
+impl PartialEq for WordList {
+    fn eq(&self, other: &Self) -> bool {
+        self.words == other.words && self.normalization == other.normalization
+    }
+}
+
+impl Eq for WordList {}
 
 impl WordList {
     /// Builds an exactly matched dictionary from non-empty UTF-8 entries.
@@ -169,6 +181,14 @@ impl WordList {
         self.words.iter().map(Box::as_ref)
     }
 
+    /// Returns the lazily-built spelling-candidate index.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn candidate_index(&self, maximum_word_scalars: usize) -> &CandidateIndex {
+        self.candidate_index
+            .get_or_init(|| CandidateIndex::new(self.words(), maximum_word_scalars))
+    }
+
     fn from_entries(normalization: Normalization, mut entries: Vec<Box<str>>) -> Self {
         entries.sort_unstable();
         entries.dedup();
@@ -176,6 +196,7 @@ impl WordList {
         Self {
             words: entries,
             normalization,
+            candidate_index: Arc::new(OnceLock::new()),
         }
     }
 }

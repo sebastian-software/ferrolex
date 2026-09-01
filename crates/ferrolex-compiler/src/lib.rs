@@ -22,8 +22,9 @@
 mod ir;
 
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
-use ferrolex_core::Dictionary;
+use ferrolex_core::{CandidateIndex, Dictionary};
 use ferrolex_suggest::CandidateSource;
 
 pub use ir::{
@@ -655,7 +656,7 @@ pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError>
 /// The backing byte vector is intentionally retained rather than decoded into
 /// pointer-heavy runtime objects. A caller that later supplies a memory map can
 /// use the same layout and bounds-checking rules.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct CompiledDictionary {
     bytes: Vec<u8>,
     word_count: usize,
@@ -663,7 +664,16 @@ pub struct CompiledDictionary {
     data_offset: usize,
     data_len: usize,
     frequency_offset: Option<usize>,
+    candidate_index: Arc<OnceLock<CandidateIndex>>,
 }
+
+impl PartialEq for CompiledDictionary {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+
+impl Eq for CompiledDictionary {}
 
 impl CompiledDictionary {
     /// Loads a format-version-1 dictionary after a fixed-header and checksum check.
@@ -773,6 +783,7 @@ impl CompiledDictionary {
             data_offset,
             data_len,
             frequency_offset,
+            candidate_index: Arc::new(OnceLock::new()),
         })
     }
 
@@ -911,6 +922,18 @@ impl CandidateSource for CompiledDictionary {
                 break;
             }
         }
+    }
+
+    fn visit_nearby_candidates(
+        &self,
+        query: &[char],
+        max_edit_distance: usize,
+        max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.candidate_index
+            .get_or_init(|| CandidateIndex::new(self.words(), max_word_scalars))
+            .visit_nearby(query, max_edit_distance, max_word_scalars, visitor);
     }
 
     fn candidate_frequency(&self, candidate: &str) -> Option<u64> {

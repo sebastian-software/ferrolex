@@ -533,6 +533,47 @@ impl CandidateSource for AnalysisDictionary {
         }
     }
 
+    fn visit_nearby_candidates(
+        &self,
+        query: &[char],
+        max_edit_distance: usize,
+        max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        for source in &self.sources {
+            let mut keep_going = true;
+            {
+                let mut visit = |word: &str| {
+                    keep_going = visitor(word);
+                    keep_going
+                };
+                match source {
+                    AnalysisSource::WordList(dictionary) => dictionary.visit_nearby_candidates(
+                        query,
+                        max_edit_distance,
+                        max_word_scalars,
+                        &mut visit,
+                    ),
+                    AnalysisSource::Artifact(dictionary) => dictionary.visit_nearby_candidates(
+                        query,
+                        max_edit_distance,
+                        max_word_scalars,
+                        &mut visit,
+                    ),
+                    AnalysisSource::Hunspell(dictionary) => dictionary.visit_nearby_candidates(
+                        query,
+                        max_edit_distance,
+                        max_word_scalars,
+                        &mut visit,
+                    ),
+                }
+            }
+            if !keep_going {
+                break;
+            }
+        }
+    }
+
     fn is_suggestion_candidate(&self, candidate: &str) -> bool {
         self.sources.iter().any(|source| match source {
             AnalysisSource::WordList(_) => true,
@@ -578,6 +619,30 @@ impl CandidateSource for AnalysisDictionary {
                         keep_going
                     },
                 ),
+            }
+            if !keep_going {
+                break;
+            }
+        }
+    }
+
+    fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        for source in &self.sources {
+            let mut keep_going = true;
+            match source {
+                AnalysisSource::WordList(_) => {}
+                AnalysisSource::Artifact(dictionary) => {
+                    dictionary.visit_related_seeds(&mut |word| {
+                        keep_going = visitor(word);
+                        keep_going
+                    });
+                }
+                AnalysisSource::Hunspell(dictionary) => {
+                    dictionary.visit_related_seeds(&mut |word| {
+                        keep_going = visitor(word);
+                        keep_going
+                    });
+                }
             }
             if !keep_going {
                 break;
@@ -652,6 +717,29 @@ impl CandidateSource for ArtifactDictionary {
         }
     }
 
+    fn visit_nearby_candidates(
+        &self,
+        query: &[char],
+        max_edit_distance: usize,
+        max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        match self {
+            Self::Exact(dictionary) => dictionary.visit_nearby_candidates(
+                query,
+                max_edit_distance,
+                max_word_scalars,
+                visitor,
+            ),
+            Self::Hunspell(dictionary) => dictionary.visit_nearby_candidates(
+                query,
+                max_edit_distance,
+                max_word_scalars,
+                visitor,
+            ),
+        }
+    }
+
     fn candidate_frequency(&self, candidate: &str) -> Option<u64> {
         match self {
             Self::Exact(dictionary) => dictionary.frequency(candidate),
@@ -675,6 +763,12 @@ impl CandidateSource for ArtifactDictionary {
     ) {
         if let Self::Hunspell(dictionary) = self {
             dictionary.visit_related_candidates(query, seed, max_edit_distance, visitor);
+        }
+    }
+
+    fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        if let Self::Hunspell(dictionary) = self {
+            dictionary.visit_related_seeds(visitor);
         }
     }
 }
