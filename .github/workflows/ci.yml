@@ -21,6 +21,7 @@ jobs:
         with:
           toolchain: 1.88
       - run: python3 scripts/check-release-version-contract.py
+      - run: python3 scripts/publish-crates.py --check
 
   test:
     name: Test (${{ matrix.os }}, Rust ${{ matrix.toolchain }})
