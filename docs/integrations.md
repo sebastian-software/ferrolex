@@ -13,7 +13,8 @@ in the workspace does not make them maintained release surfaces. Those crates
 are excluded from the workspace's default members and focused release
 compilation and tests. A path-filtered prototype workflow checks them when their
 own manifests, source, lockfile, or workflow changes and can also be started
-manually.
+manually. Changes to the shared core, code-analysis, or suggestion APIs also
+trigger it so retained prototypes cannot silently drift from their dependencies.
 
 Format-aware integration happens in the owning tool:
 

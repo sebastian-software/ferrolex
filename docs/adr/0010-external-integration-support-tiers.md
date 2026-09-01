@@ -32,7 +32,8 @@ promises. Existing workspace CI checks may remain temporarily while the
 prototype code is evaluated for removal. They are excluded from default
 workspace members and focused release compilation and tests, with a
 path-filtered, manually dispatchable workflow retaining targeted implementation
-evidence.
+evidence. Shared core, code-analysis, and suggestion API changes are included in
+that filter because the retained prototypes consume them.
 
 Document and language integrations belong to their owning tools and call the
 Rust or Node.js API after parsing. They do not require a ferrolex-owned LSP.
