@@ -112,5 +112,6 @@ over a large installed dictionary; an incomplete result is reported on stderr,
 and an empty budget-limited result includes a concrete retry hint. Repeating
 `--dictionary`, `--compiled`, or `--hunspell` layers suggestion candidates from
 all supplied sources in the same way as checking and analysis. The first
-Hunspell-backed source supplies KEY/MAP ranking and OCONV presentation metadata
-for the combined deterministic result.
+Hunspell-backed source supplies KEY/MAP ranking for the combined deterministic
+result. OCONV presentation remains source-owned and is applied only when the
+candidate belongs to that Hunspell-backed layer.

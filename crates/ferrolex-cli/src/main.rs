@@ -204,7 +204,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
         &command.hunspell_affix_paths,
     )?;
     let replacements = source.replacement_rules();
-    let metadata_dictionary = source.hunspell_metadata_dictionary();
+    let ranking_dictionary = source.hunspell_ranking_dictionary();
     let mut config = SuggestConfig::default();
     if let Some(max_results) = command.max_results {
         config.max_results = max_results;
@@ -218,7 +218,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     if let Some(max_edit_cells) = command.max_edit_cells {
         config.max_edit_cells = max_edit_cells;
     }
-    let result = if let Some(dictionary) = metadata_dictionary {
+    let result = if let Some(dictionary) = ranking_dictionary {
         Suggester::new(&source, config)
             .with_replacement_rules(&replacements)
             .with_ranking_signals(dictionary.ranking_signals())
@@ -231,10 +231,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",
-            metadata_dictionary.map_or_else(
-                || suggestion.word().to_owned(),
-                |dictionary| dictionary.normalize_output(suggestion.word()),
-            ),
+            source.normalize_suggestion_output(suggestion.word()),
             suggestion.distance()
         );
     }
@@ -495,12 +492,37 @@ impl AnalysisDictionary {
             .collect()
     }
 
-    fn hunspell_metadata_dictionary(&self) -> Option<&HunspellDictionary> {
+    fn hunspell_ranking_dictionary(&self) -> Option<&HunspellDictionary> {
         self.sources.iter().find_map(|source| match source {
             AnalysisSource::WordList(_) => None,
             AnalysisSource::Artifact(dictionary) => dictionary.hunspell_dictionary(),
             AnalysisSource::Hunspell(dictionary) => Some(dictionary.as_ref()),
         })
+    }
+
+    fn normalize_suggestion_output(&self, candidate: &str) -> String {
+        for source in &self.sources {
+            match source {
+                AnalysisSource::WordList(dictionary) if dictionary.contains(candidate) => {
+                    return candidate.to_owned();
+                }
+                AnalysisSource::Artifact(dictionary)
+                    if dictionary.contains(candidate)
+                        && dictionary.is_suggestion_candidate(candidate) =>
+                {
+                    return dictionary.normalize_suggestion_output(candidate);
+                }
+                AnalysisSource::Hunspell(dictionary)
+                    if dictionary.is_suggestion_candidate(candidate) =>
+                {
+                    return dictionary.normalize_output(candidate);
+                }
+                AnalysisSource::WordList(_)
+                | AnalysisSource::Artifact(_)
+                | AnalysisSource::Hunspell(_) => {}
+            }
+        }
+        candidate.to_owned()
     }
 }
 
@@ -709,6 +731,13 @@ impl ArtifactDictionary {
         match self {
             Self::Exact(_) => None,
             Self::Hunspell(dictionary) => Some(dictionary.as_ref()),
+        }
+    }
+
+    fn normalize_suggestion_output(&self, candidate: &str) -> String {
+        match self {
+            Self::Exact(_) => candidate.to_owned(),
+            Self::Hunspell(dictionary) => dictionary.normalize_output(candidate),
         }
     }
 }
@@ -3236,7 +3265,7 @@ mod tests {
     fn layered_sources_preserve_hunspell_output_metadata() {
         let hunspell = import(
             "metadata.aff",
-            "OCONV 1\nOCONV ae æ\n",
+            "OCONV 2\nOCONV ae æ\nOCONV plain rewritten\n",
             "metadata.dic",
             "1\naer\n",
             ImportMode::Strict,
@@ -3251,11 +3280,13 @@ mod tests {
             ],
         };
 
-        let metadata = dictionary
-            .hunspell_metadata_dictionary()
-            .expect("adding a plain layer preserves Hunspell metadata");
+        let ranking = dictionary
+            .hunspell_ranking_dictionary()
+            .expect("adding a plain layer preserves Hunspell ranking metadata");
 
-        assert_eq!(metadata.normalize_output("aer"), "ær");
+        assert_eq!(ranking.normalize_output("aer"), "ær");
+        assert_eq!(dictionary.normalize_suggestion_output("aer"), "ær");
+        assert_eq!(dictionary.normalize_suggestion_output("plain"), "plain");
     }
 
     #[test]
