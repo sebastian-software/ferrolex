@@ -659,11 +659,7 @@ impl<F: Fetcher> DictionaryInstaller<F> {
     fn install_file(&self, file: &VerifiedFile, directory: &Path) -> Result<PathBuf, FetchError> {
         let destination = directory.join(file.name());
         if destination.exists() {
-            let existing = fs::read(&destination).map_err(|source| FetchError::ReadCache {
-                path: destination.clone(),
-                source,
-            })?;
-            if sha256(&existing) == file.sha256 {
+            if cache_matches(&destination, file.sha256)? {
                 return Ok(destination);
             }
             return Err(FetchError::CacheConflict(destination));
@@ -686,7 +682,7 @@ impl<F: Fetcher> DictionaryInstaller<F> {
             });
         }
 
-        atomic_write_new(&destination, &bytes)?;
+        atomic_write_new(&destination, &bytes, file.sha256)?;
         Ok(destination)
     }
 }
@@ -958,7 +954,19 @@ fn timeout_error(url: &str, timeout: ureq::Timeout) -> FetchError {
     }
 }
 
-fn atomic_write_new(destination: &Path, bytes: &[u8]) -> Result<(), FetchError> {
+fn cache_matches(destination: &Path, expected_sha256: [u8; 32]) -> Result<bool, FetchError> {
+    let existing = fs::read(destination).map_err(|source| FetchError::ReadCache {
+        path: destination.to_path_buf(),
+        source,
+    })?;
+    Ok(sha256(&existing) == expected_sha256)
+}
+
+fn atomic_write_new(
+    destination: &Path,
+    bytes: &[u8],
+    expected_sha256: [u8; 32],
+) -> Result<(), FetchError> {
     let temporary = destination.with_extension(format!(
         "tmp-{}-{}",
         std::process::id(),
@@ -990,7 +998,14 @@ fn atomic_write_new(destination: &Path, bytes: &[u8]) -> Result<(), FetchError> 
                 source,
             }),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                Err(FetchError::CacheConflict(destination.to_path_buf()))
+                if cache_matches(destination, expected_sha256)? {
+                    fs::remove_file(&temporary).map_err(|source| FetchError::WriteCache {
+                        path: temporary.clone(),
+                        source,
+                    })
+                } else {
+                    Err(FetchError::CacheConflict(destination.to_path_buf()))
+                }
             }
             Err(source) => Err(FetchError::WriteCache {
                 path: destination.to_path_buf(),
@@ -1182,6 +1197,7 @@ mod tests {
 
         let error = DictionaryInstaller::new(RacingFetcher {
             destination: destination.clone(),
+            competing_bytes: b"different".to_vec(),
         })
         .install(&manifest, cache.path())
         .expect_err("a file created after the cache check is not overwritten");
@@ -1191,6 +1207,43 @@ mod tests {
             fs::read(destination).expect("concurrent cache bytes remain"),
             b"different"
         );
+    }
+
+    #[test]
+    fn concurrent_cache_creation_accepts_identical_verified_bytes() {
+        let manifest = manifest();
+        let cache = Cache::new();
+        let directory = cache.path().join("en_US");
+        let destination = directory.join("sample.aff");
+
+        let installed = DictionaryInstaller::new(RacingFetcher {
+            destination: destination.clone(),
+            competing_bytes: b"abc".to_vec(),
+        })
+        .install(&manifest, cache.path())
+        .expect("an identical concurrent cache entry is reusable");
+
+        assert_eq!(installed.aff_path(), destination);
+        assert_eq!(
+            fs::read(installed.aff_path()).expect("verified concurrent bytes remain"),
+            b"abc"
+        );
+        assert_eq!(
+            fs::read(installed.dic_path()).expect("second cache file is installed"),
+            b"abc"
+        );
+        let mut cached_names = fs::read_dir(directory)
+            .expect("cache directory is readable")
+            .map(|entry| {
+                entry
+                    .expect("cache entry is readable")
+                    .file_name()
+                    .into_string()
+                    .expect("fixture names are UTF-8")
+            })
+            .collect::<Vec<_>>();
+        cached_names.sort();
+        assert_eq!(cached_names, ["sample.aff", "sample.dic"]);
     }
 
     #[test]
@@ -1333,11 +1386,12 @@ mod tests {
 
     struct RacingFetcher {
         destination: PathBuf,
+        competing_bytes: Vec<u8>,
     }
 
     impl Fetcher for RacingFetcher {
         fn fetch(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
-            fs::write(&self.destination, b"different").map_err(|source| {
+            fs::write(&self.destination, &self.competing_bytes).map_err(|source| {
                 FetchError::WriteCache {
                     path: self.destination.clone(),
                     source,
