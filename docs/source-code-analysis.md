@@ -102,6 +102,11 @@ processes should serialize add-word operations themselves: atomic replacement
 prevents partial files but intentionally does not merge two independently read
 snapshots.
 
+`check`, `suggest`, and `analyze` automatically layer both files when present;
+workspace words take precedence in candidate traversal. A user list can be the
+only dictionary source, so an added word is available to the next CLI process
+without repeating its path on every command.
+
 ## Technical vocabulary
 
 Use a reviewed plain UTF-8 word list for technology names, APIs, and product

@@ -41,14 +41,14 @@ const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 const EXIT_CODES: &str =
     "\nExit status: 0 success, 1 finding, 2 usage error, 3 operational failure.";
-const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
-const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
+const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
+const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
 const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
-const HELP_ANALYZE: &str = "Usage: ferrolex analyze (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>) [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
+const HELP_ANALYZE: &str = "Usage: ferrolex analyze [--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>] [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
 const HELP_COMPILE: &str = "Usage: ferrolex compile (--dictionary <PATH> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n\nCompiles a plain word list or Hunspell pair to a native artifact.\n  -o <ARTIFACT>  Output artifact path\n\nExample: ferrolex compile --dictionary words.txt -o words.flexdic";
 const HELP_INSPECT: &str = "Usage: ferrolex inspect <ARTIFACT>\n\nPrints native artifact metadata.\n\nExample: ferrolex inspect words.flexdic";
 const HELP_VALIDATE: &str = "Usage: ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n\nExample: ferrolex validate --strict dictionary.aff dictionary.dic";
-const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | install | add-word> [OPTIONS]\n\nLists reviewed dictionaries, obtains a pinned source, installs a runtime cache, or records a user word.\n  fetch/install <LOCALE> --cache <PATH>  Use an explicit cache directory\n  add-word [--workspace <PATH> | --global] <WORD>\n\nExample: ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries";
+const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | install | add-word> [OPTIONS]\n\nLists reviewed dictionaries, obtains a pinned source, installs a runtime cache, or records a user word.\nUser words are automatically included by check, suggest, and analyze.\n  fetch/install <LOCALE> --cache <PATH>  Use an explicit cache directory\n  add-word [--workspace <PATH> | --global] <WORD>\n\nExample: ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -203,6 +203,11 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
         &command.compiled_paths,
         &command.hunspell_affix_paths,
     )?;
+    if source.is_empty() {
+        return Err(CliError::Usage(
+            "suggest requires a dictionary option or a workspace/global user dictionary".to_owned(),
+        ));
+    }
     let replacements = source.replacement_rules();
     let ranking_dictionary = source.hunspell_ranking_dictionary();
     let mut config = SuggestConfig::default();
@@ -462,6 +467,19 @@ fn load_checker(
     hunspell_affix_paths: &[PathBuf],
 ) -> Result<Checker, CliError> {
     let mut builder = Checker::builder();
+    let user_dictionaries = load_user_dictionaries()?;
+    if user_dictionaries.is_empty()
+        && dictionary_paths.is_empty()
+        && compiled_paths.is_empty()
+        && hunspell_affix_paths.is_empty()
+    {
+        return Err(CliError::Usage(
+            "check requires a dictionary option or a workspace/global user dictionary".to_owned(),
+        ));
+    }
+    for dictionary in user_dictionaries {
+        builder = builder.dictionary(dictionary);
+    }
     for path in dictionary_paths {
         let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
             path: path.clone(),
@@ -485,6 +503,10 @@ struct AnalysisDictionary {
 }
 
 impl AnalysisDictionary {
+    fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+
     fn replacement_rules(&self) -> Vec<ReplacementRule> {
         self.sources
             .iter()
@@ -695,7 +717,10 @@ fn load_analysis_dictionary(
     compiled_paths: &[PathBuf],
     hunspell_affix_paths: &[PathBuf],
 ) -> Result<AnalysisDictionary, CliError> {
-    let mut sources = Vec::new();
+    let mut sources = load_user_dictionaries()?
+        .into_iter()
+        .map(AnalysisSource::WordList)
+        .collect::<Vec<_>>();
     for path in dictionary_paths {
         let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
             path: path.clone(),
@@ -969,12 +994,13 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
         );
         hunspell_paths.extend(project.hunspell_paths().map(|path| base.join(path)));
     }
-    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_paths.is_empty() {
+    let dictionary = load_analysis_dictionary(&dictionary_paths, &compiled_paths, &hunspell_paths)?;
+    if dictionary.is_empty() {
         return Err(CliError::Usage(
-            "analyze requires a dictionary option or configured dictionary source".to_owned(),
+            "analyze requires a dictionary option, configured source, or a workspace/global user dictionary"
+                .to_owned(),
         ));
     }
-    let dictionary = load_analysis_dictionary(&dictionary_paths, &compiled_paths, &hunspell_paths)?;
     let mut builder = Analyzer::builder(&dictionary);
     let mut include_patterns = command.include_patterns.clone();
     let mut exclude_patterns = command.exclude_patterns.clone();
@@ -1735,12 +1761,6 @@ fn parse_suggest_arguments(
             _ => word = Some(argument),
         }
     }
-    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
-        return Err(CliError::Usage(
-            "suggest requires at least one `--dictionary`, `--compiled`, or `--hunspell` path"
-                .to_owned(),
-        ));
-    }
     let word =
         word.ok_or_else(|| CliError::Usage("suggest requires exactly one word".to_owned()))?;
     Ok(Command::Suggest(SuggestCommand {
@@ -1832,6 +1852,25 @@ fn global_user_dictionary_path() -> Result<PathBuf, CliError> {
     env::var_os("HOME")
         .map(|directory| PathBuf::from(directory).join(".config/ferrolex/words.txt"))
         .ok_or_else(|| CliError::Usage("`--global` requires HOME or XDG_CONFIG_HOME".to_owned()))
+}
+
+fn load_user_dictionaries() -> Result<Vec<WordList>, CliError> {
+    let mut paths = vec![PathBuf::from(".ferrolex/words.txt")];
+    if let Ok(global_path) = global_user_dictionary_path() {
+        if global_path != paths[0] {
+            paths.push(global_path);
+        }
+    }
+
+    let mut dictionaries = Vec::new();
+    for path in paths {
+        match fs::read_to_string(&path) {
+            Ok(text) => dictionaries.push(WordList::from_text(Normalization::Nfc, &text)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => return Err(CliError::ReadDictionary { path, source }),
+        }
+    }
+    Ok(dictionaries)
 }
 
 fn parse_dictionary_catalog_arguments(
@@ -2041,15 +2080,6 @@ fn parse_analyze_arguments(
         }
     }
 
-    if dictionary_paths.is_empty()
-        && compiled_paths.is_empty()
-        && hunspell_affix_paths.is_empty()
-        && config_path.is_none()
-    {
-        return Err(CliError::Usage(
-            "analyze requires a dictionary option or `--config`".to_owned(),
-        ));
-    }
     let path = path.ok_or_else(|| CliError::Usage("analyze requires a path".to_owned()))?;
 
     Ok(Command::Analyze(AnalyzeCommand {
@@ -2131,12 +2161,6 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
 
     let target =
         target.ok_or_else(|| CliError::Usage("check requires a word or `--file`".to_owned()))?;
-    if dictionary_paths.is_empty() && compiled_paths.is_empty() && hunspell_affix_paths.is_empty() {
-        return Err(CliError::Usage(
-            "check requires at least one `--dictionary`, `--compiled`, or `--hunspell` path"
-                .to_owned(),
-        ));
-    }
 
     Ok(Command::Check(CheckCommand {
         dictionary_paths,
@@ -2702,11 +2726,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_dictionary_paths() {
-        let error = parse_arguments(["ferrolex", "check", "word"].map(str::to_owned))
-            .expect_err("a dictionary is required");
+    fn permits_an_automatic_user_dictionary_source() {
+        let command = parse_arguments(["ferrolex", "check", "word"].map(str::to_owned))
+            .expect("a user dictionary may supply the source at runtime");
 
-        assert!(matches!(error, CliError::Usage(message) if message.contains("--dictionary")));
+        assert_eq!(
+            command,
+            Command::Check(CheckCommand {
+                dictionary_paths: Vec::new(),
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                target: CheckTarget::Word("word".to_owned()),
+            })
+        );
     }
 
     #[test]

@@ -21,6 +21,27 @@ fn run(arguments: &[&str]) -> Output {
         .expect("CLI binary runs")
 }
 
+fn run_in(directory: &std::path::Path, arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_ferrolex"))
+        .current_dir(directory)
+        .args(arguments)
+        .output()
+        .expect("CLI binary runs")
+}
+
+fn run_with_config_home(
+    directory: &std::path::Path,
+    config_home: &std::path::Path,
+    arguments: &[&str],
+) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_ferrolex"))
+        .current_dir(directory)
+        .env("XDG_CONFIG_HOME", config_home)
+        .args(arguments)
+        .output()
+        .expect("CLI binary runs")
+}
+
 #[test]
 fn every_command_has_a_focused_help_screen() {
     for command in [
@@ -60,6 +81,69 @@ fn version_and_error_contract_cross_the_process_boundary() {
     let stderr = String::from_utf8(runtime.stderr).expect("runtime diagnostic is UTF-8");
     assert!(stderr.contains("could not read dictionary"));
     assert!(!stderr.contains("Usage: ferrolex"));
+}
+
+#[test]
+fn workspace_user_words_round_trip_across_cli_processes() {
+    let directory = temporary_directory("workspace-user-dictionary");
+    fs::write(directory.join("source.txt"), "projectterm\n").expect("source fixture is written");
+
+    let added = run_in(&directory, &["dictionary", "add-word", "projectterm"]);
+    assert!(added.status.success());
+    let added_stdout = String::from_utf8(added.stdout).expect("stdout is UTF-8");
+    let added_path = added_stdout
+        .strip_prefix("added: ")
+        .expect("the add command reports its path")
+        .trim();
+    assert_eq!(
+        std::path::Path::new(added_path).file_name(),
+        Some(std::ffi::OsStr::new("words.txt"))
+    );
+    assert!(added_path.contains(".ferrolex"));
+
+    let checked = run_in(&directory, &["check", "projectterm"]);
+    assert!(checked.status.success());
+    assert_eq!(
+        String::from_utf8(checked.stdout).expect("stdout is UTF-8"),
+        "accepted: projectterm\n"
+    );
+
+    let suggested = run_in(&directory, &["suggest", "projecttrm"]);
+    assert!(suggested.status.success());
+    assert!(String::from_utf8(suggested.stdout)
+        .expect("stdout is UTF-8")
+        .contains("suggestion: projectterm"));
+
+    let analyzed = run_in(&directory, &["analyze", "source.txt"]);
+    assert!(analyzed.status.success());
+    assert!(analyzed.stdout.is_empty());
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn global_user_words_are_loaded_outside_the_creating_workspace() {
+    let config_home = temporary_directory("global-user-config");
+    let first_workspace = temporary_directory("global-user-first-workspace");
+    let second_workspace = temporary_directory("global-user-second-workspace");
+
+    let added = run_with_config_home(
+        &first_workspace,
+        &config_home,
+        &["dictionary", "add-word", "--global", "globalterm"],
+    );
+    assert!(added.status.success());
+
+    let checked = run_with_config_home(&second_workspace, &config_home, &["check", "globalterm"]);
+    assert!(checked.status.success());
+    assert_eq!(
+        String::from_utf8(checked.stdout).expect("stdout is UTF-8"),
+        "accepted: globalterm\n"
+    );
+
+    fs::remove_dir_all(config_home).expect("temporary fixture is removed");
+    fs::remove_dir_all(first_workspace).expect("temporary fixture is removed");
+    fs::remove_dir_all(second_workspace).expect("temporary fixture is removed");
 }
 
 #[test]
