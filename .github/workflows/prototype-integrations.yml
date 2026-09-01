@@ -6,6 +6,7 @@ on:
       - '.github/workflows/prototype-integrations.yml'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      # Retained prototypes consume these shared APIs.
       - 'crates/ferrolex-code/**'
       - 'crates/ferrolex-core/**'
       - 'crates/ferrolex-ffi/**'
@@ -20,6 +21,7 @@ on:
       - '.github/workflows/prototype-integrations.yml'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      # Retained prototypes consume these shared APIs.
       - 'crates/ferrolex-code/**'
       - 'crates/ferrolex-core/**'
       - 'crates/ferrolex-ffi/**'
