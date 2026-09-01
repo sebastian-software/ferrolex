@@ -1,0 +1,5 @@
+ignore-word = ferrolex
+ignore-pattern = generated_.+
+minimum-word-length = 2
+single-letter-prefix = separate
+comment-syntax = line://

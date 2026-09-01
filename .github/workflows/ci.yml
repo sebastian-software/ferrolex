@@ -91,9 +91,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-08-31
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          shared-key: fuzz
           workspaces: |
             . -> target
             fuzz -> target
@@ -101,10 +102,46 @@ jobs:
         with:
           tool: cargo-fuzz
       - run: |
-          host_target="$(rustc +nightly --version --verbose | sed -n 's/^host: //p')"
-          for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation; do
-            cargo +nightly fuzz run "$target" --target "$host_target" -- -runs=256
+          host_target="$(rustc --version --verbose | sed -n 's/^host: //p')"
+          for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation analyze_source project_config word_list; do
+            cargo fuzz run "$target" --target "$host_target" -- -runs=256
           done
+
+  fuzz-scheduled:
+    name: Sustained fuzz (${{ matrix.target }})
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - hunspell_import
+          - runtime_cache_loader
+          - compiled_loader
+          - suggestion_input
+          - compound_evaluation
+          - analyze_source
+          - project_config
+          - word_list
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly-2026-08-31
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: fuzz
+          workspaces: |
+            . -> target
+            fuzz -> target
+          save-if: ${{ matrix.target == 'hunspell_import' }}
+      - uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        with:
+          tool: cargo-fuzz
+      - run: |
+          host_target="$(rustc --version --verbose | sed -n 's/^host: //p')"
+          cargo fuzz run "${{ matrix.target }}" --target "$host_target" -- -max_total_time=600
 
   hunspell-compatibility-gate:
     name: Hunspell compatibility gate

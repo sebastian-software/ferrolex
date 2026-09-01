@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 ferrolex-compiler = { path = "../crates/ferrolex-compiler" }
+ferrolex-code = { path = "../crates/ferrolex-code" }
 ferrolex-core = { path = "../crates/ferrolex-core" }
 ferrolex-hunspell = { path = "../crates/ferrolex-hunspell" }
 ferrolex-suggest = { path = "../crates/ferrolex-suggest" }
@@ -50,6 +51,27 @@ bench = false
 [[bin]]
 name = "compound_evaluation"
 path = "fuzz_targets/compound_evaluation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "analyze_source"
+path = "fuzz_targets/analyze_source.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project_config"
+path = "fuzz_targets/project_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "word_list"
+path = "fuzz_targets/word_list.rs"
 test = false
 doc = false
 bench = false
