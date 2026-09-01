@@ -11,6 +11,23 @@ version and release record through the root `ferrolex` umbrella package. The
 requirements, the release manifest, and the explicit Cargo-workspace release
 plugin configuration on every change.
 
+## Releasing
+
+Merging the Release Please PR creates the GitHub release and tag. The release
+workflow then runs the full Hunspell compatibility scorecard and, only after it
+passes, publishes the public workspace crates to crates.io in dependency order.
+The publish step uses the repository's `CARGO_REGISTRY_TOKEN` Actions secret.
+Configure that secret with a crates.io token scoped to the nine public ferrolex
+crates before merging the first release PR. After the initial versions exist,
+crates.io Trusted Publishing can replace the long-lived secret with a
+workflow-scoped short-lived token.
+
+Publishing is resumable: the script skips an exact crate version already on
+crates.io and waits for every upload to reach Cargo's index before continuing.
+After a failed publish job, rerun that job rather than changing the release tag.
+The experimental FFI, Node.js, Python, and LSP packages remain explicitly
+unpublished.
+
 ## Developing
 
 ferrolex supports Rust 1.88 and later. Install the pinned MSRV when you need

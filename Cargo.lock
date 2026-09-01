@@ -384,7 +384,6 @@ name = "ferrolex"
 version = "0.3.0"
 dependencies = [
  "ferrolex-core",
- "ferrolex-ffi",
 ]
 
 [[package]]
