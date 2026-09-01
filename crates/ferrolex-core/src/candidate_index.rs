@@ -53,6 +53,9 @@ impl CandidateIndex {
 
     /// Visits candidates that can still be within `maximum_distance` of `query`.
     ///
+    /// Query scalars are lowercased internally using the same Unicode mapping
+    /// applied to indexed candidates.
+    ///
     /// Candidates are emitted in their original deterministic order. Returning
     /// `false` from `visitor` stops the traversal.
     pub fn visit_nearby(
@@ -62,8 +65,13 @@ impl CandidateIndex {
         maximum_word_scalars: usize,
         visitor: &mut dyn FnMut(&str) -> bool,
     ) {
+        let Some(query) = lowercase_characters_bounded(query.iter().copied(), maximum_word_scalars)
+        else {
+            return;
+        };
+        let query_length = query.len();
         if maximum_word_scalars > self.indexed_maximum_word_scalars {
-            self.visit_nearby_linear(query, maximum_distance, maximum_word_scalars, visitor);
+            self.visit_nearby_linear(&query, maximum_distance, maximum_word_scalars, visitor);
             return;
         }
         let minimum_length = query.len().saturating_sub(maximum_distance);
@@ -88,7 +96,7 @@ impl CandidateIndex {
             }
         }
 
-        let mut sorted_query = query.to_vec();
+        let mut sorted_query = query;
         sorted_query.sort_unstable();
         for candidate_index in possible {
             let Some(candidate_characters) = &self.lowercase_characters[candidate_index] else {
@@ -99,8 +107,7 @@ impl CandidateIndex {
             {
                 continue;
             }
-            let minimum_overlap = query
-                .len()
+            let minimum_overlap = query_length
                 .max(candidate_characters.len())
                 .saturating_sub(maximum_distance);
             if multiset_overlap(&sorted_query, candidate_characters) < minimum_overlap {
@@ -152,8 +159,15 @@ impl CandidateIndex {
 }
 
 fn lowercase_bounded(word: &str, maximum: usize) -> Option<Vec<char>> {
+    lowercase_characters_bounded(word.chars(), maximum)
+}
+
+fn lowercase_characters_bounded(
+    characters: impl IntoIterator<Item = char>,
+    maximum: usize,
+) -> Option<Vec<char>> {
     let mut lowercase = Vec::new();
-    for character in word.chars() {
+    for character in characters {
         for lowercase_character in character.to_lowercase() {
             if lowercase.len() == maximum {
                 return None;
@@ -214,6 +228,20 @@ mod tests {
     fn retains_transpositions_and_late_lexical_neighbors() {
         let index = CandidateIndex::new(["aaaaaaa", "receive", "zzzzzzz"], 64);
         let query = "recieve".chars().collect::<Vec<_>>();
+        let mut candidates = Vec::new();
+
+        index.visit_nearby(&query, 1, 64, &mut |candidate| {
+            candidates.push(candidate.to_owned());
+            true
+        });
+
+        assert_eq!(candidates, ["receive"]);
+    }
+
+    #[test]
+    fn lowercases_public_query_input_before_filtering() {
+        let index = CandidateIndex::new(["receive"], 64);
+        let query = "RECIEVE".chars().collect::<Vec<_>>();
         let mut candidates = Vec::new();
 
         index.visit_nearby(&query, 1, 64, &mut |candidate| {
