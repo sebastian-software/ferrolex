@@ -156,21 +156,24 @@ fn check_reuses_one_dictionary_for_multiple_files() {
 }
 
 #[test]
-fn check_accepts_a_hyphen_leading_word_after_the_option_separator() {
+fn check_accepts_option_shaped_words_after_the_option_separator() {
     let directory = temporary_directory("check-option-separator");
-    fs::write(directory.join("words.txt"), "-ish\n").expect("dictionary fixture is written");
+    fs::write(directory.join("words.txt"), "-ish\n--file=x\n")
+        .expect("dictionary fixture is written");
 
-    let output = run_in(
-        &directory,
-        &["check", "--dictionary", "words.txt", "--", "-ish"],
-    );
+    for word in ["-ish", "--file=x"] {
+        let output = run_in(
+            &directory,
+            &["check", "--dictionary", "words.txt", "--", word],
+        );
 
-    assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
-        "accepted: -ish\n"
-    );
-    assert!(output.stderr.is_empty());
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+            format!("accepted: {word}\n")
+        );
+        assert!(output.stderr.is_empty());
+    }
 
     fs::remove_dir_all(directory).expect("temporary fixture is removed");
 }

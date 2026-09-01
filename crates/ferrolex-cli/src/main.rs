@@ -2241,9 +2241,17 @@ fn required_path(
 }
 
 fn expand_long_option_values(arguments: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut options_ended = false;
     arguments
         .into_iter()
         .flat_map(|argument| {
+            if options_ended {
+                return vec![argument];
+            }
+            if argument == "--" {
+                options_ended = true;
+                return vec![argument];
+            }
             let Some((option, value)) = argument.split_once('=') else {
                 return vec![argument];
             };
@@ -2795,29 +2803,23 @@ mod tests {
     }
 
     #[test]
-    fn parses_a_hyphen_leading_word_after_the_option_separator() {
-        let command = parse_arguments(
-            [
-                "ferrolex",
-                "check",
-                "--dictionary",
-                "words.txt",
-                "--",
-                "-ish",
-            ]
-            .map(str::to_owned),
-        )
-        .expect("the option separator makes the word unambiguous");
+    fn parses_option_shaped_words_literally_after_the_option_separator() {
+        for word in ["-ish", "--file=x"] {
+            let command = parse_arguments(
+                ["ferrolex", "check", "--dictionary", "words.txt", "--", word].map(str::to_owned),
+            )
+            .expect("the option separator makes the word unambiguous");
 
-        assert_eq!(
-            command,
-            Command::Check(CheckCommand {
-                dictionary_paths: vec![PathBuf::from("words.txt")],
-                compiled_paths: Vec::new(),
-                hunspell_affix_paths: Vec::new(),
-                target: CheckTarget::Word("-ish".to_owned()),
-            })
-        );
+            assert_eq!(
+                command,
+                Command::Check(CheckCommand {
+                    dictionary_paths: vec![PathBuf::from("words.txt")],
+                    compiled_paths: Vec::new(),
+                    hunspell_affix_paths: Vec::new(),
+                    target: CheckTarget::Word(word.to_owned()),
+                })
+            );
+        }
     }
 
     #[test]
