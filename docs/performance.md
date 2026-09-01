@@ -28,10 +28,18 @@ measurement, nor a comparison with another spelling engine.
 `cargo bench -p ferrolex-hunspell` measures one strict, in-source synthetic
 Hunspell pair. Its lookup lanes are `hit`, `miss`, `affixed`, `compound`, and
 `mixed-case`; the fixture asserts each lane's recognition result before timing.
+It also measures the dominant startup and runtime paths against a deterministic
+100,000-entry Hunspell source: strict `.aff`/`.dic` import, validated runtime
+cache loading, source and cache parity for hit / affixed / miss lookups, and an
+affix-derived suggestion. The import source and runtime artifact are prepared
+outside the timed closures; import and cache-load measurements include parsing,
+validation, allocation, construction, and destruction, but no filesystem I/O.
+
 The same benchmark checks four pinned synthetic repository-shaped workloads:
 large Markdown, TypeScript, Rust, and mixed documentation/code. Corpus text,
 dictionary construction, and analyzer construction are outside the timed
-closures. The results characterize tokenization plus recognition, not disk I/O
+closures. Every lookup and suggestion lane asserts its intended result before
+timing. The results characterize the named in-memory paths, not process startup
 or a claim about any external repository.
 
 There is intentionally no `ferrolex benchmark` CLI command. Criterion benches
@@ -53,11 +61,14 @@ recognition mismatch before interpreting timing results.
 ## Suggestions
 
 `cargo bench -p ferrolex-suggest` measures the reused-buffer
-`Suggester::suggest_into` path against a deterministic 100,000-word corpus.
+`Suggester::suggest_into` path against a deterministic, exactly 100,000-word
+corpus.
 The five lanes are `single-edit`, `transposition`, `long-word`,
 `compound-typo`, and `no-useful-suggestion`. Their target spellings are added
 to the same synthetic corpus so every lane has a stable intended outcome (or,
-for the last lane, intentionally does not).
+for the last lane, intentionally does not). Before Criterion times a lane, the
+benchmark requires a complete, non-budget-truncated result and verifies the
+expected suggestion or stable empty output.
 
 Corpus construction, sorting, `Suggester` construction, and initial buffer
 allocation happen outside Criterion's timed closure. Each measurement retains
