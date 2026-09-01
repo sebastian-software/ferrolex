@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -35,7 +36,10 @@ use ferrolex_hunspell::{
     Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError, ImportMode, ImportResult,
     LookupExplanation, Rejection, RejectionReason, RuntimeCacheError, Severity, SourceDigests,
 };
-use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
+use ferrolex_suggest::{
+    CandidateSource, Completeness, ReplacementRule, SuggestConfig, SuggestScratch, Suggester,
+    Suggestion,
+};
 use ferrolex_text::check_text;
 use serde_json::json;
 
@@ -53,6 +57,7 @@ const HELP_VALIDATE: &str = "Usage: ferrolex validate [--format <text|json>] [--
 const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | install | add-word> [OPTIONS]\n\nLists reviewed dictionaries, obtains a pinned source, installs a runtime cache, or records a user word.\nUser words are automatically included by check, suggest, and analyze.\n  fetch/install <LOCALE> --cache <PATH>  Use an explicit cache directory\n  add-word [--workspace <PATH> | --global] <WORD>\n\nExample: ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries";
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
+const MAX_ANALYSIS_SUGGESTION_CACHE_ENTRIES: usize = 4_096;
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> ExitCode {
@@ -1115,6 +1120,7 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
     }
     let analyzer = builder.build();
     let paths = analysis_paths(&command.path, &include_patterns, &exclude_patterns)?;
+    let mut suggestion_engine = analysis_suggestion_engine(command.suggest, &dictionary);
     let mut has_diagnostic = false;
     for path in paths {
         let Some(source) = read_analysis_source(&path)? else {
@@ -1135,8 +1141,7 @@ fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
                 &source,
                 &line_index,
                 finding,
-                &dictionary,
-                command.suggest,
+                suggestion_engine.as_mut(),
             );
             has_diagnostic = true;
         }
@@ -1332,15 +1337,10 @@ fn print_analysis_finding(
     source: &str,
     line_index: &LineIndex,
     finding: &ferrolex_code::Finding<'_>,
-    dictionary: &AnalysisDictionary,
-    include_suggestions: bool,
+    suggestion_engine: Option<&mut AnalysisSuggestionEngine<'_, AnalysisDictionary>>,
 ) {
     let (line, column) = line_index.line_and_column(source, finding.range().start);
-    let suggestions = if include_suggestions {
-        analysis_suggestions(finding, dictionary)
-    } else {
-        Vec::new()
-    };
+    let suggestions = suggestion_engine.map_or_else(Vec::new, |engine| engine.suggestions(finding));
 
     match output_format {
         OutputFormat::Text => {
@@ -1379,25 +1379,61 @@ fn print_analysis_finding(
     }
 }
 
-fn analysis_suggestions(
-    finding: &ferrolex_code::Finding<'_>,
+struct AnalysisSuggestionEngine<'source, S: ?Sized> {
+    suggester: Suggester<'source, S>,
+    scratch: SuggestScratch,
+    output: Vec<Suggestion>,
+    cache: HashMap<String, Vec<(String, usize)>>,
+}
+
+fn analysis_suggestion_engine(
+    include_suggestions: bool,
     dictionary: &AnalysisDictionary,
-) -> Vec<(String, usize)> {
-    let config = SuggestConfig {
-        max_results: 3,
-        ..SuggestConfig::default()
-    };
-    Suggester::new(dictionary, config)
-        .suggest(finding.word())
-        .suggestions()
-        .iter()
-        .map(|suggestion| {
-            let replacement = finding
-                .whole_identifier_suggestion(suggestion.word())
-                .unwrap_or_else(|| suggestion.word().to_owned());
-            (replacement, suggestion.distance())
-        })
-        .collect()
+) -> Option<AnalysisSuggestionEngine<'_, AnalysisDictionary>> {
+    include_suggestions.then(|| AnalysisSuggestionEngine::new(dictionary))
+}
+
+impl<'source, S: CandidateSource + ?Sized> AnalysisSuggestionEngine<'source, S> {
+    fn new(source: &'source S) -> Self {
+        let config = SuggestConfig {
+            max_results: 3,
+            ..SuggestConfig::default()
+        };
+        Self {
+            suggester: Suggester::new(source, config),
+            scratch: SuggestScratch::default(),
+            output: Vec::new(),
+            cache: HashMap::new(),
+        }
+    }
+
+    fn suggestions(&mut self, finding: &ferrolex_code::Finding<'_>) -> Vec<(String, usize)> {
+        self.base_suggestions(finding.word())
+            .into_iter()
+            .map(|(word, distance)| {
+                let replacement = finding.whole_identifier_suggestion(&word).unwrap_or(word);
+                (replacement, distance)
+            })
+            .collect()
+    }
+
+    fn base_suggestions(&mut self, word: &str) -> Vec<(String, usize)> {
+        if let Some(suggestions) = self.cache.get(word) {
+            return suggestions.clone();
+        }
+
+        self.suggester
+            .suggest_into(word, &mut self.output, &mut self.scratch);
+        let suggestions = self
+            .output
+            .iter()
+            .map(|suggestion| (suggestion.word().to_owned(), suggestion.distance()))
+            .collect::<Vec<_>>();
+        if self.cache.len() < MAX_ANALYSIS_SUGGESTION_CACHE_ENTRIES {
+            self.cache.insert(word.to_owned(), suggestions.clone());
+        }
+        suggestions
+    }
 }
 
 const fn directive_problem_code(problem: DirectiveProblem) -> &'static str {
@@ -3000,14 +3036,26 @@ mod tests {
         analysis_paths, analyze, catalog_import_encodings, comment_syntax_for_path, glob_matches,
         incomplete_suggestion_hint, install_hunspell_runtime_cache, load_analysis_dictionary,
         parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
-        runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource, AnalyzeCommand,
-        CheckCommand, CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand,
-        CompileInput, DictionaryCommand, ExplainCommand, LineIndex, Normalization, OutputFormat,
+        runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource,
+        AnalysisSuggestionEngine, AnalyzeCommand, Analyzer, CandidateSource, CheckCommand,
+        CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
+        DictionaryCommand, Document, ExplainCommand, LineIndex, Normalization, OutputFormat,
         RunOutcome, SourceEncoding, SuggestCommand, SuggestConfig, ValidateCommand, WordList,
         HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
+
+    struct CountingCandidateSource {
+        visits: AtomicUsize,
+    }
+
+    impl CandidateSource for CountingCandidateSource {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            self.visits.fetch_add(1, Ordering::Relaxed);
+            visitor("receive");
+        }
+    }
 
     #[test]
     fn parses_repeated_dictionary_options() {
@@ -3838,6 +3886,55 @@ mod tests {
             .suggestions()
             .iter()
             .any(|suggestion| suggestion.word() == "receive"));
+    }
+
+    #[test]
+    fn analysis_suggestion_engine_memoizes_repeated_words() {
+        let source = CountingCandidateSource {
+            visits: AtomicUsize::new(0),
+        };
+        let mut engine = AnalysisSuggestionEngine::new(&source);
+
+        assert_eq!(
+            engine.base_suggestions("recieve"),
+            vec![("receive".to_owned(), 1)]
+        );
+        let visits_after_first_query = source.visits.load(Ordering::Relaxed);
+        assert!(visits_after_first_query > 0);
+
+        assert_eq!(
+            engine.base_suggestions("recieve"),
+            vec![("receive".to_owned(), 1)]
+        );
+        assert_eq!(
+            source.visits.load(Ordering::Relaxed),
+            visits_after_first_query
+        );
+    }
+
+    #[test]
+    fn cached_analysis_suggestions_keep_identifier_context() {
+        let dictionary = AnalysisDictionary {
+            sources: vec![AnalysisSource::WordList(
+                WordList::new(["Account", "Authentication", "OAuth", "Provider"])
+                    .expect("test words are valid"),
+            )],
+        };
+        let analyzer = Analyzer::builder(&dictionary).build();
+        let analysis = analyzer.check(&Document::new(
+            "OAuthAuthentcationProvider AccountAuthentcationProvider",
+        ));
+        let mut engine = AnalysisSuggestionEngine::new(&dictionary);
+
+        assert_eq!(analysis.findings().len(), 2);
+        assert_eq!(
+            engine.suggestions(&analysis.findings()[0]),
+            vec![("OAuthAuthenticationProvider".to_owned(), 1)]
+        );
+        assert_eq!(
+            engine.suggestions(&analysis.findings()[1]),
+            vec![("AccountAuthenticationProvider".to_owned(), 1)]
+        );
     }
 
     #[test]
