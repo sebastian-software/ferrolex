@@ -26,10 +26,10 @@ jobs:
     # leaves conservative diagnostic and artifact-upload headroom.
     timeout-minutes: 150
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref || github.sha }}
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: 1.88
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -43,7 +43,7 @@ jobs:
           FERROLEX_COMPAT_SCORECARD="$RUNNER_TEMP/recognition-scorecard.tsv"
           FERROLEX_COMPAT_SCORECARD_BASELINE="crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv"
           cargo test -p ferrolex-hunspell --test real_world -- --nocapture
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ !cancelled() }}
         with:
           name: recognition-scorecard

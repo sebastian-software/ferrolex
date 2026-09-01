@@ -16,8 +16,8 @@ jobs:
     name: Release version contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: 1.88
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -40,8 +40,8 @@ jobs:
           - os: windows-latest
             toolchain: stable
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
@@ -61,10 +61,10 @@ jobs:
     name: Dependency policy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: test -s LICENSE-APACHE
       - run: test -s LICENSE-MIT
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check
           # Feature coverage is configured in deny.toml; avoid action defaults
@@ -75,8 +75,8 @@ jobs:
     name: Suggestion quality regression
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: 1.88
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -88,8 +88,8 @@ jobs:
     name: Fuzz smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: nightly-2026-08-31
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -125,8 +125,8 @@ jobs:
           - project_config
           - word_list
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: nightly-2026-08-31
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -148,7 +148,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - id: changes
@@ -162,6 +162,19 @@ jobs:
             base='${{ github.event.before }}'
             head='${{ github.sha }}'
           fi
+          if [[ "$base" =~ ^0+$ ]]; then
+            if base="$(git rev-parse "${head}^" 2>/dev/null)"; then
+              echo 'The event has a zero diff base; comparing the pushed commit with its first parent.'
+            else
+              echo 'relevant=true' >> "$GITHUB_OUTPUT"
+              echo 'The pushed root commit has no diff base; compatibility validation is required.'
+              exit 0
+            fi
+          elif ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo 'relevant=true' >> "$GITHUB_OUTPUT"
+            echo 'The event diff base is unavailable locally; compatibility validation is required.'
+            exit 0
+          fi
           git diff --name-only "$base" "$head" > "$RUNNER_TEMP/changed-files"
           if grep -Eq '^(Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.cargo/|crates/|scripts/(fetch-compat-fixtures|generate-readme-compat-status)\.sh$|README\.md$|\.github/workflows/)' "$RUNNER_TEMP/changed-files"; then
             echo 'relevant=true' >> "$GITHUB_OUTPUT"
@@ -169,7 +182,7 @@ jobs:
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
             echo 'No executable, dependency, fixture, generator, README, or CI paths changed.'
           fi
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         if: steps.changes.outputs.relevant == 'true'
         with:
           toolchain: 1.88
@@ -195,12 +208,12 @@ jobs:
     name: Node binding
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: 1.88
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
       - run: bash scripts/bench-node-binding.sh
