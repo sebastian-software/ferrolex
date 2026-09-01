@@ -5162,6 +5162,31 @@ mod tests {
     }
 
     #[test]
+    fn explanation_bounds_adversarial_compound_backtracking() {
+        let result = import(
+            "compound-trace.aff",
+            "SET UTF-8\nCOMPOUNDFLAG C\nCOMPOUNDMIN 1\n",
+            "compound-trace.dic",
+            "3\na/C\naa/C\naaa/C\n",
+            ImportMode::Strict,
+        )
+        .expect("overlapping compound fixture imports");
+        let dictionary = result.dictionary();
+        let adversarial = format!("{}b", "a".repeat(40));
+
+        assert!(!dictionary.contains(&adversarial));
+        let explanation = dictionary.explain(&adversarial);
+
+        assert_eq!(
+            explanation
+                .rejected()
+                .expect("the unmatched suffix rejects the compound")
+                .reason(),
+            &RejectionReason::NoDerivation
+        );
+    }
+
+    #[test]
     fn explanation_reports_case_fallback_without_changing_lookup() {
         let dictionary = import("case.aff", "", "case.dic", "1\nhouse\n", ImportMode::Strict)
             .expect("case fixture imports")

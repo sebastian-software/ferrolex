@@ -9,6 +9,8 @@ use super::{
     MAX_AFFIX_CHAIN, MAX_DERIVATIONS_PER_LEXEME,
 };
 
+const MAX_COMPOUND_TRACE_STEPS: usize = MAX_DERIVATIONS_PER_LEXEME;
+
 /// An experimental, owned explanation of one dictionary lookup.
 ///
 /// This API is deliberately unstable. It is a diagnostic path rather than a
@@ -436,6 +438,7 @@ impl HunspellDictionary {
             return None;
         }
         let boundaries = compound_boundaries(word)?;
+        let mut trace_steps = 0;
 
         if let Some(flag) = self.compound.flag.as_ref() {
             for count in 2..boundaries.len() {
@@ -447,8 +450,12 @@ impl HunspellDictionary {
                     &boundaries,
                     std::iter::repeat_n((flag, CompoundComponentRole::Generic), count),
                     allow_keep_case,
+                    &mut trace_steps,
                 ) {
                     return Some(AcceptanceKind::Compound { components });
+                }
+                if trace_steps == MAX_COMPOUND_TRACE_STEPS {
+                    return None;
                 }
                 if self.compound_component_count_cannot_continue(count) {
                     return None;
@@ -464,12 +471,16 @@ impl HunspellDictionary {
                         .iter()
                         .map(|flag| (flag, CompoundComponentRole::Generic)),
                     allow_keep_case,
+                    &mut trace_steps,
                 ) {
                     return Some(AcceptanceKind::Compound { components });
                 }
+                if trace_steps == MAX_COMPOUND_TRACE_STEPS {
+                    return None;
+                }
             }
         }
-        self.trace_positioned_compound(word, &boundaries, allow_keep_case)
+        self.trace_positioned_compound(word, &boundaries, allow_keep_case, &mut trace_steps)
             .map(|components| AcceptanceKind::Compound { components })
     }
 
@@ -479,6 +490,7 @@ impl HunspellDictionary {
         boundaries: &[usize],
         requirements: impl IntoIterator<Item = (&'a super::Flag, CompoundComponentRole)>,
         allow_keep_case: bool,
+        trace_steps: &mut usize,
     ) -> Option<Vec<CompoundComponent>> {
         let requirements = requirements.into_iter().collect::<Vec<_>>();
         let mut components = Vec::with_capacity(requirements.len());
@@ -490,6 +502,7 @@ impl HunspellDictionary {
             0,
             allow_keep_case,
             &mut components,
+            trace_steps,
         )
         .then_some(components)
     }
@@ -507,6 +520,7 @@ impl HunspellDictionary {
         start: usize,
         allow_keep_case: bool,
         components: &mut Vec<CompoundComponent>,
+        trace_steps: &mut usize,
     ) -> bool {
         if requirement_index == requirements.len() {
             return start + 1 == boundaries.len();
@@ -515,6 +529,10 @@ impl HunspellDictionary {
         let is_final = requirement_index + 1 == requirements.len();
         let first_end = start.saturating_add(self.compound.minimum_length);
         for end in first_end..boundaries.len() {
+            if *trace_steps == MAX_COMPOUND_TRACE_STEPS {
+                return false;
+            }
+            *trace_steps += 1;
             let candidate = &word[boundaries[start]..boundaries[end]];
             if !self.compound_boundary_is_allowed(word, boundaries[start], boundaries[end], false) {
                 continue;
@@ -540,6 +558,7 @@ impl HunspellDictionary {
                 end,
                 allow_keep_case,
                 components,
+                trace_steps,
             ) {
                 return true;
             }
@@ -553,6 +572,7 @@ impl HunspellDictionary {
         word: &str,
         boundaries: &[usize],
         allow_keep_case: bool,
+        trace_steps: &mut usize,
     ) -> Option<Vec<CompoundComponent>> {
         let (Some(begin), Some(end)) = (&self.compound.begin, &self.compound.end) else {
             return None;
@@ -571,10 +591,17 @@ impl HunspellDictionary {
                 ));
             }
             requirements.push((end, CompoundComponentRole::End));
-            if let Some(components) =
-                self.trace_compound_components(word, boundaries, requirements, allow_keep_case)
-            {
+            if let Some(components) = self.trace_compound_components(
+                word,
+                boundaries,
+                requirements,
+                allow_keep_case,
+                trace_steps,
+            ) {
                 return Some(components);
+            }
+            if *trace_steps == MAX_COMPOUND_TRACE_STEPS {
+                return None;
             }
             if self.compound_component_count_cannot_continue(count) {
                 return None;
