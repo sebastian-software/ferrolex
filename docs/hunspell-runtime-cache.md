@@ -51,8 +51,7 @@ must be rebuilt from its source pair; it is never silently repaired in place.
 
 ## Offline runtime use
 
-After a successful install, pass the installed affix path to `check` or
-`analyze` with `--hunspell`:
+Pass an affix path to `check` or `analyze` with `--hunspell`:
 
 ```sh
 ferrolex check \
@@ -64,13 +63,24 @@ ferrolex analyze \
   src/lib.rs
 ```
 
-The option derives the adjacent `.dic` source and versioned runtime cache from
-the affix stem. It reads all three local files and verifies the cache against
-the exact `.aff` and `.dic` bytes before any lookup. `--dictionary` and
-`--hunspell` may be repeated and composed in the same invocation. No network
-access, reimport, or cache rebuild occurs while checking; a missing, malformed,
-or stale cache is an error that instructs the caller to rerun `ferrolex
-dictionary install`.
+The option derives the adjacent `.dic` source and versioned runtime-cache path
+from the affix stem. When the cache exists, it reads all three local files and
+verifies the cache against the exact `.aff` and `.dic` bytes before any lookup.
+`--dictionary` and `--hunspell` may be repeated and composed in the same
+invocation.
+
+When the cache is absent, ferrolex strictly imports the `.aff`/`.dic` pair
+directly in memory and prints a notice that this path is slower. Importer errors
+and their diagnostics fail closed rather than exposing a partial dictionary.
+The fallback does not try to write beside the sources, so compatible ordinary
+Hunspell pairs in read-only system directories remain usable. For repeated
+use, compile the pair into a writable location and pass the result with
+`--compiled`. Reviewed catalog pairs, especially those with per-file encoding
+overrides, must use `dictionary install`; a matching filename alone does not
+establish catalog provenance. Malformed or stale caches also fail closed with
+the same remediation choices; they are never ignored as though absent. Runtime
+commands perform no network access and never rebuild or repair a cache
+implicitly.
 
 ## Standalone artifact
 

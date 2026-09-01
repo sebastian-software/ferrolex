@@ -41,10 +41,10 @@ const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 const EXIT_CODES: &str =
     "\nExit status: 0 success, 1 finding, 2 usage error, 3 operational failure.";
-const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Installed Hunspell AFF path (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
-const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Installed Hunspell AFF path (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
+const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
+const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
 const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
-const HELP_ANALYZE: &str = "Usage: ferrolex analyze (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>) [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Installed Hunspell AFF path (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
+const HELP_ANALYZE: &str = "Usage: ferrolex analyze (--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>) [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
 const HELP_COMPILE: &str = "Usage: ferrolex compile (--dictionary <PATH> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n\nCompiles a plain word list or Hunspell pair to a native artifact.\n  -o <ARTIFACT>  Output artifact path\n\nExample: ferrolex compile --dictionary words.txt -o words.flexdic";
 const HELP_INSPECT: &str = "Usage: ferrolex inspect <ARTIFACT>\n\nPrints native artifact metadata.\n\nExample: ferrolex inspect words.flexdic";
 const HELP_VALIDATE: &str = "Usage: ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n\nExample: ferrolex validate --strict dictionary.aff dictionary.dic";
@@ -286,10 +286,14 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
         }
         DictionaryCommand::Fetch { locale, cache_path } => {
             let (source, installed) = fetch_catalog_dictionary(locale, cache_path)?;
-            println!("installed: {}", installed.aff_path().display());
-            println!("installed: {}", installed.dic_path().display());
+            println!("fetched: {}", installed.aff_path().display());
+            println!("fetched: {}", installed.dic_path().display());
             println!("license: {}", source.license_spdx_expression());
             println!("notice: {}", source.license_notice_url());
+            println!(
+                "hint: build the runtime cache with `ferrolex dictionary install {locale} --cache {}` before using this catalog dictionary with `--hunspell`",
+                cache_path.display()
+            );
             Ok(RunOutcome::Success)
         }
         DictionaryCommand::Install { locale, cache_path } => {
@@ -840,13 +844,57 @@ fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDiction
         source,
     })?;
     let dic_bytes = fs::read(&dic_path).map_err(|source| CliError::ReadInput {
-        path: dic_path,
+        path: dic_path.clone(),
         source,
     })?;
-    let cache = fs::read(&cache_path).map_err(|source| CliError::ReadHunspellCache {
-        path: cache_path.clone(),
-        source,
-    })?;
+    let cache = match fs::read(&cache_path) {
+        Ok(cache) => cache,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            eprintln!(
+                "notice: no Hunspell runtime cache found at `{}`; importing `{}` and `{}` directly (slower)",
+                cache_path.display(),
+                aff_path.display(),
+                dic_path.display()
+            );
+            eprintln!(
+                "hint: for repeated use or read-only source directories, run `ferrolex compile {} {} -o dictionary.flexh` and pass `--compiled dictionary.flexh`; catalog dictionaries can use `ferrolex dictionary install`",
+                aff_path.display(),
+                dic_path.display()
+            );
+            let aff_source = aff_path.display().to_string();
+            let dic_source = dic_path.display().to_string();
+            let imported = match import_hunspell_source_bytes(
+                &aff_source,
+                &aff_bytes,
+                &dic_source,
+                &dic_bytes,
+                None,
+                ImportMode::Strict,
+            ) {
+                Ok(imported) => imported,
+                Err(source) => {
+                    for diagnostic in source.diagnostics() {
+                        print_import_diagnostic_to_stderr(diagnostic);
+                    }
+                    return Err(CliError::ImportHunspellSources {
+                        aff_path: aff_path.to_path_buf(),
+                        dic_path: dic_path.clone(),
+                        source,
+                    });
+                }
+            };
+            for diagnostic in imported.diagnostics() {
+                print_import_diagnostic_to_stderr(diagnostic);
+            }
+            return Ok(imported.dictionary().clone());
+        }
+        Err(source) => {
+            return Err(CliError::ReadHunspellCache {
+                path: cache_path.clone(),
+                source,
+            })
+        }
+    };
 
     load_runtime_cache(
         &cache,
@@ -1235,22 +1283,35 @@ fn import_hunspell_files(
     let aff_source = aff_path.display().to_string();
     let dic_source = dic_path.display().to_string();
 
-    let import = match encodings {
-        Some(encodings) => import_hunspell_bytes_with_encodings(
-            &aff_source,
-            &aff_bytes,
-            &dic_source,
-            &dic_bytes,
-            encodings,
-            mode,
-        ),
-        None => import_hunspell_bytes(&aff_source, &aff_bytes, &dic_source, &dic_bytes, mode),
-    };
+    let import = import_hunspell_source_bytes(
+        &aff_source,
+        &aff_bytes,
+        &dic_source,
+        &dic_bytes,
+        encodings,
+        mode,
+    );
 
     Ok((
         import,
         SourceDigests::from_source_bytes(&aff_bytes, &dic_bytes),
     ))
+}
+
+fn import_hunspell_source_bytes(
+    aff_source: &str,
+    aff_bytes: &[u8],
+    dic_source: &str,
+    dic_bytes: &[u8],
+    encodings: Option<ByteImportEncodings>,
+    mode: ImportMode,
+) -> Result<ImportResult, ImportError> {
+    match encodings {
+        Some(encodings) => import_hunspell_bytes_with_encodings(
+            aff_source, aff_bytes, dic_source, dic_bytes, encodings, mode,
+        ),
+        None => import_hunspell_bytes(aff_source, aff_bytes, dic_source, dic_bytes, mode),
+    }
 }
 
 fn report_hunspell_import(
@@ -2307,6 +2368,11 @@ enum CliError {
         path: PathBuf,
         source: io::Error,
     },
+    ImportHunspellSources {
+        aff_path: PathBuf,
+        dic_path: PathBuf,
+        source: ImportError,
+    },
     WriteArtifact {
         path: PathBuf,
         source: io::Error,
@@ -2392,10 +2458,20 @@ impl fmt::Display for CliError {
             Self::ReadHunspellCache { path, source } => {
                 write!(
                     formatter,
-                    "could not read Hunspell runtime cache `{}`: {source}",
+                    "could not read Hunspell runtime cache `{}`: {source}; rerun `ferrolex dictionary install` for catalog sources, or compile the AFF/DIC pair and use `--compiled` when the source directory is read-only",
                     path.display()
                 )
             }
+            Self::ImportHunspellSources {
+                aff_path,
+                dic_path,
+                source,
+            } => write!(
+                formatter,
+                "could not strictly import Hunspell sources `{}` and `{}` without a runtime cache: {source}; run `ferrolex validate --strict` on the pair before compiling it in a writable directory and using `--compiled`",
+                aff_path.display(),
+                dic_path.display()
+            ),
             Self::WriteArtifact { path, source } => {
                 write!(
                     formatter,
@@ -2439,7 +2515,7 @@ impl fmt::Display for CliError {
             Self::LoadHunspellCache { path, source } => {
                 write!(
                     formatter,
-                    "invalid or stale Hunspell runtime cache `{}`: {source}; rerun `ferrolex dictionary install`",
+                    "invalid or stale Hunspell runtime cache `{}`: {source}; rerun `ferrolex dictionary install` for catalog sources, or compile the AFF/DIC pair and use `--compiled` when the source directory is read-only",
                     path.display()
                 )
             }
@@ -2504,6 +2580,7 @@ impl Error for CliError {
             | Self::ReadProjectConfig { source, .. } => Some(source),
             Self::CompileDictionary(source) => Some(source),
             Self::CompileFrequencyList(source) => Some(source),
+            Self::ImportHunspellSources { source, .. } => Some(source),
             Self::LoadArtifact { source, .. } => Some(source),
             Self::LoadHunspellArtifact { source, .. } => Some(source),
             Self::ValidateArtifact { source, .. } => Some(source),
