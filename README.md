@@ -117,7 +117,9 @@ complete search, still returns any stable partial results, and prints a scaled
 retry hint when budget exhaustion produced no result. Hunspell
 suggestions enumerate stored stems and additionally derive bounded affixed and
 compound forms near the query; they never pre-expand the dictionary.
-`UserDictionary` project overlays can be used through the library API. The
+`UserDictionary` project overlays can be used through the library API. The CLI
+automatically layers `.ferrolex/words.txt` and the global ferrolex user word
+list into `check`, `suggest`, and `analyze` when those files exist. The
 comparison and ranking contract is documented in [Suggestions](docs/suggestions.md).
 
 ## Rust library quick start
