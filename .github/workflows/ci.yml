@@ -97,8 +97,9 @@ jobs:
         with:
           tool: cargo-fuzz
       - run: |
+          host_target="$(rustc +nightly --version --verbose | sed -n 's/^host: //p')"
           for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation; do
-            cargo +nightly fuzz run "$target" -- -runs=256
+            cargo +nightly fuzz run "$target" --target "$host_target" -- -runs=256
           done
 
   hunspell-compatibility-gate:
