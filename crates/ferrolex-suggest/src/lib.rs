@@ -23,6 +23,22 @@ pub trait CandidateSource: Send + Sync {
     /// Visits candidates in deterministic byte-lexicographic order.
     fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool);
 
+    /// Visits candidates that may be within the requested query distance.
+    ///
+    /// The default preserves compatibility for mutable or custom sources by
+    /// visiting the complete source. Immutable sources should override this
+    /// with a conservative index: omitting a genuinely nearby candidate would
+    /// change suggestion correctness.
+    fn visit_nearby_candidates(
+        &self,
+        _query: &[char],
+        _max_edit_distance: usize,
+        _max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.visit_candidates(visitor);
+    }
+
     /// Returns whether a stored candidate may be shown as a suggestion.
     ///
     /// Sources with richer recognition semantics can reject pseudo-stems or
@@ -50,6 +66,13 @@ pub trait CandidateSource: Send + Sync {
         _visitor: &mut dyn FnMut(&str) -> bool,
     ) {
     }
+
+    /// Visits stored seeds that can produce query-related derived forms.
+    ///
+    /// Sources without morphology keep the empty default. Morphological
+    /// sources may scan a wider seed vocabulary here; only forms emitted by
+    /// [`Self::visit_related_candidates`] consume suggestion budgets.
+    fn visit_related_seeds(&self, _visitor: &mut dyn FnMut(&str) -> bool) {}
 }
 
 impl CandidateSource for WordList {
@@ -59,6 +82,21 @@ impl CandidateSource for WordList {
                 break;
             }
         }
+    }
+
+    fn visit_nearby_candidates(
+        &self,
+        query: &[char],
+        max_edit_distance: usize,
+        max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.candidate_index(max_word_scalars).visit_nearby(
+            query,
+            max_edit_distance,
+            max_word_scalars,
+            visitor,
+        );
     }
 }
 
@@ -333,65 +371,75 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
         let mut examined = 0;
         let mut cells = 0_usize;
         let mut completeness = Completeness::Complete;
-        self.source.visit_candidates(&mut |candidate| {
-            if !consider_candidate(
-                self.source,
-                candidate,
-                query,
-                query_chars,
-                self.config,
-                self.replacements,
-                self.ranking_signals,
-                suggestions,
-                candidate_chars,
-                transformed_chars,
-                replacement_from_chars,
-                replacement_to_chars,
-                previous_previous,
-                previous,
-                current,
-                &mut examined,
-                &mut cells,
-                &mut completeness,
-            ) {
-                return false;
-            }
-            if is_related_seed(
-                query_chars,
-                candidate,
-                self.config.max_edit_distance,
-                related_candidate_chars,
-            ) {
-                self.source.visit_related_candidates(
-                    query,
+        self.source.visit_nearby_candidates(
+            query_chars,
+            self.config.max_edit_distance,
+            self.config.max_word_scalars,
+            &mut |candidate| {
+                if !consider_candidate(
+                    self.source,
                     candidate,
+                    query,
+                    query_chars,
+                    self.config,
+                    self.replacements,
+                    self.ranking_signals,
+                    suggestions,
+                    candidate_chars,
+                    transformed_chars,
+                    replacement_from_chars,
+                    replacement_to_chars,
+                    previous_previous,
+                    previous,
+                    current,
+                    &mut examined,
+                    &mut cells,
+                    &mut completeness,
+                ) {
+                    return false;
+                }
+                matches!(completeness, Completeness::Complete)
+            },
+        );
+        if matches!(completeness, Completeness::Complete) {
+            self.source.visit_related_seeds(&mut |seed| {
+                if is_related_seed(
+                    query_chars,
+                    seed,
                     self.config.max_edit_distance,
-                    &mut |derived| {
-                        consider_candidate(
-                            self.source,
-                            derived,
-                            query,
-                            query_chars,
-                            self.config,
-                            self.replacements,
-                            self.ranking_signals,
-                            suggestions,
-                            candidate_chars,
-                            transformed_chars,
-                            replacement_from_chars,
-                            replacement_to_chars,
-                            previous_previous,
-                            previous,
-                            current,
-                            &mut examined,
-                            &mut cells,
-                            &mut completeness,
-                        )
-                    },
-                );
-            }
-            matches!(completeness, Completeness::Complete)
-        });
+                    related_candidate_chars,
+                ) {
+                    self.source.visit_related_candidates(
+                        query,
+                        seed,
+                        self.config.max_edit_distance,
+                        &mut |derived| {
+                            consider_candidate(
+                                self.source,
+                                derived,
+                                query,
+                                query_chars,
+                                self.config,
+                                self.replacements,
+                                self.ranking_signals,
+                                suggestions,
+                                candidate_chars,
+                                transformed_chars,
+                                replacement_from_chars,
+                                replacement_to_chars,
+                                previous_previous,
+                                previous,
+                                current,
+                                &mut examined,
+                                &mut cells,
+                                &mut completeness,
+                            )
+                        },
+                    );
+                }
+                matches!(completeness, Completeness::Complete)
+            });
+        }
         rank_suggestions(suggestions);
         presented.clear();
         suggestions.retain(|suggestion| presented.insert(suggestion.word.clone()));
@@ -429,9 +477,6 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
         return false;
     }
     *examined += 1;
-    if !source.is_suggestion_candidate(candidate) {
-        return true;
-    }
     let Some(candidate_chars) =
         lowercase_chars_bounded_into(candidate, config.max_word_scalars, candidate_chars)
     else {
@@ -469,6 +514,9 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
         )
     };
     if let Some(distance) = distance {
+        if !source.is_suggestion_candidate(candidate) {
+            return true;
+        }
         suggestions.push(Suggestion {
             word: present(candidate, query),
             distance,
@@ -758,6 +806,22 @@ mod tests {
 
         assert_eq!(result.completeness(), Completeness::Complete);
         assert_eq!(result.suggestions()[0].word(), "zzword");
+    }
+
+    #[test]
+    fn indexed_word_lists_find_late_neighbors_with_tiny_budgets() {
+        let words = WordList::new(["aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd", "receive"])
+            .expect("valid words");
+        let config = SuggestConfig {
+            max_candidates: 1,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&words, config).suggest("recieve");
+
+        assert_eq!(result.completeness(), Completeness::Complete);
+        assert_eq!(result.suggestions()[0].word(), "receive");
     }
 
     #[test]

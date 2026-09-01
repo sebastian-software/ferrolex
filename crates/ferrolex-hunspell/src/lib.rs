@@ -22,6 +22,7 @@ mod explanation;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 use encoding_rs::ISO_8859_2;
 use ferrolex_compiler::{
@@ -29,7 +30,7 @@ use ferrolex_compiler::{
     CompoundSyllableLimitIr, ConditionAtomIr, ConditionIr, DictionaryIr, FlagIr, FlagModeIr,
     InputConversionIr, LexemeIr, ReplacementRuleIr, SpecialFlagsIr,
 };
-use ferrolex_core::Dictionary;
+use ferrolex_core::{CandidateIndex, Dictionary};
 use ferrolex_suggest::{CandidateSource, RankingSignals, ReplacementRule};
 
 pub use cache::{
@@ -301,6 +302,7 @@ pub struct HunspellDictionary {
     output_conversions: Vec<InputConversion>,
     full_strip: bool,
     complex_prefixes: bool,
+    candidate_index: Arc<OnceLock<CandidateIndex>>,
 }
 
 impl Dictionary for HunspellDictionary {
@@ -449,6 +451,7 @@ impl HunspellDictionary {
             output_conversions,
             full_strip,
             complex_prefixes,
+            candidate_index: Arc::new(OnceLock::new()),
         }
     }
 
@@ -1383,6 +1386,18 @@ impl CandidateSource for HunspellDictionary {
         }
     }
 
+    fn visit_nearby_candidates(
+        &self,
+        query: &[char],
+        max_edit_distance: usize,
+        max_word_scalars: usize,
+        visitor: &mut dyn FnMut(&str) -> bool,
+    ) {
+        self.candidate_index
+            .get_or_init(|| CandidateIndex::new(self.stems(), max_word_scalars))
+            .visit_nearby(query, max_edit_distance, max_word_scalars, visitor);
+    }
+
     fn is_suggestion_candidate(&self, candidate: &str) -> bool {
         self.is_suggestable_stem(candidate)
     }
@@ -1395,6 +1410,10 @@ impl CandidateSource for HunspellDictionary {
         visitor: &mut dyn FnMut(&str) -> bool,
     ) {
         self.visit_related_suggestion_forms(query, seed, max_edit_distance, visitor);
+    }
+
+    fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+        self.visit_candidates(visitor);
     }
 }
 
