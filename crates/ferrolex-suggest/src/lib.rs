@@ -522,32 +522,42 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
     cells: &mut usize,
     completeness: &mut Completeness,
 ) -> bool {
-    if *examined == config.max_candidates {
-        *completeness = Completeness::CandidateLimitReached;
-        return false;
-    }
-    *examined += 1;
     let Some(candidate_chars) =
         lowercase_chars_bounded_into(candidate, config.max_word_scalars, candidate_chars)
     else {
         return true;
     };
-    let distance = if let Some(distance) = replacement_distance(
+    let replacement_distance = replacement_distance(
         query_chars,
         candidate_chars,
         replacements,
         transformed_chars,
         replacement_from_chars,
         replacement_to_chars,
-    ) {
-        Some(distance)
-    } else {
+    );
+    if replacement_distance.is_none() {
         // A length difference beyond the permitted distance cannot reach the
         // dynamic-programming matrix. It must not spend the edit-cell budget
         // merely because it appeared early in lexical candidate order.
         if query_chars.len().abs_diff(candidate_chars.len()) > config.max_edit_distance {
             return true;
         }
+    }
+    // Admission is deliberately deferred until the candidate index and cheap
+    // length checks have narrowed the source. Policy-rejected pseudo-stems are
+    // not suggestion candidates and therefore must not consume either work
+    // budget or a reserved direct-candidate slot.
+    if !source.is_suggestion_candidate(candidate) {
+        return true;
+    }
+    if *examined == config.max_candidates {
+        *completeness = Completeness::CandidateLimitReached;
+        return false;
+    }
+    *examined += 1;
+    let distance = if let Some(distance) = replacement_distance {
+        Some(distance)
+    } else {
         let required = (query_chars.len() + 1).saturating_mul(candidate_chars.len() + 1);
         if cells.saturating_add(required) > config.max_edit_cells {
             *completeness = Completeness::EditBudgetReached;
@@ -564,9 +574,6 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
         )
     };
     if let Some(distance) = distance {
-        if !source.is_suggestion_candidate(candidate) {
-            return true;
-        }
         suggestions.push(Suggestion {
             word: present(candidate, query),
             distance,
@@ -847,6 +854,46 @@ mod tests {
         }
     }
 
+    struct RejectingDerivedSource;
+
+    impl CandidateSource for RejectingDerivedSource {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            for candidate in ["bat", "cat"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_nearby_candidates(
+            &self,
+            _query: &[char],
+            _max_edit_distance: usize,
+            _max_word_scalars: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            self.visit_candidates(visitor);
+        }
+
+        fn is_suggestion_candidate(&self, candidate: &str) -> bool {
+            candidate != "bat"
+        }
+
+        fn visit_related_candidates(
+            &self,
+            _query: &str,
+            _seed: &str,
+            _max_edit_distance: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            visitor("cot");
+        }
+
+        fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            visitor("seed");
+        }
+    }
+
     #[test]
     fn suggests_missing_letters_and_transpositions_deterministically() {
         let words = WordList::new(["authentication", "receive", "recipe"]).expect("valid words");
@@ -947,6 +994,26 @@ mod tests {
 
         assert_eq!(words, ["cat"]);
         assert_eq!(result.completeness(), Completeness::CandidateLimitReached);
+    }
+
+    #[test]
+    fn rejected_stems_do_not_consume_the_direct_reservation() {
+        let config = SuggestConfig {
+            max_candidates: 2,
+            max_edit_cells: 64,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&RejectingDerivedSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert!(words.contains(&"cat"));
+        assert!(words.contains(&"cot"));
+        assert_eq!(result.completeness(), Completeness::Complete);
     }
 
     #[test]
