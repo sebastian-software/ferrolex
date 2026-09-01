@@ -108,4 +108,7 @@ frequency-aware cases.
 The `ferrolex suggest` command exposes `--max-results`,
 `--max-edit-distance`, `--max-candidates`, and `--max-edit-cells`. The latter
 two are useful when deliberately spending a larger, still explicit work budget
-over a large installed dictionary; an incomplete result is reported on stderr.
+over a large installed dictionary; an incomplete result is reported on stderr,
+and an empty budget-limited result includes a concrete retry hint. Repeating
+`--dictionary`, `--compiled`, or `--hunspell` layers suggestion candidates from
+all supplied sources in the same way as checking and analysis.
