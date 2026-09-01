@@ -49,23 +49,26 @@ cargo +1.88 test -p ferrolex-hunspell -p ferrolex-compiler -p ferrolex-suggest
 The nightly-only `fuzz/` workspace deliberately sits outside the shipped
 workspace and its Rust 1.88 MSRV contract. Its targets cover raw Hunspell
 import in every supported byte encoding, the FLXHSP runtime-cache loader, the
-FLEXDIC loader, suggestion queries, and compound evaluation. Their initial
-corpus consists of the deterministic robustness cases above; minimize and add
-any crash or sanitizer finding to the appropriate target corpus before fixing
-it and file the finding as a GitHub issue.
+FLEXDIC loader, suggestion queries, compound evaluation, source analysis,
+project configuration, and plain word-list parsing. Their initial corpus
+consists of the deterministic robustness cases above; minimize and add any
+crash or sanitizer finding to the appropriate target corpus before fixing it
+and file the finding as a GitHub issue.
 
 Run a short local smoke pass with:
 
 ```sh
-cargo +nightly install cargo-fuzz --locked
-for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation; do
-  cargo +nightly fuzz run "$target" -- -runs=256
+cargo +nightly-2026-08-31 install cargo-fuzz --locked
+for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation analyze_source project_config word_list; do
+  cargo +nightly-2026-08-31 fuzz run "$target" -- -runs=256
 done
 ```
 
 For an investigation, run one target without `-runs` and stop it manually. CI
-runs the bounded smoke pass only; it is evidence that every fuzz boundary
-builds and executes, not a substitute for a sustained local campaign.
+runs the bounded smoke pass on every change and a ten-minute-per-target matrix
+every Monday. The smoke pass is evidence that every fuzz boundary builds and
+executes; the weekly jobs provide sustained coverage and remain a complement
+to focused local campaigns.
 
 Run the complete repository gate with the commands in CI:
 
