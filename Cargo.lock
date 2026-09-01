@@ -397,6 +397,7 @@ dependencies = [
  "ferrolex-hunspell",
  "ferrolex-suggest",
  "ferrolex-text",
+ "serde_json",
 ]
 
 [[package]]
