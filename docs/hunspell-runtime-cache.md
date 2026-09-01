@@ -69,15 +69,18 @@ verifies the cache against the exact `.aff` and `.dic` bytes before any lookup.
 `--dictionary` and `--hunspell` may be repeated and composed in the same
 invocation.
 
-When the cache is absent, ferrolex imports the `.aff`/`.dic` pair directly in
-memory, emits importer diagnostics on standard error, and prints a notice that
-this path is slower. It does not try to write beside the sources, so ordinary
+When the cache is absent, ferrolex strictly imports the `.aff`/`.dic` pair
+directly in memory and prints a notice that this path is slower. Importer errors
+and their diagnostics fail closed rather than exposing a partial dictionary.
+The fallback does not try to write beside the sources, so compatible ordinary
 Hunspell pairs in read-only system directories remain usable. For repeated
 use, compile the pair into a writable location and pass the result with
-`--compiled`, or use `dictionary install` for a reviewed catalog locale.
-Malformed or stale caches still fail closed with the same remediation choices;
-they are never ignored as though absent. Runtime commands perform no network
-access and never rebuild or repair a cache implicitly.
+`--compiled`. Reviewed catalog pairs, especially those with per-file encoding
+overrides, must use `dictionary install`; a matching filename alone does not
+establish catalog provenance. Malformed or stale caches also fail closed with
+the same remediation choices; they are never ignored as though absent. Runtime
+commands perform no network access and never rebuild or repair a cache
+implicitly.
 
 ## Standalone artifact
 

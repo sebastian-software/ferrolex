@@ -291,7 +291,7 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
             println!("license: {}", source.license_spdx_expression());
             println!("notice: {}", source.license_notice_url());
             println!(
-                "hint: build the runtime cache with `ferrolex dictionary install {locale} --cache {}` before using `--hunspell` repeatedly",
+                "hint: build the runtime cache with `ferrolex dictionary install {locale} --cache {}` before using this catalog dictionary with `--hunspell`",
                 cache_path.display()
             );
             Ok(RunOutcome::Success)
@@ -370,11 +370,6 @@ fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodi
         )),
         SourceEncoding::Utf8 | SourceEncoding::Iso8859_1 | SourceEncoding::Iso8859_2 => None,
     }
-}
-
-fn catalog_import_encodings_for_affix_path(aff_path: &Path) -> Option<ByteImportEncodings> {
-    let locale = aff_path.file_stem()?.to_str()?;
-    catalog_import_encodings(find_locale(locale)?.encoding())
 }
 
 fn fetch_catalog_dictionary(
@@ -868,19 +863,26 @@ fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDiction
             );
             let aff_source = aff_path.display().to_string();
             let dic_source = dic_path.display().to_string();
-            let imported = import_hunspell_source_bytes(
+            let imported = match import_hunspell_source_bytes(
                 &aff_source,
                 &aff_bytes,
                 &dic_source,
                 &dic_bytes,
-                catalog_import_encodings_for_affix_path(aff_path),
-                ImportMode::Lenient,
-            )
-            .map_err(|source| CliError::ImportHunspellSources {
-                aff_path: aff_path.to_path_buf(),
-                dic_path: dic_path.clone(),
-                source,
-            })?;
+                None,
+                ImportMode::Strict,
+            ) {
+                Ok(imported) => imported,
+                Err(source) => {
+                    for diagnostic in source.diagnostics() {
+                        print_import_diagnostic_to_stderr(diagnostic);
+                    }
+                    return Err(CliError::ImportHunspellSources {
+                        aff_path: aff_path.to_path_buf(),
+                        dic_path: dic_path.clone(),
+                        source,
+                    });
+                }
+            };
             for diagnostic in imported.diagnostics() {
                 print_import_diagnostic_to_stderr(diagnostic);
             }
@@ -2466,7 +2468,7 @@ impl fmt::Display for CliError {
                 source,
             } => write!(
                 formatter,
-                "could not import Hunspell sources `{}` and `{}` without a runtime cache: {source}; compile the pair in a writable directory and use `--compiled`",
+                "could not strictly import Hunspell sources `{}` and `{}` without a runtime cache: {source}; run `ferrolex validate --strict` on the pair before compiling it in a writable directory and using `--compiled`",
                 aff_path.display(),
                 dic_path.display()
             ),

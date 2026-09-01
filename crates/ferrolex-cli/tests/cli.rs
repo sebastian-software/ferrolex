@@ -98,11 +98,11 @@ fn hunspell_sources_without_a_cache_are_imported_with_actionable_guidance() {
 }
 
 #[test]
-fn cacheless_catalog_sources_retain_their_reviewed_mixed_encoding() {
-    let directory = temporary_directory("mixed-encoding");
+fn a_catalog_shaped_filename_does_not_override_local_source_encoding() {
+    let directory = temporary_directory("catalog-name-collision");
     let aff_path = directory.join("id_ID.aff");
     let dic_path = directory.join("id_ID.dic");
-    fs::write(&aff_path, "SET ISO-8859-1\n").expect("affix fixture is written");
+    fs::write(&aff_path, "SET UTF-8\n").expect("affix fixture is written");
     fs::write(&dic_path, "1\ncafé\n").expect("UTF-8 dictionary fixture is written");
 
     let output = run(&[
@@ -120,6 +120,32 @@ fn cacheless_catalog_sources_retain_their_reviewed_mixed_encoding() {
     assert!(String::from_utf8(output.stderr)
         .expect("stderr is UTF-8")
         .contains("directly (slower)"));
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
+fn cacheless_importer_errors_fail_closed_with_diagnostics() {
+    let directory = temporary_directory("strict-import");
+    let aff_path = directory.join("invalid.aff");
+    let dic_path = directory.join("invalid.dic");
+    fs::write(&aff_path, "SET UTF-8\nICONV 1\nICONV only-source\n")
+        .expect("affix fixture is written");
+    fs::write(&dic_path, "1\nword\n").expect("dictionary fixture is written");
+
+    let output = run(&[
+        "check",
+        "--hunspell",
+        aff_path.to_str().expect("temporary path is UTF-8"),
+        "word",
+    ]);
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty(), "no partial dictionary is queried");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert!(stderr.contains("error[ICONV]"));
+    assert!(stderr.contains("could not strictly import Hunspell sources"));
+    assert!(stderr.contains("ferrolex validate --strict"));
 
     fs::remove_dir_all(directory).expect("temporary fixture is removed");
 }

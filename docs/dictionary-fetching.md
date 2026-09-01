@@ -101,8 +101,9 @@ ferrolex dictionary fetch pl_PL \
 ```
 
 The command prints the fetched paths plus the reviewed SPDX expression and
-notice URL, then points to `dictionary install` for building the runtime cache.
-Validate the resulting files before using them:
+notice URL, then points to `dictionary install` for building the runtime cache
+with the pair's reviewed provenance and encoding policy. Validate the resulting
+files before using them:
 
 ```sh
 ferrolex validate --strict \
@@ -147,8 +148,11 @@ ferrolex check \
 ```
 
 This loads the adjacent runtime cache only after verifying it against both
-source files. If no cache exists, `--hunspell` imports the pair directly and
-prints a slower-path notice plus a `compile`/`--compiled` hint. This makes
-read-only system dictionary directories usable without writing beside their
-sources. Checking never downloads or silently writes a cache; malformed or
-stale caches remain errors.
+source files. If no cache exists, `--hunspell` strictly imports an ordinary pair
+directly and prints a slower-path notice plus a `compile`/`--compiled` hint.
+Catalog pairs with reviewed per-file encoding overrides must go through
+`dictionary install`; a locale-shaped filename alone is not treated as catalog
+provenance. This makes compatible read-only system dictionary directories
+usable without writing beside their sources. Checking never downloads or
+silently writes a cache; importer errors and malformed or stale caches remain
+errors.

@@ -103,9 +103,11 @@ invokes an external spell-checking engine; see the
 
 `--hunspell` accepts an ordinary `.aff` path and derives the adjacent `.dic`.
 It verifies and uses an installed runtime cache when present; otherwise it
-imports the sources directly with a slower-path notice and does not write next
-to them. For frequent use or read-only source directories, compile the pair to
-a writable standalone artifact and pass it with `--compiled`.
+strictly imports the sources with a slower-path notice and does not write next
+to them. Importer errors fail closed. For frequent use or read-only source
+directories, compile the pair to a writable standalone artifact and pass it
+with `--compiled`; catalog-specific encoding overrides require `dictionary
+install` and are never inferred from a filename alone.
 
 `suggest` exposes bounded, deterministic edit-distance suggestions across any
 number of layered plain-word-list dictionaries, installed Hunspell runtime
