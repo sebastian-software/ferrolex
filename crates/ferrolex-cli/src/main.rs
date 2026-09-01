@@ -204,7 +204,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
         &command.hunspell_affix_paths,
     )?;
     let replacements = source.replacement_rules();
-    let output_dictionary = source.single_hunspell_dictionary();
+    let metadata_dictionary = source.hunspell_metadata_dictionary();
     let mut config = SuggestConfig::default();
     if let Some(max_results) = command.max_results {
         config.max_results = max_results;
@@ -218,7 +218,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     if let Some(max_edit_cells) = command.max_edit_cells {
         config.max_edit_cells = max_edit_cells;
     }
-    let result = if let Some(dictionary) = output_dictionary {
+    let result = if let Some(dictionary) = metadata_dictionary {
         Suggester::new(&source, config)
             .with_replacement_rules(&replacements)
             .with_ranking_signals(dictionary.ranking_signals())
@@ -231,7 +231,7 @@ fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> {
     for suggestion in result.suggestions() {
         println!(
             "suggestion: {} (distance {})",
-            output_dictionary.map_or_else(
+            metadata_dictionary.map_or_else(
                 || suggestion.word().to_owned(),
                 |dictionary| dictionary.normalize_output(suggestion.word()),
             ),
@@ -495,12 +495,12 @@ impl AnalysisDictionary {
             .collect()
     }
 
-    fn single_hunspell_dictionary(&self) -> Option<&HunspellDictionary> {
-        match self.sources.as_slice() {
-            [AnalysisSource::Artifact(dictionary)] => dictionary.hunspell_dictionary(),
-            [AnalysisSource::Hunspell(dictionary)] => Some(dictionary.as_ref()),
-            [AnalysisSource::WordList(_)] | [] | [_, _, ..] => None,
-        }
+    fn hunspell_metadata_dictionary(&self) -> Option<&HunspellDictionary> {
+        self.sources.iter().find_map(|source| match source {
+            AnalysisSource::WordList(_) => None,
+            AnalysisSource::Artifact(dictionary) => dictionary.hunspell_dictionary(),
+            AnalysisSource::Hunspell(dictionary) => Some(dictionary.as_ref()),
+        })
     }
 }
 
@@ -2508,10 +2508,10 @@ mod tests {
         analysis_paths, analyze, catalog_import_encodings, comment_syntax_for_path, glob_matches,
         incomplete_suggestion_hint, install_hunspell_runtime_cache, load_analysis_dictionary,
         parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
-        runtime_cache_path, validate_hunspell, AnalyzeCommand, CheckCommand, CheckTarget, CliError,
-        Command, CommentSyntax, CompileCommand, CompileInput, DictionaryCommand, ExplainCommand,
-        LineIndex, RunOutcome, SourceEncoding, SuggestCommand, SuggestConfig, ValidateCommand,
-        HELP_CHECK,
+        runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource, AnalyzeCommand,
+        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
+        DictionaryCommand, ExplainCommand, LineIndex, Normalization, RunOutcome, SourceEncoding,
+        SuggestCommand, SuggestConfig, ValidateCommand, WordList, HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -3230,6 +3230,32 @@ mod tests {
             .suggestions()
             .iter()
             .any(|suggestion| suggestion.word() == "receive"));
+    }
+
+    #[test]
+    fn layered_sources_preserve_hunspell_output_metadata() {
+        let hunspell = import(
+            "metadata.aff",
+            "OCONV 1\nOCONV ae æ\n",
+            "metadata.dic",
+            "1\naer\n",
+            ImportMode::Strict,
+        )
+        .expect("output metadata fixture imports")
+        .dictionary()
+        .clone();
+        let dictionary = AnalysisDictionary {
+            sources: vec![
+                AnalysisSource::WordList(WordList::from_text(Normalization::Exact, "plain\n")),
+                AnalysisSource::Hunspell(Box::new(hunspell)),
+            ],
+        };
+
+        let metadata = dictionary
+            .hunspell_metadata_dictionary()
+            .expect("adding a plain layer preserves Hunspell metadata");
+
+        assert_eq!(metadata.normalize_output("aer"), "ær");
     }
 
     #[test]
