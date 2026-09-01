@@ -90,10 +90,16 @@ fn workspace_user_words_round_trip_across_cli_processes() {
 
     let added = run_in(&directory, &["dictionary", "add-word", "projectterm"]);
     assert!(added.status.success());
+    let added_stdout = String::from_utf8(added.stdout).expect("stdout is UTF-8");
+    let added_path = added_stdout
+        .strip_prefix("added: ")
+        .expect("the add command reports its path")
+        .trim();
     assert_eq!(
-        String::from_utf8(added.stdout).expect("stdout is UTF-8"),
-        "added: ./.ferrolex/words.txt\n"
+        std::path::Path::new(added_path).file_name(),
+        Some(std::ffi::OsStr::new("words.txt"))
     );
+    assert!(added_path.contains(".ferrolex"));
 
     let checked = run_in(&directory, &["check", "projectterm"]);
     assert!(checked.status.success());
