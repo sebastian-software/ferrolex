@@ -7,7 +7,7 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -37,11 +37,11 @@ use ferrolex_hunspell::{
 use ferrolex_suggest::{CandidateSource, Completeness, ReplacementRule, SuggestConfig, Suggester};
 use ferrolex_text::check_text;
 
-const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH>\n       ferrolex suggest [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
+const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n       ferrolex suggest [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 const EXIT_CODES: &str =
     "\nExit status: 0 success, 1 finding, 2 usage error, 3 operational failure.";
-const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] (<WORD> | --file <PATH>)\n\nChecks one word or every natural-language word in a UTF-8 file.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH>        Check a UTF-8 text file\n\nExample: ferrolex check --dictionary words.txt ferrolex";
+const HELP_CHECK: &str = "Usage: ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n\nChecks one word or every natural-language word in one or more UTF-8 inputs.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>  Plain word-list dictionary (repeatable)\n  --compiled <PATH>    Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>    Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --file <PATH|->      Check a UTF-8 file, or stdin with `-` (repeatable)\n  --                   End options, including before a word beginning with `-`\n\nAfter the first `--file`, positional arguments are additional file paths.\n\nExamples:\n  ferrolex check --dictionary words.txt -- --compound\n  printf 'some text' | ferrolex check --dictionary words.txt --file -";
 const HELP_SUGGEST: &str = "Usage: ferrolex suggest [--dictionary <PATH> ...] [--compiled <PATH> ...] [--hunspell <AFF_PATH> ...] [OPTIONS] <WORD>\n\nPrints bounded deterministic spelling suggestions.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>          Plain word-list dictionary (repeatable)\n  --compiled <PATH>            Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>            Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --max-results <COUNT>        Maximum returned suggestions\n  --max-edit-distance <COUNT>  Maximum OSA edit distance\n  --max-candidates <COUNT>     Maximum considered candidates\n  --max-edit-cells <COUNT>     Maximum edit-distance work\n\nExample: ferrolex suggest --dictionary words.txt --dictionary technical.txt ferolex";
 const HELP_EXPLAIN: &str = "Usage: ferrolex explain --hunspell <AFF_PATH> <WORD>\n\nExplains a Hunspell recognition decision.\n\nExample: ferrolex explain --hunspell de_DE.aff Haustürschlüssel";
 const HELP_ANALYZE: &str = "Usage: ferrolex analyze [--dictionary <PATH> | --compiled <PATH> | --hunspell <AFF_PATH> | --config <PATH>] [OPTIONS] <PATH>\n\nAnalyzes selected source files using dictionaries or a project config.\nAutomatically includes workspace and global user dictionaries when present.\n  --dictionary <PATH>   Plain word-list dictionary (repeatable)\n  --compiled <PATH>     Compiled dictionary artifact (repeatable)\n  --hunspell <PATH>     Hunspell AFF path; uses an adjacent cache when present (repeatable)\n  --config <PATH>       Project configuration\n  --include <GLOB>      Include glob (repeatable)\n  --exclude <GLOB>      Exclude glob (repeatable)\n  --suggest             Print suggestions for findings\n  --comment-prefix <P>  Line-comment directive prefix\n  --comment-syntax html HTML comment directives\n\nExample: ferrolex analyze --dictionary words.txt src";
@@ -457,7 +457,7 @@ fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
 
     match &command.target {
         CheckTarget::Word(word) => Ok(check_word(&checker, word)),
-        CheckTarget::File(path) => check_file(&checker, path),
+        CheckTarget::Inputs(inputs) => check_inputs(&checker, inputs),
     }
 }
 
@@ -941,24 +941,56 @@ fn check_word(checker: &Checker, word: &str) -> RunOutcome {
     }
 }
 
+fn check_inputs(checker: &Checker, inputs: &[CheckInput]) -> Result<RunOutcome, CliError> {
+    let mut outcome = RunOutcome::Success;
+
+    for input in inputs {
+        let input_outcome = match input {
+            CheckInput::File(path) => check_file(checker, path)?,
+            CheckInput::Stdin => check_stdin(checker)?,
+        };
+        if input_outcome == RunOutcome::Misspelled {
+            outcome = RunOutcome::Misspelled;
+        }
+    }
+
+    Ok(outcome)
+}
+
 fn check_file(checker: &Checker, path: &Path) -> Result<RunOutcome, CliError> {
     let text = fs::read_to_string(path).map_err(|source| CliError::ReadInput {
         path: path.to_path_buf(),
         source,
     })?;
+    Ok(check_source(checker, path, &text))
+}
+
+fn check_stdin(checker: &Checker) -> Result<RunOutcome, CliError> {
+    let path = Path::new("-");
+    let mut text = String::new();
+    io::stdin()
+        .read_to_string(&mut text)
+        .map_err(|source| CliError::ReadInput {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(check_source(checker, path, &text))
+}
+
+fn check_source(checker: &Checker, path: &Path, text: &str) -> RunOutcome {
     let mut misspelled = false;
 
-    let line_index = LineIndex::new(&text);
-    for issue in check_text(checker, &text) {
-        print_finding(path, &text, &line_index, issue.range().start, issue.word());
+    let line_index = LineIndex::new(text);
+    for issue in check_text(checker, text) {
+        print_finding(path, text, &line_index, issue.range().start, issue.word());
         misspelled = true;
     }
 
-    Ok(if misspelled {
+    if misspelled {
         RunOutcome::Misspelled
     } else {
         RunOutcome::Success
-    })
+    }
 }
 
 fn analyze(command: &AnalyzeCommand) -> Result<RunOutcome, CliError> {
@@ -1588,7 +1620,9 @@ fn requests_help(arguments: &[String]) -> bool {
     let mut arguments = arguments.iter();
 
     while let Some(argument) = arguments.next() {
-        if value_option(argument) {
+        if argument == "--" {
+            break;
+        } else if value_option(argument) {
             arguments.next();
         } else if matches!(argument.as_str(), "--help" | "-h") {
             return true;
@@ -2135,8 +2169,14 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
     let mut hunspell_affix_paths = Vec::new();
     let mut target = None;
     let mut arguments = arguments.into_iter();
+    let mut options_ended = false;
 
     while let Some(argument) = arguments.next() {
+        if options_ended {
+            push_check_positional(&mut target, argument)?;
+            continue;
+        }
+
         match argument.as_str() {
             "--dictionary" => {
                 dictionary_paths.push(required_path(&mut arguments, "--dictionary")?);
@@ -2146,16 +2186,14 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
             }
             "--compiled" => compiled_paths.push(required_path(&mut arguments, "--compiled")?),
             "--file" => {
-                set_target(
-                    &mut target,
-                    CheckTarget::File(required_path(&mut arguments, "--file")?),
-                )?;
+                push_check_input(&mut target, required_check_input(&mut arguments)?)?;
             }
+            "--" => options_ended = true,
             "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
-            _ => set_target(&mut target, CheckTarget::Word(argument))?,
+            _ => push_check_positional(&mut target, argument)?,
         }
     }
 
@@ -2168,6 +2206,24 @@ fn parse_check_arguments(arguments: impl IntoIterator<Item = String>) -> Result<
         hunspell_affix_paths,
         target,
     }))
+}
+
+fn required_check_input(
+    arguments: &mut impl Iterator<Item = String>,
+) -> Result<CheckInput, CliError> {
+    let path = arguments
+        .next()
+        .ok_or_else(|| CliError::Usage("`--file` requires a path or `-`".to_owned()))?;
+    if path == "-" {
+        return Ok(CheckInput::Stdin);
+    }
+    if path.is_empty() || path.starts_with('-') {
+        return Err(CliError::Usage(
+            "`--file` requires a path or `-`".to_owned(),
+        ));
+    }
+
+    Ok(CheckInput::File(PathBuf::from(path)))
 }
 
 fn required_path(
@@ -2269,11 +2325,38 @@ fn set_once_usize(
     Ok(())
 }
 
-fn set_target(target: &mut Option<CheckTarget>, value: CheckTarget) -> Result<(), CliError> {
-    if target.replace(value).is_some() {
-        return Err(CliError::Usage(
-            "check accepts exactly one word or `--file` target".to_owned(),
-        ));
+fn push_check_input(target: &mut Option<CheckTarget>, input: CheckInput) -> Result<(), CliError> {
+    match target {
+        None => *target = Some(CheckTarget::Inputs(vec![input])),
+        Some(CheckTarget::Inputs(inputs)) => {
+            if input == CheckInput::Stdin && inputs.contains(&CheckInput::Stdin) {
+                return Err(CliError::Usage(
+                    "stdin (`--file -`) may only be supplied once".to_owned(),
+                ));
+            }
+            inputs.push(input);
+        }
+        Some(CheckTarget::Word(_)) => {
+            return Err(CliError::Usage(
+                "check cannot mix a word with file inputs".to_owned(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn push_check_positional(target: &mut Option<CheckTarget>, value: String) -> Result<(), CliError> {
+    match target {
+        None => *target = Some(CheckTarget::Word(value)),
+        Some(CheckTarget::Inputs(_)) => {
+            push_check_input(target, CheckInput::File(PathBuf::from(value)))?;
+        }
+        Some(CheckTarget::Word(_)) => {
+            return Err(CliError::Usage(
+                "check accepts one word, or one or more file inputs".to_owned(),
+            ));
+        }
     }
 
     Ok(())
@@ -2322,7 +2405,13 @@ struct ExplainCommand {
 #[derive(Debug, Eq, PartialEq)]
 enum CheckTarget {
     Word(String),
+    Inputs(Vec<CheckInput>),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum CheckInput {
     File(PathBuf),
+    Stdin,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -2639,9 +2728,9 @@ mod tests {
         incomplete_suggestion_hint, install_hunspell_runtime_cache, load_analysis_dictionary,
         parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
         runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource, AnalyzeCommand,
-        CheckCommand, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
-        DictionaryCommand, ExplainCommand, LineIndex, Normalization, RunOutcome, SourceEncoding,
-        SuggestCommand, SuggestConfig, ValidateCommand, WordList, HELP_CHECK,
+        CheckCommand, CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand,
+        CompileInput, DictionaryCommand, ExplainCommand, LineIndex, Normalization, RunOutcome,
+        SourceEncoding, SuggestCommand, SuggestConfig, ValidateCommand, WordList, HELP_CHECK,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -2671,6 +2760,77 @@ mod tests {
                 target: CheckTarget::Word("OAuth".to_owned()),
             })
         );
+    }
+
+    #[test]
+    fn parses_repeated_and_positional_file_inputs() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "check",
+                "--dictionary",
+                "words.txt",
+                "--file",
+                "first.txt",
+                "--file=-",
+                "second.txt",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("multiple file inputs are valid");
+
+        assert_eq!(
+            command,
+            Command::Check(CheckCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                target: CheckTarget::Inputs(vec![
+                    CheckInput::File(PathBuf::from("first.txt")),
+                    CheckInput::Stdin,
+                    CheckInput::File(PathBuf::from("second.txt")),
+                ]),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_a_hyphen_leading_word_after_the_option_separator() {
+        let command = parse_arguments(
+            [
+                "ferrolex",
+                "check",
+                "--dictionary",
+                "words.txt",
+                "--",
+                "-ish",
+            ]
+            .map(str::to_owned),
+        )
+        .expect("the option separator makes the word unambiguous");
+
+        assert_eq!(
+            command,
+            Command::Check(CheckCommand {
+                dictionary_paths: vec![PathBuf::from("words.txt")],
+                compiled_paths: Vec::new(),
+                hunspell_affix_paths: Vec::new(),
+                target: CheckTarget::Word("-ish".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_mixed_word_and_file_inputs_or_repeated_stdin() {
+        for arguments in [
+            ["ferrolex", "check", "word", "--file", "input.txt"].as_slice(),
+            ["ferrolex", "check", "--file", "-", "--file", "-"].as_slice(),
+        ] {
+            assert!(matches!(
+                parse_arguments(arguments.iter().map(|argument| (*argument).to_owned())),
+                Err(CliError::Usage(_))
+            ));
+        }
     }
 
     #[test]

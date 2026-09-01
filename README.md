@@ -79,6 +79,9 @@ one word or a plain-text file:
 ```sh
 ferrolex check --dictionary words.txt Straße
 ferrolex check --dictionary words.txt --file README.md
+ferrolex check --dictionary words.txt --file README.md CHANGELOG.md
+printf 'text from stdin' | ferrolex check --dictionary words.txt --file -
+ferrolex check --dictionary words.txt -- --hyphenated-word
 ferrolex suggest --dictionary words.txt Strase
 ferrolex validate --strict dictionary.aff dictionary.dic
 ferrolex check --hunspell dictionary.aff derived-form
