@@ -16,6 +16,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Range;
 
 use ferrolex_core::{Dictionary, Normalization};
@@ -46,15 +48,19 @@ impl<'text> Misspelling<'text> {
 pub struct Misspellings<'dictionary, 'text> {
     dictionary: &'dictionary dyn Dictionary,
     tokens: WordTokens<'text>,
+    recognition_cache: HashMap<&'text str, bool>,
 }
 
 impl<'text> Iterator for Misspellings<'_, 'text> {
     type Item = Misspelling<'text>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.tokens.find_map(|(range, word)| {
-            (!contains_normalized(self.dictionary, word)).then_some(Misspelling { word, range })
-        })
+        for (range, word) in self.tokens.by_ref() {
+            if !contains_normalized_cached(self.dictionary, word, &mut self.recognition_cache) {
+                return Some(Misspelling { word, range });
+            }
+        }
+        None
     }
 }
 
@@ -71,6 +77,7 @@ pub fn check_text<'dictionary, 'text>(
     Misspellings {
         dictionary,
         tokens: WordTokens::new(text),
+        recognition_cache: HashMap::new(),
     }
 }
 
@@ -123,7 +130,26 @@ impl<'text> Iterator for WordTokens<'text> {
 }
 
 fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
-    dictionary.contains(token) || dictionary.contains(Normalization::Nfc.normalize(token).as_ref())
+    if dictionary.contains(token) {
+        return true;
+    }
+    match Normalization::Nfc.normalize(token) {
+        Cow::Borrowed(_) => false,
+        Cow::Owned(normalized) => dictionary.contains(&normalized),
+    }
+}
+
+fn contains_normalized_cached<'text>(
+    dictionary: &dyn Dictionary,
+    token: &'text str,
+    cache: &mut HashMap<&'text str, bool>,
+) -> bool {
+    if let Some(&recognized) = cache.get(token) {
+        return recognized;
+    }
+    let recognized = contains_normalized(dictionary, token);
+    cache.insert(token, recognized);
+    recognized
 }
 
 fn is_word_character(character: char) -> bool {
@@ -132,9 +158,32 @@ fn is_word_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use ferrolex_core::WordList;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ferrolex_core::{Dictionary, WordList};
 
     use super::check_text;
+
+    struct CountingDictionary {
+        accepted: &'static str,
+        lookups: AtomicUsize,
+    }
+
+    impl CountingDictionary {
+        const fn new(accepted: &'static str) -> Self {
+            Self {
+                accepted,
+                lookups: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Dictionary for CountingDictionary {
+        fn contains(&self, word: &str) -> bool {
+            self.lookups.fetch_add(1, Ordering::Relaxed);
+            word == self.accepted
+        }
+    }
 
     #[test]
     fn reports_unknown_unicode_words_with_utf8_ranges() {
@@ -164,6 +213,20 @@ mod tests {
         assert_eq!(misspellings.len(), 1);
         assert_eq!(misspellings[0].word(), "typo");
         assert_eq!(&text[misspellings[0].range()], "typo");
+    }
+
+    #[test]
+    fn avoids_duplicate_normalization_and_repeated_token_lookups() {
+        let misses = CountingDictionary::new("");
+        assert_eq!(check_text(&misses, "typo typo").count(), 2);
+        assert_eq!(misses.lookups.load(Ordering::Relaxed), 1);
+
+        let normalized = CountingDictionary::new("café");
+        assert_eq!(
+            check_text(&normalized, "cafe\u{301} cafe\u{301}").count(),
+            0
+        );
+        assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
     }
 
     #[test]

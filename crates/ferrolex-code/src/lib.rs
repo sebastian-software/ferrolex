@@ -16,7 +16,8 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use std::fmt;
 use std::ops::Range;
@@ -709,6 +710,7 @@ impl<'dictionary> Analyzer<'dictionary> {
         }
 
         let mut findings = Vec::new();
+        let mut recognition_cache = HashMap::new();
         for (line_index, line) in lines.iter().enumerate() {
             if let Some(directive) = parse_directive(line.text, &document.comment_syntax) {
                 directives.apply_switch(&directive);
@@ -723,6 +725,7 @@ impl<'dictionary> Analyzer<'dictionary> {
                     document.source,
                     &raw_token,
                     &directives.ignored_words,
+                    &mut recognition_cache,
                     &mut findings,
                 );
             }
@@ -739,13 +742,16 @@ impl<'dictionary> Analyzer<'dictionary> {
         source: &'source str,
         raw_token: &RawToken<'source>,
         directive_ignored_words: &BTreeSet<Box<str>>,
+        recognition_cache: &mut HashMap<&'source str, bool>,
         findings: &mut Vec<Finding<'source>>,
     ) {
         let mut class = classify(raw_token.text);
         // A project dictionary may deliberately contain an unprefixed
         // alphanumeric term that otherwise resembles a hexadecimal hash.
         // Recognition takes precedence over this lossy classifier heuristic.
-        if class == TokenClass::Hash && self.dictionary.contains(raw_token.text) {
+        if class == TokenClass::Hash
+            && contains_normalized_cached(self.dictionary, raw_token.text, recognition_cache)
+        {
             class = TokenClass::NaturalWord;
         }
         if self.config.ignored_classes.contains(&class)
@@ -767,7 +773,7 @@ impl<'dictionary> Analyzer<'dictionary> {
             }
             if self.config.ignored_words.contains(segment.text())
                 || directive_ignored_words.contains(segment.text())
-                || contains_normalized(self.dictionary, segment.text())
+                || contains_normalized_cached(self.dictionary, segment.text(), recognition_cache)
             {
                 continue;
             }
@@ -1205,7 +1211,26 @@ fn is_generated_token(token: &str) -> bool {
 }
 
 fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
-    dictionary.contains(token) || dictionary.contains(Normalization::Nfc.normalize(token).as_ref())
+    if dictionary.contains(token) {
+        return true;
+    }
+    match Normalization::Nfc.normalize(token) {
+        Cow::Borrowed(_) => false,
+        Cow::Owned(normalized) => dictionary.contains(&normalized),
+    }
+}
+
+fn contains_normalized_cached<'source>(
+    dictionary: &dyn Dictionary,
+    token: &'source str,
+    cache: &mut HashMap<&'source str, bool>,
+) -> bool {
+    if let Some(&recognized) = cache.get(token) {
+        return recognized;
+    }
+    let recognized = contains_normalized(dictionary, token);
+    cache.insert(token, recognized);
+    recognized
 }
 
 fn is_word_character(character: char) -> bool {
@@ -1272,13 +1297,36 @@ fn shift_range(range: Range<usize>, offset: usize) -> Range<usize> {
 
 #[cfg(test)]
 mod tests {
-    use ferrolex_core::{Checker, Normalization, UserDictionary, WordList};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ferrolex_core::{Checker, Dictionary, Normalization, UserDictionary, WordList};
 
     use super::{
         classify, recombine_identifier_suggestion, split_identifier, Analyzer, CommentSyntax,
         DirectiveProblem, Document, IdentifierSplitConfig, ProjectConfig, ProjectConfigError,
         SingleLetterPrefix, TokenClass,
     };
+
+    struct CountingDictionary {
+        accepted: &'static str,
+        lookups: AtomicUsize,
+    }
+
+    impl CountingDictionary {
+        const fn new(accepted: &'static str) -> Self {
+            Self {
+                accepted,
+                lookups: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Dictionary for CountingDictionary {
+        fn contains(&self, word: &str) -> bool {
+            self.lookups.fetch_add(1, Ordering::Relaxed);
+            word == self.accepted
+        }
+    }
 
     #[test]
     fn splits_rfc_identifiers_with_unicode_and_digits() {
@@ -1299,6 +1347,25 @@ mod tests {
         assert_eq!(segments("StraßeÜberblick"), ["Straße", "Überblick"]);
         assert_eq!(segments("version2Parser"), ["version", "2", "Parser"]);
         assert_eq!(segments("cafe\u{301}"), ["cafe\u{301}"]);
+    }
+
+    #[test]
+    fn avoids_duplicate_normalization_and_repeated_segment_lookups() {
+        let misses = CountingDictionary::new("");
+        let analyzer = Analyzer::builder(&misses).build();
+        assert_eq!(
+            analyzer.check(&Document::new("typo typo")).findings().len(),
+            2
+        );
+        assert_eq!(misses.lookups.load(Ordering::Relaxed), 1);
+
+        let normalized = CountingDictionary::new("café");
+        let analyzer = Analyzer::builder(&normalized).build();
+        assert!(analyzer
+            .check(&Document::new("cafe\u{301} cafe\u{301}"))
+            .findings()
+            .is_empty());
+        assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
     }
 
     #[test]
