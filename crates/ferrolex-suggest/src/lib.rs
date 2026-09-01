@@ -423,6 +423,17 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
             }
             direct_cursor += 1;
         }
+        let related_reservation = SuggestConfig {
+            max_candidates: examined
+                .saturating_add(self.config.max_candidates / 2)
+                .min(self.config.max_candidates),
+            max_edit_cells: cells
+                .saturating_add(self.config.max_edit_cells / 2)
+                .min(self.config.max_edit_cells),
+            ..self.config
+        };
+        let mut related_completeness = Completeness::Complete;
+        let mut related_reservation_exhausted = false;
         self.source.visit_related_seeds(&mut |seed| {
             if is_related_seed(
                 query_chars,
@@ -435,12 +446,14 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                     seed,
                     self.config.max_edit_distance,
                     &mut |derived| {
-                        consider_candidate(
+                        let examined_before_reservation = examined;
+                        let cells_before_reservation = cells;
+                        if consider_candidate(
                             self.source,
                             derived,
                             query,
                             query_chars,
-                            self.config,
+                            related_reservation,
                             self.replacements,
                             self.ranking_signals,
                             suggestions,
@@ -453,38 +466,48 @@ impl<'source, S: CandidateSource + ?Sized> Suggester<'source, S> {
                             current,
                             &mut examined,
                             &mut cells,
-                            &mut completeness,
-                        )
+                            &mut related_completeness,
+                        ) {
+                            true
+                        } else {
+                            examined = examined_before_reservation;
+                            cells = cells_before_reservation;
+                            related_reservation_exhausted = true;
+                            false
+                        }
                     },
                 );
             }
-            matches!(completeness, Completeness::Complete)
+            !related_reservation_exhausted
         });
-        if matches!(completeness, Completeness::Complete) {
-            while direct_cursor < direct_candidates.len()
-                && consider_candidate(
-                    self.source,
-                    &direct_candidates[direct_cursor],
-                    query,
-                    query_chars,
-                    self.config,
-                    self.replacements,
-                    self.ranking_signals,
-                    suggestions,
-                    candidate_chars,
-                    transformed_chars,
-                    replacement_from_chars,
-                    replacement_to_chars,
-                    previous_previous,
-                    previous,
-                    current,
-                    &mut examined,
-                    &mut cells,
-                    &mut completeness,
-                )
-            {
-                direct_cursor += 1;
-            }
+        while direct_cursor < direct_candidates.len()
+            && consider_candidate(
+                self.source,
+                &direct_candidates[direct_cursor],
+                query,
+                query_chars,
+                self.config,
+                self.replacements,
+                self.ranking_signals,
+                suggestions,
+                candidate_chars,
+                transformed_chars,
+                replacement_from_chars,
+                replacement_to_chars,
+                previous_previous,
+                previous,
+                current,
+                &mut examined,
+                &mut cells,
+                &mut completeness,
+            )
+        {
+            direct_cursor += 1;
+        }
+        if matches!(completeness, Completeness::Complete)
+            && !matches!(related_completeness, Completeness::Complete)
+        {
+            completeness = related_completeness;
         }
         rank_suggestions(suggestions);
         presented.clear();
@@ -894,6 +917,46 @@ mod tests {
         }
     }
 
+    struct CompetingPhaseSource;
+
+    impl CandidateSource for CompetingPhaseSource {
+        fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            for candidate in ["cat", "cut"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_nearby_candidates(
+            &self,
+            _query: &[char],
+            _max_edit_distance: usize,
+            _max_word_scalars: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            self.visit_candidates(visitor);
+        }
+
+        fn visit_related_candidates(
+            &self,
+            _query: &str,
+            _seed: &str,
+            _max_edit_distance: usize,
+            visitor: &mut dyn FnMut(&str) -> bool,
+        ) {
+            for candidate in ["cot", "bit"] {
+                if !visitor(candidate) {
+                    break;
+                }
+            }
+        }
+
+        fn visit_related_seeds(&self, visitor: &mut dyn FnMut(&str) -> bool) {
+            visitor("seed");
+        }
+    }
+
     #[test]
     fn suggests_missing_letters_and_transpositions_deterministically() {
         let words = WordList::new(["authentication", "receive", "recipe"]).expect("valid words");
@@ -1014,6 +1077,27 @@ mod tests {
         assert!(words.contains(&"cat"));
         assert!(words.contains(&"cot"));
         assert_eq!(result.completeness(), Completeness::Complete);
+    }
+
+    #[test]
+    fn related_forms_do_not_consume_the_direct_remainder() {
+        let config = SuggestConfig {
+            max_candidates: 10,
+            max_edit_cells: 48,
+            ..SuggestConfig::default()
+        };
+
+        let result = Suggester::new(&CompetingPhaseSource, config).suggest("cit");
+        let words = result
+            .suggestions()
+            .iter()
+            .map(Suggestion::word)
+            .collect::<Vec<_>>();
+
+        assert!(words.contains(&"cat"));
+        assert!(words.contains(&"cot"));
+        assert!(words.contains(&"cut"));
+        assert_eq!(result.completeness(), Completeness::EditBudgetReached);
     }
 
     #[test]
