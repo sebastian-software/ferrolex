@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-13
-- Last updated: 2026-08-14
+- Last updated: 2026-09-01
 - Deciders: Ferrolex maintainers
 
 ## Context
@@ -29,8 +29,10 @@ The C ABI and Python packages are retained only as evaluation prototypes. The
 generic LSP and Visual Studio Code client are outside the current product and
 distribution scope. They do not define release artifacts or compatibility
 promises. Existing workspace CI checks may remain temporarily while the
-prototype code is evaluated for removal, but they are not focused release
-gates.
+prototype code is evaluated for removal. They are excluded from default
+workspace members and focused release compilation and tests, with a
+path-filtered, manually dispatchable workflow retaining targeted implementation
+evidence.
 
 Document and language integrations belong to their owning tools and call the
 Rust or Node.js API after parsing. They do not require a ferrolex-owned LSP.

@@ -1,0 +1,67 @@
+name: Prototype integrations
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/prototype-integrations.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/ferrolex-ffi/**'
+      - 'crates/ferrolex-lsp/**'
+      - 'crates/ferrolex-python/**'
+      - 'editors/vscode/ferrolex/**'
+      - 'scripts/bench-python-binding.sh'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/prototype-integrations.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/ferrolex-ffi/**'
+      - 'crates/ferrolex-lsp/**'
+      - 'crates/ferrolex-python/**'
+      - 'editors/vscode/ferrolex/**'
+      - 'scripts/bench-python-binding.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-prototypes:
+    name: Rust prototypes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.88
+          components: clippy, rustfmt
+      - run: cargo fmt --all -- --check
+      - run: >-
+          cargo clippy
+          -p ferrolex-ffi
+          -p ferrolex-lsp
+          -p ferrolex-python
+          --all-targets -- -D warnings
+      - run: >-
+          RUSTDOCFLAGS='-D warnings' cargo doc
+          -p ferrolex-ffi
+          -p ferrolex-lsp
+          -p ferrolex-python
+          --no-deps
+      - run: cargo test -p ferrolex-ffi --features c-abi
+      - run: cargo test -p ferrolex-lsp
+      - run: bash scripts/bench-python-binding.sh
+
+  vscode-extension:
+    name: VS Code prototype
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm --prefix editors/vscode/ferrolex ci --ignore-scripts
+      - run: npm --prefix editors/vscode/ferrolex test
+      - run: npm --prefix editors/vscode/ferrolex run pack:check
