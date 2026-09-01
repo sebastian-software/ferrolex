@@ -45,13 +45,11 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo doc --workspace --no-deps
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-      - run: cargo test --workspace
-      - run: cargo test -p ferrolex-ffi --features c-abi
-      - run: cargo test -p ferrolex-lsp
+      - run: cargo test
       - run: cargo bench -p ferrolex-core --no-run
       - run: cargo bench -p ferrolex-compiler --no-run
       - run: cargo bench -p ferrolex-suggest --no-run
@@ -143,8 +141,8 @@ jobs:
     uses: ./.github/workflows/hunspell-compatibility.yml
     secrets: inherit
 
-  binding-spikes:
-    name: Binding spikes
+  node-binding:
+    name: Node binding
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,16 +153,3 @@ jobs:
         with:
           node-version: 20
       - run: bash scripts/bench-node-binding.sh
-      - run: bash scripts/bench-python-binding.sh
-
-  vscode-extension:
-    name: VS Code extension
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: npm --prefix editors/vscode/ferrolex ci --ignore-scripts
-      - run: npm --prefix editors/vscode/ferrolex test
-      - run: npm --prefix editors/vscode/ferrolex run pack:check

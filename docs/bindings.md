@@ -32,8 +32,9 @@ bash scripts/bench-python-binding.sh
 
 Each command emits JSON with elapsed nanoseconds and the recognized-query
 count. Timings are machine-local observations; equality of the count and the
-successful extension import are the correctness gates. Both checks still run
-while the workspace is being simplified, but only Node.js belongs to the
+successful extension import are the correctness gates. The Node.js check runs
+in focused release CI. The Python check runs only in the path-filtered or
+manually dispatched prototype workflow because only Node.js belongs to the
 current release direction.
 
 ## Decisions

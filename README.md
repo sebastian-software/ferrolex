@@ -139,7 +139,9 @@ assert!(dictionary.contains("ferrolex"));
 The [Node.js binding](docs/bindings.md) is the only current foreign-runtime
 integration direction. The checked-in C ABI, Python, LSP, and VS Code work is
 prototype history rather than an active distribution or compatibility promise;
-see [Native integrations](docs/integrations.md).
+it is excluded from the default release compilation and test gates, then
+checked when prototype paths change or a maintainer starts the prototype
+workflow manually. See [Native integrations](docs/integrations.md).
 
 The optional, digest-pinned LibreOffice installer is documented in
 [Dictionary fetching](docs/dictionary-fetching.md). It fetches reviewed

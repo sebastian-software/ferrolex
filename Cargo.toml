@@ -32,6 +32,18 @@ members = [
     "crates/ferrolex-python",
     "crates/ferrolex-lsp",
 ]
+default-members = [
+    ".",
+    "crates/ferrolex-core",
+    "crates/ferrolex-text",
+    "crates/ferrolex-code",
+    "crates/ferrolex-hunspell",
+    "crates/ferrolex-suggest",
+    "crates/ferrolex-dictionaries",
+    "crates/ferrolex-compiler",
+    "crates/ferrolex-cli",
+    "crates/ferrolex-node",
+]
 resolver = "2"
 
 [workspace.package]
