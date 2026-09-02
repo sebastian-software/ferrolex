@@ -4,7 +4,7 @@
 files and derives a local runtime cache beside the affix file:
 
 ```text
-<cache>/<locale>/<affix-stem>.ferrolex-hunspell-v1.flexh
+<cache>/<locale>/<affix-stem>.ferrolex-hunspell-v2.flexh
 ```
 
 The cache is an implementation artifact. The original `.aff` and `.dic` bytes
@@ -48,6 +48,11 @@ adds only its four-byte ID to the cache.
 import leaves the verified source cache available for diagnostics but does not
 create a runtime artifact. A stale or malformed runtime cache is disposable and
 must be rebuilt from its source pair; it is never silently repaired in place.
+
+The filename namespace advances when recognition semantics become incompatible.
+An artifact in an older namespace is treated like an absent cache, so the
+authoritative source pair remains usable through the strict in-memory fallback
+until `dictionary install` creates the current cache generation.
 
 ## Offline runtime use
 

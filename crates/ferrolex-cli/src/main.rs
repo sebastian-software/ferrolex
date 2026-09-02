@@ -56,7 +56,7 @@ const HELP_INSPECT: &str = "Usage: ferrolex inspect <ARTIFACT>\n\nPrints native 
 const HELP_VALIDATE: &str = "Usage: ferrolex validate [--format <text|json>] [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate [--format <text|json>] --compiled <ARTIFACT>\n\nValidates a Hunspell pair or compiled artifact. `--strict` rejects importer errors.\n  --format <text|json>  Human-readable text or JSON Lines output (default: text)\n\nExample: ferrolex validate --format json --strict dictionary.aff dictionary.dic";
 const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | install | add-word> [OPTIONS]\n\nLists reviewed dictionaries, obtains a pinned source, installs a runtime cache, or records a user word.\nUser words are automatically included by check, suggest, and analyze.\n  fetch/install <LOCALE> --cache <PATH>  Use an explicit cache directory\n  add-word [--workspace <PATH> | --global] <WORD>\n\nExample: ferrolex dictionary install pl_PL --cache .ferrolex-dictionaries";
 
-const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v1.flexh";
+const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v2.flexh";
 const MAX_ANALYSIS_SUGGESTION_CACHE_ENTRIES: usize = 4_096;
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -4452,6 +4452,30 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn legacy_runtime_cache_namespace_does_not_block_source_import() {
+        let sources = temporary_hunspell_sources("\u{feff}SET UTF-8\n", "\u{feff}1\nword\n");
+        let legacy_cache_path = sources
+            .affix_path
+            .with_extension("ferrolex-hunspell-v1.flexh");
+        fs::write(&legacy_cache_path, b"legacy version-29 cache")
+            .expect("legacy cache fixture is writable");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "check".to_owned(),
+            "--hunspell".to_owned(),
+            sources.affix_path.to_string_lossy().into_owned(),
+            "word".to_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("legacy cache namespace falls back to the source pair"),
+            RunOutcome::Success
+        );
+        assert!(!runtime_cache_path(&sources.affix_path).exists());
+        fs::remove_file(legacy_cache_path).expect("test removes its legacy cache fixture");
     }
 
     #[test]
