@@ -97,10 +97,12 @@ additions in `$XDG_CONFIG_HOME/ferrolex/words.txt` (or
 `$HOME/.config/ferrolex/words.txt`). Use `ferrolex dictionary add-word WORD`
 for the current workspace, `--workspace PATH` for an explicit project root, or
 `--global` for the user-wide list. Each update writes a sorted complete
-replacement to a temporary sibling and then renames it atomically. Concurrent
-processes should serialize add-word operations themselves: atomic replacement
-prevents partial files but intentionally does not merge two independently read
-snapshots.
+replacement to a synced temporary sibling, renames it atomically, and syncs the
+parent directory where the platform supports directory handles. A short-lived
+lock serializes concurrent `add-word` processes around the complete
+read-modify-write cycle, so independently added words are retained. Later
+writes opportunistically remove stale temporary siblings left by interrupted
+processes.
 
 `check`, `suggest`, and `analyze` automatically layer both files when present;
 workspace words take precedence in candidate traversal. A user list can be the

@@ -12,6 +12,8 @@ use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 use ferrolex_code::{
     Analyzer, AnalyzerConfigError, CommentSyntax, DirectiveProblem, Document, ProjectConfig,
@@ -58,6 +60,10 @@ const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | instal
 
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v2.flexh";
 const MAX_ANALYSIS_SUGGESTION_CACHE_ENTRIES: usize = 4_096;
+const STALE_TEMPORARY_FILE_AGE: Duration = Duration::from_secs(60 * 60);
+const STALE_USER_DICTIONARY_LOCK_AGE: Duration = Duration::from_secs(30);
+const USER_DICTIONARY_LOCK_ATTEMPTS: usize = 500;
+const USER_DICTIONARY_LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> ExitCode {
@@ -353,6 +359,12 @@ fn dictionary(command: &DictionaryCommand) -> Result<RunOutcome, CliError> {
 }
 
 fn add_user_dictionary_word(word: &str, path: &Path) -> Result<RunOutcome, CliError> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| CliError::WriteUserDictionary {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let _lock = UserDictionaryLock::acquire(path)?;
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
@@ -380,21 +392,168 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), CliError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let temporary = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("words"),
-        std::process::id()
-    ));
-    fs::write(&temporary, text).map_err(|source| CliError::WriteUserDictionary {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    fs::rename(&temporary, path).map_err(|source| CliError::WriteUserDictionary {
-        path: path.to_path_buf(),
-        source,
-    })
+    sweep_stale_temporary_siblings(path);
+    let temporary = temporary_sibling(path);
+    let mut created = false;
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|source| CliError::WriteUserDictionary {
+                path: temporary.clone(),
+                source,
+            })?;
+        created = true;
+        file.write_all(text.as_bytes())
+            .map_err(|source| CliError::WriteUserDictionary {
+                path: temporary.clone(),
+                source,
+            })?;
+        file.sync_all()
+            .map_err(|source| CliError::WriteUserDictionary {
+                path: temporary.clone(),
+                source,
+            })?;
+        fs::rename(&temporary, path).map_err(|source| CliError::WriteUserDictionary {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        sync_parent_directory(parent).map_err(|source| CliError::WriteUserDictionary {
+            path: parent.to_path_buf(),
+            source,
+        })
+    })();
+    if result.is_err() && created {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+struct UserDictionaryLock {
+    path: PathBuf,
+}
+
+impl UserDictionaryLock {
+    fn acquire(dictionary_path: &Path) -> Result<Self, CliError> {
+        let lock_path = hidden_sibling(dictionary_path, "lock");
+        for _ in 0..USER_DICTIONARY_LOCK_ATTEMPTS {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(mut file) => {
+                    if let Err(source) = writeln!(file, "{}", std::process::id()) {
+                        let _ = fs::remove_file(&lock_path);
+                        return Err(CliError::WriteUserDictionary {
+                            path: lock_path,
+                            source,
+                        });
+                    }
+                    return Ok(Self { path: lock_path });
+                }
+                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                    if file_is_stale(&lock_path, STALE_USER_DICTIONARY_LOCK_AGE) {
+                        let _ = fs::remove_file(&lock_path);
+                        continue;
+                    }
+                    thread::sleep(USER_DICTIONARY_LOCK_RETRY_DELAY);
+                }
+                Err(source) => {
+                    return Err(CliError::WriteUserDictionary {
+                        path: lock_path,
+                        source,
+                    })
+                }
+            }
+        }
+        Err(CliError::WriteUserDictionary {
+            path: lock_path,
+            source: io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "timed out waiting for another add-word process",
+            ),
+        })
+    }
+}
+
+impl Drop for UserDictionaryLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn hidden_sibling(path: &Path, suffix: &str) -> PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut name = std::ffi::OsString::from(".");
+    name.push(path.file_name().unwrap_or(std::ffi::OsStr::new("words")));
+    name.push(".");
+    name.push(suffix);
+    parent.join(name)
+}
+
+fn temporary_sibling(path: &Path) -> PathBuf {
+    hidden_sibling(
+        path,
+        &format!(
+            "tmp-{}-{}",
+            std::process::id(),
+            CACHE_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ),
+    )
+}
+
+fn sweep_stale_temporary_siblings(path: &Path) {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let current_prefix = format!(".{name}.tmp-");
+    let legacy_runtime_prefix = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| format!("{stem}.tmp-"));
+    let legacy_user_prefix = format!(".{name}.");
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        let legacy_user_pid = file_name
+            .strip_prefix(&legacy_user_prefix)
+            .and_then(|value| value.strip_suffix(".tmp"))
+            .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit()));
+        let belongs_to_path = file_name.starts_with(&current_prefix)
+            || legacy_runtime_prefix
+                .as_deref()
+                .is_some_and(|prefix| file_name.starts_with(prefix))
+            || legacy_user_pid;
+        if belongs_to_path && file_is_stale(&entry.path(), STALE_TEMPORARY_FILE_AGE) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn file_is_stale(path: &Path, maximum_age: Duration) -> bool {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .is_some_and(|age| age >= maximum_age)
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodings> {
@@ -1602,11 +1761,9 @@ fn print_validation_result(path: &Path, valid: bool, output_format: OutputFormat
 }
 
 fn atomic_write_runtime_cache(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
-    let temporary = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        CACHE_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
+    sweep_stale_temporary_siblings(path);
+    let temporary = temporary_sibling(path);
+    let parent = path.parent().unwrap_or(Path::new("."));
     let mut created = false;
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -1630,6 +1787,10 @@ fn atomic_write_runtime_cache(path: &Path, bytes: &[u8]) -> Result<(), CliError>
             })?;
         fs::rename(&temporary, path).map_err(|source| CliError::WriteHunspellCache {
             path: path.to_path_buf(),
+            source,
+        })?;
+        sync_parent_directory(parent).map_err(|source| CliError::WriteHunspellCache {
+            path: parent.to_path_buf(),
             source,
         })
     })();
@@ -3025,6 +3186,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::{Duration, SystemTime};
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
     use ferrolex_core::Dictionary;
@@ -3033,15 +3196,16 @@ mod tests {
     };
 
     use super::{
-        analysis_paths, analyze, catalog_import_encodings, comment_syntax_for_path, glob_matches,
-        incomplete_suggestion_hint, install_hunspell_runtime_cache, load_analysis_dictionary,
-        parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
-        runtime_cache_path, validate_hunspell, AnalysisDictionary, AnalysisSource,
-        AnalysisSuggestionEngine, AnalyzeCommand, Analyzer, CandidateSource, CheckCommand,
-        CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand, CompileInput,
-        DictionaryCommand, Document, ExplainCommand, LineIndex, Normalization, OutputFormat,
-        RunOutcome, SourceEncoding, SuggestCommand, SuggestConfig, ValidateCommand, WordList,
-        HELP_CHECK,
+        add_user_dictionary_word, analysis_paths, analyze, catalog_import_encodings,
+        comment_syntax_for_path, glob_matches, incomplete_suggestion_hint,
+        install_hunspell_runtime_cache, load_analysis_dictionary, parse_arguments,
+        read_analysis_source, read_compiled_artifact, render_explanation, run, runtime_cache_path,
+        validate_hunspell, AnalysisDictionary, AnalysisSource, AnalysisSuggestionEngine,
+        AnalyzeCommand, Analyzer, CandidateSource, CheckCommand, CheckInput, CheckTarget, CliError,
+        Command, CommentSyntax, CompileCommand, CompileInput, DictionaryCommand, Document,
+        ExplainCommand, LineIndex, Normalization, OutputFormat, RunOutcome, SourceEncoding,
+        SuggestCommand, SuggestConfig, UserDictionaryLock, ValidateCommand, WordList, HELP_CHECK,
+        STALE_TEMPORARY_FILE_AGE,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -3219,6 +3383,43 @@ mod tests {
                 target: CheckTarget::Word("word".to_owned()),
             })
         );
+    }
+
+    #[test]
+    fn add_word_serializes_updates_and_sweeps_only_stale_temporary_files() {
+        let directory = temporary_directory();
+        let dictionary_path = directory.path.join("words.txt");
+        let stale_temporary = directory.path.join(".words.txt.999999.tmp");
+        let fresh_temporary = directory.path.join(".words.txt.tmp-active");
+        fs::write(&stale_temporary, "stale").expect("stale fixture is writable");
+        fs::write(&fresh_temporary, "active").expect("active fixture is writable");
+        let stale_time = SystemTime::now()
+            .checked_sub(STALE_TEMPORARY_FILE_AGE + Duration::from_secs(1))
+            .expect("fixture timestamp remains representable");
+        fs::File::options()
+            .write(true)
+            .open(&stale_temporary)
+            .expect("stale fixture opens")
+            .set_times(fs::FileTimes::new().set_modified(stale_time))
+            .expect("stale fixture timestamp is writable");
+
+        let lock = UserDictionaryLock::acquire(&dictionary_path).expect("test holds the lock");
+        let concurrent_path = dictionary_path.clone();
+        let writer = thread::spawn(move || {
+            add_user_dictionary_word("second", &concurrent_path)
+                .expect("concurrent word is eventually added");
+        });
+        thread::sleep(Duration::from_millis(50));
+        fs::write(&dictionary_path, "first\n").expect("first writer commits while holding lock");
+        drop(lock);
+        writer.join().expect("concurrent writer does not panic");
+
+        assert_eq!(
+            fs::read_to_string(&dictionary_path).expect("dictionary remains readable"),
+            "first\nsecond\n"
+        );
+        assert!(!stale_temporary.exists());
+        assert!(fresh_temporary.exists());
     }
 
     #[test]
