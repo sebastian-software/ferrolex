@@ -1246,6 +1246,10 @@ fn sync_parent_directory(parent: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "all platforms share one fallible directory-sync call site"
+)]
 fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
