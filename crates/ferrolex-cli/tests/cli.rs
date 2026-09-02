@@ -383,7 +383,7 @@ fn hunspell_sources_without_a_cache_are_imported_with_actionable_guidance() {
     let directory = temporary_directory("hunspell");
     let aff_path = directory.join("en.aff");
     let dic_path = directory.join("en.dic");
-    let cache_path = directory.join("en.ferrolex-hunspell-v1.flexh");
+    let cache_path = directory.join("en.ferrolex-hunspell-v2.flexh");
     fs::write(&aff_path, "SET UTF-8\nSFX S N 1\nSFX S 0 s .\n").expect("affix fixture is written");
     fs::write(&dic_path, "1\nword/S\n").expect("dictionary fixture is written");
 
