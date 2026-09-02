@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ferrolex-core = { path = "crates/ferrolex-core", version = "0.3.1" }
+ferrolex-core = { path = "crates/ferrolex-core", version = "0.4.0" }
 
 [lints]
 workspace = true
