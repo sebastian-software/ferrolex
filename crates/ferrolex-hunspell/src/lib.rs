@@ -2896,6 +2896,7 @@ fn parse_aff(source: &str, text: &str) -> ParsedAff {
     let mut lines = text.lines().enumerate();
 
     while let Some((index, original_line)) = lines.next() {
+        let original_line = strip_initial_bom(index, original_line);
         let line = original_line.trim();
         let line_number = index + 1;
         if is_ignored_line(line) {
@@ -4836,6 +4837,7 @@ fn parse_dic(
     let mut entry_count = 0;
 
     for (index, original_line) in text.lines().enumerate() {
+        let original_line = strip_initial_bom(index, original_line);
         let line = original_line.trim();
         if is_ignored_dictionary_line(line) {
             continue;
@@ -4956,6 +4958,14 @@ fn parse_dic(
     }
     entries.sort_by(|left, right| left.stem.cmp(&right.stem));
     entries
+}
+
+fn strip_initial_bom(line_index: usize, line: &str) -> &str {
+    if line_index == 0 {
+        line.strip_prefix('\u{feff}').unwrap_or(line)
+    } else {
+        line
+    }
 }
 
 fn decode_entry_flags(
@@ -6070,6 +6080,43 @@ mod tests {
         .expect("a UTF-8 BOM is normalized before parsing the affix file");
 
         assert!(result.dictionary().contains("München"));
+    }
+
+    #[test]
+    fn string_import_accepts_a_utf8_bom_in_both_sources() {
+        let result = import(
+            "bom.aff",
+            "\u{feff}SET UTF-8\n",
+            "bom.dic",
+            "\u{feff}2\nhello\nworld\n",
+            ImportMode::Strict,
+        )
+        .expect("leading Unicode BOMs are normalized before parsing either source");
+
+        assert!(result.diagnostics().is_empty());
+        assert!(result.dictionary().contains("hello"));
+        assert!(result.dictionary().contains("world"));
+        assert!(!result.dictionary().contains("\u{feff}2"));
+    }
+
+    #[test]
+    fn byte_import_strips_a_dictionary_bom_without_disabling_count_validation() {
+        let result = import_bytes(
+            "bom.aff",
+            b"SET UTF-8\n",
+            "bom.dic",
+            b"\xef\xbb\xbf1\nhello\nworld\n",
+            ImportMode::Strict,
+        )
+        .expect("a dictionary BOM does not hide a count mismatch");
+
+        assert!(result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.directive() == "count"
+                && diagnostic.message() == "declared 1 entries but parsed 2"
+        }));
+        assert!(result.dictionary().contains("hello"));
+        assert!(result.dictionary().contains("world"));
+        assert!(!result.dictionary().contains("\u{feff}1"));
     }
 
     #[test]
