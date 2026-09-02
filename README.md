@@ -21,9 +21,10 @@ compatibility evidence, and retained prototype history.
 
 The project is pre-1.0. The Rust engine, Hunspell compatibility, suggestions,
 and managed dictionary acquisition are the current product focus. The Node.js
-binding is the first direct runtime integration and remains unpublished while
-its package and installation contract are completed. Public APIs may change in
-minor releases before 1.0; breaking changes are recorded in the changelog.
+binding is the first direct runtime integration. Its `@ferrolex/node` package
+contract and prebuilt matrix are release-gated in CI, but the package has not
+yet been published to npm. Public APIs may change in minor releases before
+1.0; breaking changes are recorded in the changelog.
 
 ### Reviewed dictionary compatibility
 

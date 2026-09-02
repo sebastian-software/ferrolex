@@ -1,0 +1,6 @@
+artifacts/
+node_modules/
+npm/
+*.node
+LICENSE-APACHE
+LICENSE-MIT

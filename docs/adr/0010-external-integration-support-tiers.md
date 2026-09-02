@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-13
-- Last updated: 2026-09-01
+- Last updated: 2026-09-03
 - Deciders: Ferrolex maintainers
 
 ## Context
@@ -22,8 +22,10 @@ not currently have a concrete consumer or distribution requirement.
 
 Node.js is the only selected direct non-Rust integration. Its API mirrors the
 Rust engine's dictionary, checking, suggestion, and managed-acquisition model.
-It remains pre-1.0 until an npm package, supported platform matrix, TypeScript
-types, and clean-install verification exist.
+`@ferrolex/node` is the selected package, with `sebastian-software` as the
+repository and release owner. Its checked-in TypeScript declarations,
+supported prebuilt matrix, and clean-install verification are release gates.
+Publishing to npm remains a separate, credentialed release action.
 
 The C ABI and Python packages are retained only as evaluation prototypes. The
 generic LSP and Visual Studio Code client are outside the current product and
@@ -49,9 +51,12 @@ Rust or Node.js API after parsing. They do not require a ferrolex-owned LSP.
 
 ## Promotion criteria
 
-Promote the Node.js binding when the package has a named npm owner, documented
-TypeScript API, prebuilt binary policy, dictionary workflow, and clean-install
-tests on its declared platforms.
+The Node.js binding is promoted as the supported pre-1.0 integration because
+it has a named release owner, documented TypeScript API, prebuilt binary
+policy, managed dictionary workflow, and clean-install tests on its declared
+platforms. The first npm publication additionally requires verified registry
+access for the `@ferrolex` scope; source control and CI do not imply that
+credential.
 
 Reconsider another direct binding only for a concrete consumer that cannot use
 Rust or Node.js and supplies a credible packaging and maintenance owner.

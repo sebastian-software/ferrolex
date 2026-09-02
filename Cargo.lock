@@ -480,6 +480,8 @@ name = "ferrolex-node"
 version = "0.4.0"
 dependencies = [
  "ferrolex-core",
+ "ferrolex-dictionaries",
+ "ferrolex-hunspell",
  "ferrolex-suggest",
  "napi",
  "napi-build",

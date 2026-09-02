@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify ferrolex's single-version Cargo workspace release contract."""
+"""Verify ferrolex's single-version Cargo and Node.js release contract."""
 
 from __future__ import annotations
 
@@ -44,6 +44,49 @@ def main() -> int:
     if release_config.get("release-type") != "rust":
         errors.append("release-please must use the rust release strategy")
 
+    expected_node_release_paths = {
+        ("crates/ferrolex-node/package.json", "$.version"),
+        (
+            "crates/ferrolex-node/package.json",
+            "$['optionalDependencies']['@ferrolex/node-darwin-arm64']",
+        ),
+        (
+            "crates/ferrolex-node/package.json",
+            "$['optionalDependencies']['@ferrolex/node-linux-x64-gnu']",
+        ),
+        (
+            "crates/ferrolex-node/package.json",
+            "$['optionalDependencies']['@ferrolex/node-win32-x64-msvc']",
+        ),
+        ("crates/ferrolex-node/package-lock.json", "$.version"),
+        (
+            "crates/ferrolex-node/package-lock.json",
+            "$['packages']['']['version']",
+        ),
+        (
+            "crates/ferrolex-node/package-lock.json",
+            "$['packages']['']['optionalDependencies']['@ferrolex/node-darwin-arm64']",
+        ),
+        (
+            "crates/ferrolex-node/package-lock.json",
+            "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-x64-gnu']",
+        ),
+        (
+            "crates/ferrolex-node/package-lock.json",
+            "$['packages']['']['optionalDependencies']['@ferrolex/node-win32-x64-msvc']",
+        ),
+    }
+    node_release_paths = {
+        (entry.get("path"), entry.get("jsonpath"))
+        for entry in configured_packages.get(".", {}).get("extra-files", [])
+        if isinstance(entry, dict) and entry.get("type") == "json"
+    }
+    if node_release_paths != expected_node_release_paths:
+        errors.append(
+            "release-please extra-files must update every Node.js package and "
+            "lockfile version field"
+        )
+
     workspace_plugins = [
         plugin
         for plugin in release_config.get("plugins", [])
@@ -62,6 +105,42 @@ def main() -> int:
             ".release-please-manifest.json must contain only the root workspace version "
             f"{root_version}"
         )
+
+    node_package = load_json(ROOT / "crates/ferrolex-node/package.json")
+    node_lock = load_json(ROOT / "crates/ferrolex-node/package-lock.json")
+    if node_package.get("name") != "@ferrolex/node":
+        errors.append("the supported Node.js package must be named @ferrolex/node")
+    if node_package.get("version") != root_version:
+        errors.append(
+            "@ferrolex/node is "
+            f"{node_package.get('version')}, expected workspace version {root_version}"
+        )
+    if node_lock.get("name") != node_package.get("name"):
+        errors.append("the Node.js lockfile package name is out of sync")
+    if node_lock.get("version") != root_version:
+        errors.append("the Node.js lockfile package version is out of sync")
+    locked_root = node_lock.get("packages", {}).get("", {})
+    if locked_root.get("name") != node_package.get("name"):
+        errors.append("the Node.js lockfile root package name is out of sync")
+    if locked_root.get("version") != root_version:
+        errors.append("the Node.js lockfile root package version is out of sync")
+
+    node_targets = {
+        "@ferrolex/node-darwin-arm64",
+        "@ferrolex/node-linux-x64-gnu",
+        "@ferrolex/node-win32-x64-msvc",
+    }
+    optional_dependencies = node_package.get("optionalDependencies", {})
+    if set(optional_dependencies) != node_targets:
+        errors.append(
+            "@ferrolex/node optionalDependencies must exactly match the supported "
+            "prebuilt packages"
+        )
+    for name, version in optional_dependencies.items():
+        if version != root_version:
+            errors.append(
+                f"{name} is pinned to {version}, expected workspace version {root_version}"
+            )
 
     metadata = cargo_metadata()
     workspace_ids = set(metadata["workspace_members"])
@@ -96,7 +175,7 @@ def main() -> int:
     print(
         "release version contract ok: "
         f"{len(packages)} workspace packages and {internal_requirements} internal "
-        f"requirements use {root_version}"
+        f"requirements plus @ferrolex/node use {root_version}"
     )
     return 0
 

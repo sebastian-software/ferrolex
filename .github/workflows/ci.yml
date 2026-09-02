@@ -215,5 +215,49 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: crates/ferrolex-node/package-lock.json
+      - run: npm ci --prefix crates/ferrolex-node --ignore-scripts
+      - run: npm run build --prefix crates/ferrolex-node
+      - run: git diff --exit-code -- crates/ferrolex-node/index.js crates/ferrolex-node/index.d.ts
+      - run: npm test --prefix crates/ferrolex-node
+      - run: cargo run --quiet -p ferrolex-cli -- dictionary fetch en_US --cache "$RUNNER_TEMP/ferrolex-node-cache"
+      - run: npm test --prefix crates/ferrolex-node
+        env:
+          FERROLEX_NODE_MANAGED_CACHE: ${{ runner.temp }}/ferrolex-node-cache
+      - run: bash scripts/test-node-package.sh
       - run: bash scripts/bench-node-binding.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm test --prefix crates/ferrolex-node
+      - run: bash scripts/test-node-package.sh
+
+  node-prebuilt:
+    name: Node prebuilt (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            os: macos-15
+          - label: Windows x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.88
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: crates/ferrolex-node/package-lock.json
+      - run: npm ci --prefix crates/ferrolex-node --ignore-scripts
+      - run: npm run build --prefix crates/ferrolex-node
+      - run: git diff --exit-code -- crates/ferrolex-node/index.js crates/ferrolex-node/index.d.ts
+      - run: npm test --prefix crates/ferrolex-node
+      - run: bash scripts/test-node-package.sh
