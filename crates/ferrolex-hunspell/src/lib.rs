@@ -59,6 +59,9 @@ const MAX_DERIVATIONS_PER_LEXEME: usize = 4_096;
 /// lower than the import entry limit so a suffix with an empty `add` cannot turn
 /// a miss into a scan of the whole dictionary.
 const MAX_DERIVED_CANDIDATES_PER_LOOKUP: usize = 8_192;
+/// Bounds reverse forms used to resolve empty-add affix chains without scanning
+/// every lexeme carrying the rule's origin flag.
+const MAX_REVERSE_FORMS_PER_LOOKUP: usize = 4_096;
 /// Caps local suggestion expansion from one query-aligned stem.
 const MAX_SUGGESTION_FORMS_PER_SEED: usize = 64;
 /// Caps query split positions considered for one compound suggestion seed.
@@ -617,12 +620,17 @@ impl HunspellDictionary {
     }
 
     fn lexemes_for_stem(&self, stem: &str) -> impl Iterator<Item = &Lexeme> {
+        let range = self.lexeme_index_range(stem);
+        self.lexemes[range].iter()
+    }
+
+    fn lexeme_index_range(&self, stem: &str) -> std::ops::Range<usize> {
         let start = self
             .lexemes
             .partition_point(|lexeme| lexeme.stem.as_ref() < stem);
         let end =
             self.lexemes[start..].partition_point(|lexeme| lexeme.stem.as_ref() == stem) + start;
-        self.lexemes[start..end].iter()
+        start..end
     }
 
     /// Applies declared `OCONV` rules to a suggestion spelling.
@@ -705,36 +713,85 @@ impl HunspellDictionary {
 
     fn derived_candidate_indices(&self, word: &str) -> Option<BTreeSet<usize>> {
         let mut candidates = BTreeSet::new();
+        let include_empty_add = !self.extend_reverse_derived_candidates(word, &mut candidates);
+        if include_empty_add {
+            candidates.clear();
+        }
         self.extend_derived_candidates(
-            word,
+            (word, AffixKind::Prefix),
             &self.prefixes,
             &self.prefix_rules_by_add_edge,
-            AffixKind::Prefix,
             &self.prefix_parent_flags,
+            include_empty_add,
             &mut candidates,
         )?;
         self.extend_derived_candidates(
-            word,
+            (word, AffixKind::Suffix),
             &self.suffixes,
             &self.suffix_rules_by_add_edge,
-            AffixKind::Suffix,
             &self.suffix_parent_flags,
+            include_empty_add,
             &mut candidates,
         )?;
         Some(candidates)
     }
 
-    fn extend_derived_candidates(
+    fn extend_reverse_derived_candidates(
         &self,
         word: &str,
+        candidates: &mut BTreeSet<usize>,
+    ) -> bool {
+        if self.prefix_rules_by_add_edge.empty_add.is_empty()
+            && self.suffix_rules_by_add_edge.empty_add.is_empty()
+        {
+            return true;
+        }
+
+        let mut forms = BTreeSet::from([(word.to_owned(), false)]);
+        let mut pending = vec![(word.to_owned(), 0_usize, false)];
+        while let Some((form, depth, used_empty_add)) = pending.pop() {
+            if depth == MAX_AFFIX_CHAIN {
+                continue;
+            }
+            for rule in self.candidate_affix_rules(&form) {
+                let Some(stem) = rule.reverse_apply(&form, self.full_strip) else {
+                    continue;
+                };
+                let used_empty_add = used_empty_add || rule.add.is_empty();
+                if used_empty_add {
+                    for index in self.lexeme_index_range(&stem) {
+                        candidates.insert(index);
+                        if candidates.len() > MAX_DERIVED_CANDIDATES_PER_LOOKUP {
+                            return false;
+                        }
+                    }
+                }
+                let stem = stem.into_owned();
+                let state_changed = stem != form || used_empty_add;
+                if state_changed && forms.insert((stem.clone(), used_empty_add)) {
+                    if forms.len() > MAX_REVERSE_FORMS_PER_LOOKUP {
+                        return false;
+                    }
+                    pending.push((stem, depth + 1, used_empty_add));
+                }
+            }
+        }
+        true
+    }
+
+    fn extend_derived_candidates(
+        &self,
+        query: (&str, AffixKind),
         rules: &[AffixRule],
         rules_by_add_edge: &AffixRuleIndex,
-        kind: AffixKind,
         parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
+        include_empty_add: bool,
         candidates: &mut BTreeSet<usize>,
     ) -> Option<()> {
+        let (word, kind) = query;
         for rule in rules_by_add_edge
             .matching_rules(rules, word, kind)
+            .filter(|rule| include_empty_add || !rule.add.is_empty())
             .filter(|rule| rule.could_generate(word))
         {
             for flag in origin_flags_for(rule.flag, parent_flags) {
@@ -6873,7 +6930,28 @@ mod tests {
         )
         .expect("large affix class imports");
 
-        assert!(!imported.dictionary().contains("not-a-generated-form"));
+        let dictionary = imported.dictionary();
+        assert!(!dictionary.contains("not-a-generated-form"));
+        assert!(
+            dictionary
+                .derived_candidate_indices("not-a-generated-form")
+                .is_some_and(|candidates| candidates.is_empty()),
+            "an empty-add rule should not pull its entire flag class into a miss lookup"
+        );
+    }
+
+    #[test]
+    fn reverse_candidates_preserve_chained_empty_add_rules() {
+        let imported = import(
+            "test.aff",
+            "SFX A Y 1\nSFX A x 0/B .\nSFX B Y 1\nSFX B x 0 .\n",
+            "test.dic",
+            "1\nrootxx/A\n",
+            ImportMode::Strict,
+        )
+        .expect("empty-add continuation fixture imports");
+
+        assert!(imported.dictionary().contains("root"));
     }
 
     #[test]
