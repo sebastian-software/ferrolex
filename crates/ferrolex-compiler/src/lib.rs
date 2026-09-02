@@ -1053,17 +1053,22 @@ fn checksum(bytes: &[u8]) -> u64 {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    bytes
-        .iter()
-        .enumerate()
-        .fold(OFFSET_BASIS, |hash, (index, byte)| {
-            let byte = if (CHECKSUM_OFFSET..CHECKSUM_END).contains(&index) {
-                0
-            } else {
-                *byte
-            };
-            (hash ^ u64::from(byte)).wrapping_mul(PRIME)
-        })
+    fn extend(mut hash: u64, bytes: &[u8]) -> u64 {
+        for &byte in bytes {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(PRIME);
+        }
+        hash
+    }
+
+    let checksum_offset = bytes.len().min(CHECKSUM_OFFSET);
+    let checksum_end = bytes.len().min(CHECKSUM_END);
+    let hash = extend(OFFSET_BASIS, &bytes[..checksum_offset]);
+    let zeroed_checksum = [0; CHECKSUM_END - CHECKSUM_OFFSET];
+    let hash = extend(
+        hash,
+        &zeroed_checksum[..checksum_end.saturating_sub(checksum_offset)],
+    );
+    extend(hash, &bytes[checksum_end..])
 }
 
 #[cfg(test)]
@@ -1073,7 +1078,8 @@ mod tests {
     use super::{
         checksum, compile_exact_ir, compile_frequency_word_list, compile_words,
         inspect_compiled_artifact, put_u64, CompileError, CompiledDictionary, ExactDictionaryIr,
-        FrequencyListError, LoadError, ValidationError, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
+        FrequencyListError, LoadError, ValidationError, CHECKSUM_END, CHECKSUM_OFFSET, DATA_OFFSET,
+        INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
     use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
@@ -1273,6 +1279,31 @@ mod tests {
             dictionary.validate(),
             Err(ValidationError::UnsortedWords { entry: 1 })
         );
+    }
+
+    #[test]
+    fn checksum_range_hashing_matches_the_bytewise_format_definition() {
+        const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+        for length in [0_usize, 15, 16, 20, 24, 25, 64] {
+            let bytes: Vec<u8> = (0..length)
+                .map(|index| u8::try_from(index).expect("test byte fits"))
+                .collect();
+            let reference = bytes
+                .iter()
+                .enumerate()
+                .fold(OFFSET_BASIS, |hash, (index, byte)| {
+                    let byte = if (CHECKSUM_OFFSET..CHECKSUM_END).contains(&index) {
+                        0
+                    } else {
+                        *byte
+                    };
+                    (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+                });
+
+            assert_eq!(checksum(&bytes), reference, "length {length}");
+        }
     }
 
     #[test]

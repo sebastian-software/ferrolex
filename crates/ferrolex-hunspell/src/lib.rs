@@ -34,9 +34,10 @@ use ferrolex_core::{CandidateIndex, Dictionary};
 use ferrolex_suggest::{CandidateSource, RankingSignals, ReplacementRule};
 
 pub use cache::{
-    compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, load_runtime_artifact,
-    load_runtime_cache, CacheSource, RuntimeCacheError, RuntimeCacheMetadata, SourceDigests,
-    HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+    compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, is_runtime_artifact,
+    load_runtime_artifact, load_runtime_cache, CacheSource, RuntimeCacheError,
+    RuntimeCacheMetadata, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
+    HUNSPELL_CACHE_SEMANTICS_VERSION,
 };
 pub use explanation::{
     Acceptance, AcceptanceKind, AppliedAffix, AppliedAffixKind, CasingPath, CompoundComponent,

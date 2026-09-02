@@ -32,8 +32,8 @@ use ferrolex_dictionaries::{
 use ferrolex_hunspell::{
     compile_runtime_artifact, compile_runtime_cache, import_bytes as import_hunspell_bytes,
     import_bytes_with_encodings as import_hunspell_bytes_with_encodings, inspect_runtime_cache,
-    load_runtime_artifact, load_runtime_cache, Acceptance, AcceptanceKind, AppliedAffixKind,
-    ByteEncoding, ByteImportEncodings, CasingPath, CompoundComponentRole,
+    is_runtime_artifact, load_runtime_artifact, load_runtime_cache, Acceptance, AcceptanceKind,
+    AppliedAffixKind, ByteEncoding, ByteImportEncodings, CasingPath, CompoundComponentRole,
     Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError, ImportMode, ImportResult,
     LookupExplanation, Rejection, RejectionReason, RuntimeCacheError, Severity, SourceDigests,
 };
@@ -1018,18 +1018,20 @@ impl CandidateSource for ArtifactDictionary {
 
 fn load_artifact(path: &Path) -> Result<ArtifactDictionary, CliError> {
     let bytes = read_compiled_artifact(path)?;
-    match CompiledDictionary::load(bytes.clone()) {
-        Ok(dictionary) => Ok(ArtifactDictionary::Exact(dictionary)),
-        Err(LoadError::InvalidMagic) => load_runtime_artifact(&bytes)
+    if is_runtime_artifact(&bytes) {
+        load_runtime_artifact(&bytes)
             .map(|dictionary| ArtifactDictionary::Hunspell(Box::new(dictionary)))
             .map_err(|source| CliError::LoadHunspellArtifact {
                 path: path.to_path_buf(),
                 source,
-            }),
-        Err(source) => Err(CliError::LoadArtifact {
-            path: path.to_path_buf(),
-            source,
-        }),
+            })
+    } else {
+        CompiledDictionary::load(bytes)
+            .map(ArtifactDictionary::Exact)
+            .map_err(|source| CliError::LoadArtifact {
+                path: path.to_path_buf(),
+                source,
+            })
     }
 }
 
