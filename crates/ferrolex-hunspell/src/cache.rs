@@ -39,7 +39,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 6;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 30;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 31;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2113,6 +2113,19 @@ mod tests {
         assert_eq!(
             load_runtime_cache(&cache, stale).expect_err("stale cache is rejected"),
             RuntimeCacheError::SourceDigestMismatch(CacheSource::Aff)
+        );
+    }
+
+    #[test]
+    fn rejects_caches_from_before_counted_sections_skipped_ignored_lines() {
+        const PRE_COUNTED_SECTION_IGNORE_SEMANTICS: u32 = 30;
+        let mut cache = compile_runtime_cache(&dictionary(), sources()).expect("cache compiles");
+        cache[10..14].copy_from_slice(&PRE_COUNTED_SECTION_IGNORE_SEMANTICS.to_le_bytes());
+        rewrite_checksum(&mut cache);
+
+        assert_eq!(
+            load_runtime_cache(&cache, sources()).expect_err("stale semantics are rejected"),
+            RuntimeCacheError::UnsupportedSemanticsVersion(PRE_COUNTED_SECTION_IGNORE_SEMANTICS)
         );
     }
 

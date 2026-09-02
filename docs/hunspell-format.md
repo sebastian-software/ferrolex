@@ -23,7 +23,9 @@ number for every diagnostic.
 
 Parsing supports blank lines and lines beginning with `#`. A directive is a
 whitespace-separated keyword followed by its arguments. Unknown directives are
-reported with their source location and directive name.
+reported with their source location and directive name. Blank and comment-only
+lines inside every count-prefixed directive block are ignored and do not consume
+one of the declared entries.
 
 Strict mode rejects an input that produces an error diagnostic. Lenient mode
 returns the supported subset and all diagnostics. A construct whose omission
