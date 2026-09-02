@@ -4,7 +4,7 @@
 //! `docs/compatibility-fixtures.md` for the source, licensing, and checksum
 //! review procedure.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
@@ -17,11 +17,12 @@ use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
 use ferrolex_hunspell::{
     compile_runtime_cache, import_bytes, import_bytes_with_encodings, load_runtime_cache,
-    ByteEncoding, ByteImportEncodings, HunspellDictionary, ImportMode, SourceDigests,
+    ByteEncoding, ByteImportEncodings, HunspellDictionary, ImportMode, Severity, SourceDigests,
 };
 use sha2::{Digest as _, Sha256};
 
 const MANIFEST: &str = include_str!("real_world/manifest.tsv");
+const STRICT_BOUNDARIES: &str = include_str!("real_world/strict-boundaries.tsv");
 const SCORECARD_BASELINE: &str = include_str!("real_world/scorecard-baseline.tsv");
 const REQUIRED_FIXTURE_IDS: &[&str] = &["en_US", "de_DE", "hu_HU", "ar"];
 const SCORECARD_FIXTURE_IDS: &[&str] =
@@ -234,6 +235,8 @@ impl ImportExpectation {
 #[test]
 fn real_world_manifest_is_complete_and_source_pinned() {
     let fixtures = parse_manifest(MANIFEST).expect("checked-in compatibility manifest is valid");
+    let strict_boundaries =
+        parse_strict_boundaries(STRICT_BOUNDARIES).expect("checked-in strict boundaries are valid");
     assert!(
         fixtures.len() >= 2,
         "the suite needs independent reference cases"
@@ -261,10 +264,21 @@ fn real_world_manifest_is_complete_and_source_pinned() {
             assert!(!probe.word.is_empty(), "positive probe words are non-empty");
         }
         assert!(!fixture.rejected.is_empty());
+        assert_eq!(
+            strict_boundaries.contains_key(&fixture.id),
+            fixture.import_expectation == ImportExpectation::Lenient,
+            "every lenient fixture, and only a lenient fixture, records an exact strict-import error boundary"
+        );
         if fixture.import_expectation == ImportExpectation::Blocked {
             assert_eq!(fixture.aff_decode, Decode::NotUtf8);
         }
     }
+    assert!(
+        strict_boundaries
+            .keys()
+            .all(|identifier| identifiers.contains(identifier)),
+        "strict boundaries reference only manifested fixtures"
+    );
 }
 
 #[test]
@@ -352,6 +366,9 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     };
     let directives = directives_in(&aff_text);
     assert_strict_probe_coverage(fixture, &directives);
+    assert_lenient_strict_boundary(
+        fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes, report,
+    );
     let imported =
         import_fixture_bytes(fixture, &aff_path, &aff_bytes, &dic_path, &dic_bytes, mode)
             .unwrap_or_else(|error| panic!("{} import unexpectedly failed: {error}", fixture.id));
@@ -404,6 +421,46 @@ fn run_fixture(root: &Path, fixture: &Fixture, report: &mut String) {
     .expect("writing to String does not fail");
     write_scorecard(fixture, &dictionary, &aff_path, report);
     report_keepcase_coverage(fixture, &aff_text, &dic_text, report);
+}
+
+fn assert_lenient_strict_boundary(
+    fixture: &Fixture,
+    aff_path: &Path,
+    aff_bytes: &[u8],
+    dic_path: &Path,
+    dic_bytes: &[u8],
+    report: &mut String,
+) {
+    if fixture.import_expectation != ImportExpectation::Lenient {
+        return;
+    }
+
+    let error = import_fixture_bytes(
+        fixture,
+        aff_path,
+        aff_bytes,
+        dic_path,
+        dic_bytes,
+        ImportMode::Strict,
+    )
+    .expect_err("a lenient fixture must retain its reviewed strict-import boundary");
+    let actual = error
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .map(|diagnostic| diagnostic.directive().to_owned())
+        .collect::<BTreeSet<_>>();
+    let expected = parse_strict_boundaries(STRICT_BOUNDARIES)
+        .expect("checked-in strict boundaries are valid")
+        .remove(&fixture.id)
+        .expect("a lenient fixture records its strict-import errors");
+    assert_eq!(
+        actual, expected,
+        "{} strict-import error boundary changed; review the source and semantics before updating the manifest",
+        fixture.id
+    );
+    writeln!(report, "  strict_import=blocked errors={}", join(&actual))
+        .expect("writing to String does not fail");
 }
 
 fn assert_neutral_ir_spike(fixture: &Fixture, ir: &ferrolex_compiler::DictionaryIr) {
@@ -1000,6 +1057,42 @@ fn parse_manifest(text: &str) -> Result<Vec<Fixture>, String> {
         .filter(|(_, line)| !line.is_empty() && !line.starts_with('#'))
         .map(|(index, line)| parse_fixture(index + 1, line))
         .collect()
+}
+
+fn parse_strict_boundaries(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let mut boundaries = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (identifier, directives) = line.split_once('\t').ok_or_else(|| {
+            format!(
+                "strict-boundary line {} needs an identifier and error directives",
+                index + 1
+            )
+        })?;
+        let directives = directives
+            .split(',')
+            .filter(|directive| !directive.is_empty())
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        if identifier.is_empty() || directives.is_empty() {
+            return Err(format!(
+                "strict-boundary line {} needs non-empty fields",
+                index + 1
+            ));
+        }
+        if boundaries
+            .insert(identifier.to_owned(), directives)
+            .is_some()
+        {
+            return Err(format!(
+                "strict-boundary line {} duplicates `{identifier}`",
+                index + 1
+            ));
+        }
+    }
+    Ok(boundaries)
 }
 
 fn parse_fixture(line_number: usize, line: &str) -> Result<Fixture, String> {
