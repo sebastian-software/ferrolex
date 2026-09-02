@@ -16,6 +16,7 @@ const LARGE_AFFIXES: &str = "SET UTF-8\nSFX N Y 1\nSFX N 0 n .\n";
 const LARGE_CORPUS_SIZE: usize = 100_000;
 const LARGE_TARGET_INDEX: usize = LARGE_CORPUS_SIZE / 2;
 const LARGE_STEM_MULTIPLIER: u64 = 0x9e37_79b9_7f4a_7c15;
+const EMPTY_ADD_CORPUS_SIZE: usize = 8_192;
 
 fn dictionary() -> HunspellDictionary {
     let dictionary = import(
@@ -57,6 +58,29 @@ fn morphology_lookup(c: &mut Criterion) {
         });
     }
     group.finish();
+}
+
+fn empty_add_miss_lookup(c: &mut Criterion) {
+    let mut words = String::new();
+    writeln!(words, "{EMPTY_ADD_CORPUS_SIZE}").expect("writing to String does not fail");
+    for index in 0..EMPTY_ADD_CORPUS_SIZE {
+        writeln!(words, "emptyadd{index}/A").expect("writing to String does not fail");
+    }
+    let dictionary = import(
+        "empty-add.aff",
+        "SFX A N 1\nSFX A 0 0 .\n",
+        "empty-add.dic",
+        &words,
+        ImportMode::Strict,
+    )
+    .expect("the empty-add benchmark dictionary imports")
+    .dictionary()
+    .clone();
+    assert!(!dictionary.contains("totallyabsentword"));
+
+    c.bench_function("hunspell empty-add miss 8k", |bench| {
+        bench.iter(|| dictionary.contains(black_box("totallyabsentword")));
+    });
 }
 
 fn large_words() -> String {
@@ -297,6 +321,7 @@ fn repository_checking(c: &mut Criterion) {
 criterion_group!(
     benches,
     morphology_lookup,
+    empty_add_miss_lookup,
     dominant_hunspell_paths,
     repository_checking
 );
