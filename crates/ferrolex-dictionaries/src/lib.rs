@@ -21,9 +21,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread;
 use std::time::{Duration, SystemTime};
 
+use fs2::FileExt as _;
 use sha2::{Digest as _, Sha256};
 
 /// Immutable `LibreOffice` revision used by the built-in source catalog.
@@ -36,9 +36,6 @@ const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(15);
 const RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(75);
 const STALE_TEMPORARY_FILE_AGE: Duration = Duration::from_secs(60 * 60);
-const STALE_INSTALL_LOCK_AGE: Duration = Duration::from_secs(30);
-const INSTALL_LOCK_ATTEMPTS: usize = 500;
-const INSTALL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 static TEMPORARY_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Text encoding of the upstream Hunspell pair.
@@ -1141,43 +1138,31 @@ fn rename_without_hard_links(
 }
 
 struct InstallLock {
-    path: PathBuf,
+    file: fs::File,
 }
 
 impl InstallLock {
     fn acquire(destination: &Path) -> Result<Self, FetchError> {
         let path = hidden_sibling(destination, "install-lock");
-        for _ in 0..INSTALL_LOCK_ATTEMPTS {
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(_) => return Ok(Self { path }),
-                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                    if file_is_stale(&path, STALE_INSTALL_LOCK_AGE) {
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                    thread::sleep(INSTALL_LOCK_RETRY_DELAY);
-                }
-                Err(source) => {
-                    return Err(FetchError::WriteCache {
-                        path: path.clone(),
-                        source,
-                    })
-                }
-            }
-        }
-        Err(FetchError::WriteCache {
-            path,
-            source: io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "timed out waiting for another dictionary installer",
-            ),
-        })
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|source| FetchError::WriteCache {
+                path: path.clone(),
+                source,
+            })?;
+        file.lock_exclusive()
+            .map_err(|source| FetchError::WriteCache { path, source })?;
+        Ok(Self { file })
     }
 }
 
 impl Drop for InstallLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = fs2::FileExt::unlock(&self.file);
     }
 }
 
@@ -1424,7 +1409,7 @@ mod tests {
         );
         assert!(!stale_temporary.exists());
         assert!(fresh_temporary.exists());
-        assert!(!directory.join(".sample.aff.install-lock").exists());
+        assert!(directory.join(".sample.aff.install-lock").exists());
     }
 
     #[test]
@@ -1449,7 +1434,7 @@ mod tests {
             fs::read(&destination).expect("conflicting bytes remain readable"),
             b"different"
         );
-        assert!(!directory.join(".sample.aff.install-lock").exists());
+        assert!(directory.join(".sample.aff.install-lock").exists());
     }
 
     #[test]

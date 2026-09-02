@@ -98,11 +98,12 @@ additions in `$XDG_CONFIG_HOME/ferrolex/words.txt` (or
 for the current workspace, `--workspace PATH` for an explicit project root, or
 `--global` for the user-wide list. Each update writes a sorted complete
 replacement to a synced temporary sibling, renames it atomically, and syncs the
-parent directory where the platform supports directory handles. A short-lived
-lock serializes concurrent `add-word` processes around the complete
-read-modify-write cycle, so independently added words are retained. Later
-writes opportunistically remove stale temporary siblings left by interrupted
-processes.
+parent directory where the platform supports directory handles. An
+OS-managed exclusive lock on a persistent hidden sidecar serializes concurrent
+`add-word` processes around the complete read-modify-write cycle, so
+independently added words are retained and a terminated process releases its
+lock automatically. Later writes opportunistically remove stale temporary
+siblings left by interrupted processes.
 
 `check`, `suggest`, and `analyze` automatically layer both files when present;
 workspace words take precedence in candidate traversal. A user list can be the

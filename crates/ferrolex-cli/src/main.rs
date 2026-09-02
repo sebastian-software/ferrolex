@@ -12,7 +12,6 @@ use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread;
 use std::time::{Duration, SystemTime};
 
 use ferrolex_code::{
@@ -43,6 +42,7 @@ use ferrolex_suggest::{
     Suggestion,
 };
 use ferrolex_text::check_text;
+use fs2::FileExt as _;
 use serde_json::json;
 
 const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n       ferrolex suggest [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--format <text|json>] [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate [--format <text|json>] --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
@@ -61,9 +61,6 @@ const HELP_DICTIONARY: &str = "Usage: ferrolex dictionary <list | fetch | instal
 const HUNSPELL_RUNTIME_CACHE_EXTENSION: &str = "ferrolex-hunspell-v2.flexh";
 const MAX_ANALYSIS_SUGGESTION_CACHE_ENTRIES: usize = 4_096;
 const STALE_TEMPORARY_FILE_AGE: Duration = Duration::from_secs(60 * 60);
-const STALE_USER_DICTIONARY_LOCK_AGE: Duration = Duration::from_secs(30);
-const USER_DICTIONARY_LOCK_ATTEMPTS: usize = 500;
-const USER_DICTIONARY_LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> ExitCode {
@@ -431,56 +428,34 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), CliError> {
 }
 
 struct UserDictionaryLock {
-    path: PathBuf,
+    file: fs::File,
 }
 
 impl UserDictionaryLock {
     fn acquire(dictionary_path: &Path) -> Result<Self, CliError> {
         let lock_path = hidden_sibling(dictionary_path, "lock");
-        for _ in 0..USER_DICTIONARY_LOCK_ATTEMPTS {
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(mut file) => {
-                    if let Err(source) = writeln!(file, "{}", std::process::id()) {
-                        let _ = fs::remove_file(&lock_path);
-                        return Err(CliError::WriteUserDictionary {
-                            path: lock_path,
-                            source,
-                        });
-                    }
-                    return Ok(Self { path: lock_path });
-                }
-                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                    if file_is_stale(&lock_path, STALE_USER_DICTIONARY_LOCK_AGE) {
-                        let _ = fs::remove_file(&lock_path);
-                        continue;
-                    }
-                    thread::sleep(USER_DICTIONARY_LOCK_RETRY_DELAY);
-                }
-                Err(source) => {
-                    return Err(CliError::WriteUserDictionary {
-                        path: lock_path,
-                        source,
-                    })
-                }
-            }
-        }
-        Err(CliError::WriteUserDictionary {
-            path: lock_path,
-            source: io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "timed out waiting for another add-word process",
-            ),
-        })
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| CliError::WriteUserDictionary {
+                path: lock_path.clone(),
+                source,
+            })?;
+        file.lock_exclusive()
+            .map_err(|source| CliError::WriteUserDictionary {
+                path: lock_path,
+                source,
+            })?;
+        Ok(Self { file })
     }
 }
 
 impl Drop for UserDictionaryLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = fs2::FileExt::unlock(&self.file);
     }
 }
 
@@ -3201,7 +3176,7 @@ mod tests {
 
     use super::{
         add_user_dictionary_word, analysis_paths, analyze, catalog_import_encodings,
-        comment_syntax_for_path, glob_matches, incomplete_suggestion_hint,
+        comment_syntax_for_path, glob_matches, hidden_sibling, incomplete_suggestion_hint,
         install_hunspell_runtime_cache, load_analysis_dictionary, parse_arguments,
         read_analysis_source, read_compiled_artifact, render_explanation, run, runtime_cache_path,
         validate_hunspell, AnalysisDictionary, AnalysisSource, AnalysisSuggestionEngine,
@@ -3407,6 +3382,17 @@ mod tests {
             .set_times(fs::FileTimes::new().set_modified(stale_time))
             .expect("stale fixture timestamp is writable");
 
+        let lock_path = hidden_sibling(&dictionary_path, "lock");
+        fs::write(&lock_path, "persistent lock fixture").expect("lock fixture is writable");
+        let old_lock_time = SystemTime::now()
+            .checked_sub(Duration::from_secs(60))
+            .expect("fixture timestamp remains representable");
+        fs::File::options()
+            .write(true)
+            .open(lock_path)
+            .expect("lock fixture opens")
+            .set_times(fs::FileTimes::new().set_modified(old_lock_time))
+            .expect("lock fixture timestamp is writable");
         let lock = UserDictionaryLock::acquire(&dictionary_path).expect("test holds the lock");
         let concurrent_path = dictionary_path.clone();
         let writer = thread::spawn(move || {
