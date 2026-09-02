@@ -364,6 +364,20 @@ pub fn compile_runtime_artifact(
 /// Returns an error for an oversized, truncated, malformed, or checksum-invalid
 /// artifact.
 pub fn inspect_runtime_cache(bytes: &[u8]) -> Result<RuntimeCacheMetadata, RuntimeCacheError> {
+    let checksum_at = verify_runtime_cache_integrity(bytes)?;
+    read_runtime_cache_metadata(bytes, checksum_at)
+}
+
+/// Returns whether `bytes` start with the Hunspell runtime-artifact marker.
+///
+/// This is a cheap format discriminator only. Call [`inspect_runtime_cache`]
+/// or a loader to validate the complete artifact.
+#[must_use]
+pub fn is_runtime_artifact(bytes: &[u8]) -> bool {
+    bytes.starts_with(&MAGIC)
+}
+
+fn verify_runtime_cache_integrity(bytes: &[u8]) -> Result<usize, RuntimeCacheError> {
     if bytes.len() > MAX_RUNTIME_CACHE_BYTES {
         return Err(RuntimeCacheError::ArtifactTooLarge);
     }
@@ -374,6 +388,13 @@ pub fn inspect_runtime_cache(bytes: &[u8]) -> Result<RuntimeCacheMetadata, Runti
     if Sha256::digest(&bytes[..checksum_at]).as_slice() != &bytes[checksum_at..] {
         return Err(RuntimeCacheError::ChecksumMismatch);
     }
+    Ok(checksum_at)
+}
+
+fn read_runtime_cache_metadata(
+    bytes: &[u8],
+    checksum_at: usize,
+) -> Result<RuntimeCacheMetadata, RuntimeCacheError> {
     let mut reader = Reader::new(&bytes[..checksum_at]);
     if reader.take_array::<8>()? != MAGIC {
         return Err(RuntimeCacheError::InvalidMagic);
@@ -399,8 +420,9 @@ pub fn inspect_runtime_cache(bytes: &[u8]) -> Result<RuntimeCacheMetadata, Runti
 /// Returns the same errors as [`inspect_runtime_cache`] and
 /// [`load_runtime_cache`] for malformed or unsupported artifacts.
 pub fn load_runtime_artifact(bytes: &[u8]) -> Result<HunspellDictionary, RuntimeCacheError> {
-    let sources = inspect_runtime_cache(bytes)?.sources();
-    load_runtime_cache(bytes, sources)
+    let checksum_at = verify_runtime_cache_integrity(bytes)?;
+    let sources = read_runtime_cache_metadata(bytes, checksum_at)?.sources();
+    load_verified_runtime_cache(bytes, checksum_at, sources)
 }
 
 /// Loads a fully validated Hunspell runtime cache for exact source provenance.
@@ -414,25 +436,23 @@ pub fn load_runtime_artifact(bytes: &[u8]) -> Result<HunspellDictionary, Runtime
 /// Returns a structured [`RuntimeCacheError`] for stale, unsupported, corrupt,
 /// or malformed artifacts. Callers should rebuild the derived cache instead of
 /// attempting to repair it in place.
-#[allow(
-    clippy::too_many_lines,
-    reason = "validation and reconstruction share one bounded reader to keep the artifact boundary auditable"
-)]
 pub fn load_runtime_cache(
     bytes: &[u8],
     sources: SourceDigests,
 ) -> Result<HunspellDictionary, RuntimeCacheError> {
-    if bytes.len() > MAX_RUNTIME_CACHE_BYTES {
-        return Err(RuntimeCacheError::ArtifactTooLarge);
-    }
-    if bytes.len() < HEADER_BYTES + CHECKSUM_BYTES {
-        return Err(RuntimeCacheError::InvalidArtifact("artifact is truncated"));
-    }
-    let checksum_at = bytes.len() - CHECKSUM_BYTES;
-    if Sha256::digest(&bytes[..checksum_at]).as_slice() != &bytes[checksum_at..] {
-        return Err(RuntimeCacheError::ChecksumMismatch);
-    }
+    let checksum_at = verify_runtime_cache_integrity(bytes)?;
+    load_verified_runtime_cache(bytes, checksum_at, sources)
+}
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "validation and reconstruction share one bounded reader to keep the artifact boundary auditable"
+)]
+fn load_verified_runtime_cache(
+    bytes: &[u8],
+    checksum_at: usize,
+    sources: SourceDigests,
+) -> Result<HunspellDictionary, RuntimeCacheError> {
     let mut reader = Reader::new(&bytes[..checksum_at]);
     if reader.take_array::<8>()? != MAGIC {
         return Err(RuntimeCacheError::InvalidMagic);
@@ -1899,8 +1919,9 @@ mod tests {
 
     use super::{
         compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache,
-        load_runtime_artifact, load_runtime_cache, CacheSource, RuntimeCacheError, SourceDigests,
-        HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+        is_runtime_artifact, load_runtime_artifact, load_runtime_cache, CacheSource,
+        RuntimeCacheError, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
+        HUNSPELL_CACHE_SEMANTICS_VERSION,
     };
     use crate::{import, ImportMode};
 
@@ -2093,6 +2114,8 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(&first[..8], b"FLXHSP\0\0");
+        assert!(is_runtime_artifact(&first));
+        assert!(!is_runtime_artifact(b"FLEXDIC\0"));
         assert_eq!(
             u16::from_le_bytes([first[8], first[9]]),
             HUNSPELL_CACHE_FORMAT_VERSION
