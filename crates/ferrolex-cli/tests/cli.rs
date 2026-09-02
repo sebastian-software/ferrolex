@@ -111,6 +111,39 @@ fn version_and_error_contract_cross_the_process_boundary() {
 }
 
 #[test]
+fn compile_reports_long_running_phases_on_stderr() {
+    let directory = temporary_directory("compile-progress");
+    fs::write(directory.join("words.txt"), "alpha\nbeta\n").expect("dictionary fixture is written");
+
+    let output = run_in(
+        &directory,
+        &[
+            "compile",
+            "--dictionary",
+            "words.txt",
+            "-o",
+            "words.flexdic",
+        ],
+    );
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        "compiled: words.flexdic (2 words)\n"
+    );
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr is UTF-8"),
+        concat!(
+            "reading word list from words.txt...\n",
+            "building word-list artifact...\n",
+            "writing compiled artifact to words.flexdic...\n",
+        )
+    );
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
 fn check_accepts_stdin_and_reports_its_source() {
     let directory = temporary_directory("check-stdin");
     fs::write(directory.join("words.txt"), "correct\n").expect("dictionary fixture is written");
