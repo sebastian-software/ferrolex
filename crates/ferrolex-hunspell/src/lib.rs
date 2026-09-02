@@ -3212,7 +3212,7 @@ fn parse_flag_aliases(
     parsed.declared_sections.insert(CountedSection::FlagAliases);
 
     for _ in 0..count {
-        let Some((index, line)) = next_alias_line(lines) else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -3293,7 +3293,7 @@ fn parse_morphology_aliases(
         .insert(CountedSection::MorphologyAliases);
 
     for _ in 0..count {
-        let Some((index, line)) = next_alias_line(lines) else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -3376,7 +3376,7 @@ fn parse_input_conversions(
         .insert(CountedSection::InputConversions);
 
     for _ in 0..count {
-        let Some((index, line)) = next_alias_line(lines) else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -3465,7 +3465,7 @@ fn parse_output_conversions(
         .insert(CountedSection::OutputConversions);
 
     for _ in 0..count {
-        let Some((index, line)) = next_alias_line(lines) else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -3582,7 +3582,7 @@ fn parse_ignored_characters(
     ignored_characters.extend(fields[1].chars());
 }
 
-fn next_alias_line<'source>(
+fn next_counted_section_line<'source>(
     lines: &mut std::iter::Enumerate<std::str::Lines<'source>>,
 ) -> Option<(usize, &'source str)> {
     lines.find_map(|(index, line)| (!is_ignored_line(line.trim())).then_some((index, line.trim())))
@@ -3684,7 +3684,7 @@ fn parse_replacement_rules(
         .insert(CountedSection::ReplacementRules);
 
     for _ in 0..count {
-        let Some((index, line)) = lines.next() else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -3786,7 +3786,7 @@ fn parse_character_maps(
         return;
     }
     for _ in 0..count {
-        let Some((index, line)) = lines.next() else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -4138,7 +4138,7 @@ fn parse_compound_patterns(
         return;
     }
     for _ in 0..count {
-        let Some((index, line)) = lines.next() else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -4239,7 +4239,7 @@ fn parse_compound_rules(
     }
     let mut expansion_count = 0_usize;
     for _ in 0..rule_count {
-        let Some((index, line)) = lines.next() else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -4411,7 +4411,7 @@ fn parse_break_patterns(
             .insert(CountedSection::BreakPatterns);
     }
     for _ in 0..pattern_count {
-        let Some((index, line)) = lines.next() else {
+        let Some((index, line)) = next_counted_section_line(lines) else {
             parsed.diagnostics.push(diagnostic(
                 source,
                 line_number,
@@ -5934,6 +5934,27 @@ mod tests {
                 .word(),
             "the"
         );
+    }
+
+    #[test]
+    fn counted_affix_sections_skip_blank_and_comment_lines_consistently() {
+        let result = import(
+            "counted-sections.aff",
+            "COMPOUNDMIN 1\nREP 1\n# replacement comment\n\nREP teh the\nMAP 1\n  # map comment\n\nMAP aá\nCHECKCOMPOUNDPATTERN 1\n# compound pattern comment\n\nCHECKCOMPOUNDPATTERN x y\nCOMPOUNDRULE 1\n# compound rule comment\n\nCOMPOUNDRULE AB\nBREAK 1\n# break comment\n\nBREAK -\n",
+            "counted-sections.dic",
+            "4\nfoo/A\nbar/B\nthe\nword\n",
+            ImportMode::Strict,
+        )
+        .expect("ignored lines do not consume declared section entries");
+
+        assert!(result.diagnostics().is_empty());
+        assert_eq!(result.ir().replacement_rules.len(), 1);
+        assert_eq!(result.ir().character_maps, ["aá"]);
+        assert_eq!(result.ir().compound.patterns.len(), 1);
+        assert_eq!(result.ir().compound.rules.len(), 1);
+        assert_eq!(result.ir().break_patterns.len(), 1);
+        assert!(result.dictionary().contains("foobar"));
+        assert!(result.dictionary().contains("foo-bar"));
     }
 
     #[test]
