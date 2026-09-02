@@ -559,6 +559,12 @@ fn fetch_catalog_dictionary(
         ))
     })?;
     let manifest = source.manifest().map_err(CliError::DictionaryManifest)?;
+    let aff_url = source.aff_url();
+    let host = aff_url
+        .strip_prefix("https://")
+        .and_then(|url| url.split('/').next())
+        .unwrap_or("the pinned dictionary source");
+    eprintln!("fetching {locale} from {host}...");
     let installed = DictionaryInstaller::new(UreqFetcher)
         .install(&manifest, cache_path)
         .map_err(CliError::FetchDictionary)?;
@@ -568,17 +574,20 @@ fn fetch_catalog_dictionary(
 fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
     let (compiled, description) = match &command.input {
         CompileInput::WordList(path) => {
+            eprintln!("reading word list from {}...", path.display());
             let text = fs::read_to_string(path).map_err(|source| CliError::ReadDictionary {
                 path: path.clone(),
                 source,
             })?;
             if text.lines().any(|line| line.contains('\t')) {
+                eprintln!("building frequency-annotated word-list artifact...");
                 (
                     compile_frequency_word_list(&text).map_err(CliError::CompileFrequencyList)?,
                     "frequency-annotated words".to_owned(),
                 )
             } else {
                 let dictionary = WordList::from_text(Normalization::Exact, &text);
+                eprintln!("building word-list artifact...");
                 (
                     compile_words(dictionary.words()).map_err(CliError::CompileDictionary)?,
                     format!("{} words", dictionary.len()),
@@ -586,6 +595,11 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
             }
         }
         CompileInput::Hunspell { aff_path, dic_path } => {
+            eprintln!(
+                "importing Hunspell sources {} and {}...",
+                aff_path.display(),
+                dic_path.display()
+            );
             let (import, sources) = import_hunspell_files(aff_path, dic_path, None, true)?;
             let dictionary = match import {
                 Ok(dictionary) => dictionary,
@@ -601,6 +615,7 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
                 print_import_diagnostic(diagnostic);
             }
             let lexemes = dictionary.ir().lexemes.len();
+            eprintln!("building Hunspell runtime artifact...");
             (
                 compile_runtime_artifact(dictionary.dictionary(), sources)
                     .map_err(CliError::CompileHunspellCache)?,
@@ -608,6 +623,10 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
             )
         }
     };
+    eprintln!(
+        "writing compiled artifact to {}...",
+        command.output_path.display()
+    );
     fs::write(&command.output_path, compiled).map_err(|source| CliError::WriteArtifact {
         path: command.output_path.clone(),
         source,
@@ -1617,6 +1636,7 @@ fn install_hunspell_runtime_cache(
     dic_path: &Path,
     encodings: Option<ByteImportEncodings>,
 ) -> Result<RunOutcome, CliError> {
+    eprintln!("importing Hunspell sources for {locale}...");
     let (import, sources) = import_hunspell_files(aff_path, dic_path, encodings, true)?;
     let result = match import {
         Ok(result) => result,
@@ -1630,6 +1650,7 @@ fn install_hunspell_runtime_cache(
     for diagnostic in result.diagnostics() {
         print_import_diagnostic(diagnostic);
     }
+    eprintln!("building runtime cache for {locale}...");
     let cache = compile_runtime_cache(result.dictionary(), sources)
         .map_err(CliError::CompileHunspellCache)?;
     let cache_path = runtime_cache_path(aff_path);
