@@ -21,8 +21,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
+use fs2::FileExt as _;
 use sha2::{Digest as _, Sha256};
 
 /// Immutable `LibreOffice` revision used by the built-in source catalog.
@@ -34,6 +35,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(15);
 const RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(75);
+const STALE_TEMPORARY_FILE_AGE: Duration = Duration::from_secs(60 * 60);
 static TEMPORARY_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Text encoding of the upstream Hunspell pair.
@@ -1034,11 +1036,20 @@ fn atomic_write_new(
     bytes: &[u8],
     expected_sha256: [u8; 32],
 ) -> Result<(), FetchError> {
-    let temporary = destination.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        TEMPORARY_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
+    atomic_write_new_with_hard_link(destination, bytes, expected_sha256, |source, target| {
+        fs::hard_link(source, target)
+    })
+}
+
+fn atomic_write_new_with_hard_link(
+    destination: &Path,
+    bytes: &[u8],
+    expected_sha256: [u8; 32],
+    hard_link: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> Result<(), FetchError> {
+    sweep_stale_temporary_siblings(destination);
+    let temporary = temporary_sibling(destination);
+    let parent = destination.parent().unwrap_or(Path::new("."));
     let mut created = false;
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -1059,25 +1070,32 @@ fn atomic_write_new(
             path: temporary.clone(),
             source,
         })?;
-        match fs::hard_link(&temporary, destination) {
-            Ok(()) => fs::remove_file(&temporary).map_err(|source| FetchError::WriteCache {
-                path: temporary.clone(),
-                source,
-            }),
+        match hard_link(&temporary, destination) {
+            Ok(()) => {
+                fs::remove_file(&temporary).map_err(|source| FetchError::WriteCache {
+                    path: temporary.clone(),
+                    source,
+                })?;
+                sync_parent_directory(parent).map_err(|source| FetchError::WriteCache {
+                    path: parent.to_path_buf(),
+                    source,
+                })
+            }
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
                 if cache_matches(destination, expected_sha256)? {
                     fs::remove_file(&temporary).map_err(|source| FetchError::WriteCache {
                         path: temporary.clone(),
+                        source,
+                    })?;
+                    sync_parent_directory(parent).map_err(|source| FetchError::WriteCache {
+                        path: parent.to_path_buf(),
                         source,
                     })
                 } else {
                     Err(FetchError::CacheConflict(destination.to_path_buf()))
                 }
             }
-            Err(source) => Err(FetchError::WriteCache {
-                path: destination.to_path_buf(),
-                source,
-            }),
+            Err(_) => rename_without_hard_links(&temporary, destination, expected_sha256, parent),
         }
     })();
     if result.is_err() && created {
@@ -1086,22 +1104,158 @@ fn atomic_write_new(
     result
 }
 
+fn rename_without_hard_links(
+    temporary: &Path,
+    destination: &Path,
+    expected_sha256: [u8; 32],
+    parent: &Path,
+) -> Result<(), FetchError> {
+    let _lock = InstallLock::acquire(destination)?;
+    if destination.exists() {
+        if cache_matches(destination, expected_sha256)? {
+            fs::remove_file(temporary).map_err(|source| FetchError::WriteCache {
+                path: temporary.to_path_buf(),
+                source,
+            })?;
+            return sync_parent_directory(parent).map_err(|source| FetchError::WriteCache {
+                path: parent.to_path_buf(),
+                source,
+            });
+        }
+        return Err(FetchError::CacheConflict(destination.to_path_buf()));
+    }
+    fs::rename(temporary, destination).map_err(|source| FetchError::WriteCache {
+        path: destination.to_path_buf(),
+        source,
+    })?;
+    if !cache_matches(destination, expected_sha256)? {
+        return Err(FetchError::CacheConflict(destination.to_path_buf()));
+    }
+    sync_parent_directory(parent).map_err(|source| FetchError::WriteCache {
+        path: parent.to_path_buf(),
+        source,
+    })
+}
+
+struct InstallLock {
+    file: fs::File,
+}
+
+impl InstallLock {
+    fn acquire(destination: &Path) -> Result<Self, FetchError> {
+        let path = hidden_sibling(destination, "install-lock");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|source| FetchError::WriteCache {
+                path: path.clone(),
+                source,
+            })?;
+        file.lock_exclusive()
+            .map_err(|source| FetchError::WriteCache { path, source })?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
+
+fn hidden_sibling(path: &Path, suffix: &str) -> PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut name = std::ffi::OsString::from(".");
+    name.push(
+        path.file_name()
+            .unwrap_or(std::ffi::OsStr::new("dictionary")),
+    );
+    name.push(".");
+    name.push(suffix);
+    parent.join(name)
+}
+
+fn temporary_sibling(destination: &Path) -> PathBuf {
+    hidden_sibling(
+        destination,
+        &format!(
+            "tmp-{}-{}",
+            std::process::id(),
+            TEMPORARY_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ),
+    )
+}
+
+fn sweep_stale_temporary_siblings(destination: &Path) {
+    let parent = destination.parent().unwrap_or(Path::new("."));
+    let Some(name) = destination.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let current_prefix = format!(".{name}.tmp-");
+    let legacy_prefix = destination
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| format!("{stem}.tmp-"));
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        let belongs_to_destination = file_name.starts_with(&current_prefix)
+            || legacy_prefix
+                .as_deref()
+                .is_some_and(|prefix| file_name.starts_with(prefix));
+        if belongs_to_destination && file_is_stale(&entry.path(), STALE_TEMPORARY_FILE_AGE) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn file_is_stale(path: &Path, maximum_age: Duration) -> bool {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .is_some_and(|age| age >= maximum_age)
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "all platforms share one fallible directory-sync call site"
+)]
+fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
     use std::collections::BTreeMap;
     use std::fs;
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use super::{
-        enforce_response_limit, find_locale, map_response_read_error, map_ureq_error,
-        read_response_with_limit, reject_redirect, DictionaryInstaller, FetchError, Fetcher,
-        LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher, VerifiedDictionary,
-        VerifiedFile, CONNECT_TIMEOUT, DEFAULT_MAX_FILE_BYTES, LIBREOFFICE_CATALOG,
-        LIBREOFFICE_REVISION, REQUEST_TIMEOUT, RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT,
+        atomic_write_new_with_hard_link, enforce_response_limit, find_locale,
+        map_response_read_error, map_ureq_error, read_response_with_limit, reject_redirect, sha256,
+        DictionaryInstaller, FetchError, Fetcher, LibreOfficeDictionary, ManifestError,
+        SourceEncoding, UreqFetcher, VerifiedDictionary, VerifiedFile, CONNECT_TIMEOUT,
+        DEFAULT_MAX_FILE_BYTES, LIBREOFFICE_CATALOG, LIBREOFFICE_REVISION, REQUEST_TIMEOUT,
+        RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT, STALE_TEMPORARY_FILE_AGE,
     };
 
     const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -1218,6 +1372,69 @@ mod tests {
         assert_eq!(fs::read(installed.aff_path()).expect("aff exists"), b"abc");
         assert_eq!(fs::read(installed.dic_path()).expect("dic exists"), b"abc");
         assert_eq!(installed.aff_path(), cache.path().join("en_US/sample.aff"));
+    }
+
+    #[test]
+    fn unsupported_hard_links_fall_back_to_verified_rename_and_sweep_stale_temps() {
+        let cache = Cache::new();
+        let directory = cache.path().join("en_US");
+        fs::create_dir_all(&directory).expect("cache directory is writable");
+        let destination = directory.join("sample.aff");
+        let stale_temporary = directory.join("sample.tmp-stale");
+        let fresh_temporary = directory.join(".sample.aff.tmp-active");
+        fs::write(&stale_temporary, b"stale").expect("stale fixture is writable");
+        fs::write(&fresh_temporary, b"active").expect("active fixture is writable");
+        let stale_time = SystemTime::now()
+            .checked_sub(STALE_TEMPORARY_FILE_AGE + Duration::from_secs(1))
+            .expect("fixture timestamp remains representable");
+        fs::File::options()
+            .write(true)
+            .open(&stale_temporary)
+            .expect("stale fixture opens")
+            .set_times(fs::FileTimes::new().set_modified(stale_time))
+            .expect("stale fixture timestamp is writable");
+        let bytes = b"abc";
+
+        atomic_write_new_with_hard_link(&destination, bytes, sha256(bytes), |_, _| {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "fixture filesystem has no hard links",
+            ))
+        })
+        .expect("verified rename fallback installs the cache entry");
+
+        assert_eq!(
+            fs::read(destination).expect("fallback output is readable"),
+            bytes
+        );
+        assert!(!stale_temporary.exists());
+        assert!(fresh_temporary.exists());
+        assert!(directory.join(".sample.aff.install-lock").exists());
+    }
+
+    #[test]
+    fn rename_fallback_preserves_a_conflicting_cache_entry() {
+        let cache = Cache::new();
+        let directory = cache.path().join("en_US");
+        fs::create_dir_all(&directory).expect("cache directory is writable");
+        let destination = directory.join("sample.aff");
+        fs::write(&destination, b"different").expect("conflicting fixture is writable");
+        let bytes = b"abc";
+
+        let error = atomic_write_new_with_hard_link(&destination, bytes, sha256(bytes), |_, _| {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "fixture filesystem has no hard links",
+            ))
+        })
+        .expect_err("rename fallback refuses a conflicting cache entry");
+
+        assert!(matches!(error, FetchError::CacheConflict(path) if path == destination));
+        assert_eq!(
+            fs::read(&destination).expect("conflicting bytes remain readable"),
+            b"different"
+        );
+        assert!(directory.join(".sample.aff.install-lock").exists());
     }
 
     #[test]

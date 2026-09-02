@@ -19,6 +19,11 @@ The optional `ferrolex dictionary` command is an installer, not an updater:
   digest at an immutable upstream revision;
 - the bytes are verified before an atomic, non-replacing write to
   `<cache>/<locale>/<file-name>`;
+- cache files and their parent directory are synced before success is reported,
+  and stale temporary siblings from interrupted writes are removed later;
+- filesystems without hard-link support use an OS-locked atomic rename followed
+  by a digest re-check; the persistent hidden lock sidecar is reusable and a
+  terminated installer releases its lock automatically;
 - a cache file with different bytes is preserved and causes an error;
 - a cache file whose bytes match the pinned digest is reused without a network
   request;
