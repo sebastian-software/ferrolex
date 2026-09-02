@@ -15,6 +15,12 @@ recognition probes, and a negative probe for every fixture. It deliberately
 contains only this bounded metadata and probe set, never dictionary source data
 or affix rules.
 
+[`strict-boundaries.tsv`](../crates/ferrolex-hunspell/tests/real_world/strict-boundaries.tsv)
+records the exact error-directive set for every lenient fixture. The harness
+first retries those pinned bytes in strict mode and fails if that set changes,
+then runs the reviewed lenient import and recognition probes. A newly supported
+construct or a regression therefore both require an explicit evidence update.
+
 `hu_HU.aff` declares UTF-8 but has isolated ISO-8859-2 legacy bytes and NEL
 line separators. Its manifest entry therefore uses the reviewed
 `utf-8+iso-8859-2-fallback` decoder for the AFF file only; the paired DIC stays
@@ -23,27 +29,20 @@ mode for arbitrary dictionaries.
 
 ### Hungarian compatibility boundary
 
-`hu_HU` now imports in lenient mode and protects stored (`szó`, `ház`), affixed
+`hu_HU` imports in lenient mode and protects stored (`szó`, `ház`), affixed
 (`házban`), and compound (`házszó`) recognition through the runtime-cache
-roundtrip. Strict import remains intentionally disabled until these observed
-source constructs have their project-owned semantics:
+roundtrip. The exact pinned pair currently fails strict import for these error
+directives: `COMPOUNDFIRST`, `COMPOUNDLAST`, `COMPOUNDROOT`, `GENERATE`,
+`HU_KOTOHANGZO`, `LEMMA_PRESENT`, `ONLYROOT`, `SUBSTANDARD`, `SYLLABLENUM`,
+and `entry`. The first nine remain outside the documented recognition subset;
+`entry` records malformed or empty rows in the upstream DIC. Warning-only
+diagnostics such as `AM`, source metadata, `REP`, `TRY`, and the declared count
+difference do not themselves block strict mode.
 
-- Hungarian-specific compound positions and restrictions
-  (`COMPOUNDFIRST`, `COMPOUNDLAST`, `COMPOUNDROOT`, `ONLYROOT`, and
-  `HU_KOTOHANGZO`) remain in the directive-completeness epic [#6](https://github.com/sebastian-software/ferrolex/issues/6);
-- multi-scalar `BREAK` patterns are tracked by [#24](https://github.com/sebastian-software/ferrolex/issues/24);
-- header metadata (`HOME`, `NAME`, `VERSION`) is tracked by [#26](https://github.com/sebastian-software/ferrolex/issues/26);
-- Hungarian-specific recognition directives (`HU_KOTOHANGZO`, `ONLYROOT`,
-  `SUBSTANDARD`, `GENERATE`, `LEMMA_PRESENT`, and `SYLLABLENUM`) remain in
-  [#6](https://github.com/sebastian-software/ferrolex/issues/6) until their
-  semantics are documented; and
-- the pinned DIC declares 97,663 entries but has malformed/empty rows, while
-  one `REP` row is malformed. ferrolex retains the safely parsed subset and
-  reports these as `count`, `entry`, and `REP` diagnostics; the bounded format
-  policy belongs to [#27](https://github.com/sebastian-software/ferrolex/issues/27).
-
-This list is the explicit strict-import boundary for the locale. It is not an
-oracle-parity claim for unlisted Hungarian forms.
+This exact set is the deliberate strict-import boundary recorded in
+`strict-boundaries.tsv`. The opt-in test prints it as
+`strict_import=blocked errors=...` and fails on any unreviewed change. This is
+not an oracle-parity claim for unlisted Hungarian forms.
 
 The current reviewed LibreOffice fixtures are `en_US`, `de_DE`, `es_ES`,
 `fr_FR`, `it_IT`, `pt_BR`, `pt_PT`, `nl_NL`, `pl_PL`, `hu_HU`, `ar`, and
