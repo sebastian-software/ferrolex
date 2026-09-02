@@ -1654,6 +1654,10 @@ fn install_hunspell_runtime_cache(
     let cache = compile_runtime_cache(result.dictionary(), sources)
         .map_err(CliError::CompileHunspellCache)?;
     let cache_path = runtime_cache_path(aff_path);
+    eprintln!(
+        "writing runtime cache for {locale} to {}...",
+        cache_path.display()
+    );
     atomic_write_runtime_cache(&cache_path, &cache)?;
     println!("valid: {}", dic_path.display());
     println!("runtime-cache: {}", cache_path.display());
