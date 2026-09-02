@@ -39,7 +39,7 @@ pub const HUNSPELL_CACHE_FORMAT_VERSION: u16 = 6;
 ///
 /// This changes whenever the runtime's interpretation of any serialized field
 /// changes. A cache with another semantics version is always rebuilt.
-pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 29;
+pub const HUNSPELL_CACHE_SEMANTICS_VERSION: u32 = 30;
 
 /// SHA-256 provenance of the exact raw `.aff` and `.dic` source bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
