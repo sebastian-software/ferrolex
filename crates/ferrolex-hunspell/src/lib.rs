@@ -1790,21 +1790,45 @@ fn case_pattern(word: &str, language: CaseLanguage) -> Option<CasePattern> {
 }
 
 fn is_cased(character: char, language: CaseLanguage) -> bool {
-    lowercase_character(character, language) != uppercase_character(character, language)
+    if language == CaseLanguage::Turkic {
+        match character {
+            'I' | 'İ' | 'i' | 'ı' => return true,
+            _ => {}
+        }
+    }
+    !character.to_lowercase().eq(character.to_uppercase())
 }
 
 fn is_uppercase(character: char, language: CaseLanguage) -> bool {
-    character.to_string() != lowercase_character(character, language)
+    if language == CaseLanguage::Turkic {
+        return matches!(character, 'I' | 'İ')
+            || (!matches!(character, 'i' | 'ı') && lowercase_changes(character));
+    }
+    lowercase_changes(character)
 }
 
 fn is_lowercase(character: char, language: CaseLanguage) -> bool {
-    character.to_string() != uppercase_character(character, language)
+    if language == CaseLanguage::Turkic {
+        return matches!(character, 'i' | 'ı')
+            || (!matches!(character, 'I' | 'İ') && uppercase_changes(character));
+    }
+    uppercase_changes(character)
+}
+
+fn lowercase_changes(character: char) -> bool {
+    let mut lowercase = character.to_lowercase();
+    lowercase.next() != Some(character) || lowercase.next().is_some()
+}
+
+fn uppercase_changes(character: char) -> bool {
+    let mut uppercase = character.to_uppercase();
+    uppercase.next() != Some(character) || uppercase.next().is_some()
 }
 
 fn lowercase_for_language(word: &str, language: CaseLanguage) -> String {
     let mut result = String::with_capacity(word.len());
     for character in word.chars() {
-        result.push_str(&lowercase_character(character, language));
+        push_lowercase(&mut result, character, language);
     }
     result
 }
@@ -1813,7 +1837,8 @@ fn initial_case_for_language(word: &str, language: CaseLanguage) -> String {
     let Some((index, first)) = word.char_indices().next() else {
         return String::new();
     };
-    let mut result = uppercase_character(first, language);
+    let mut result = String::with_capacity(word.len());
+    push_uppercase(&mut result, first, language);
     result.push_str(&lowercase_for_language(
         &word[index + first.len_utf8()..],
         language,
@@ -1821,26 +1846,26 @@ fn initial_case_for_language(word: &str, language: CaseLanguage) -> String {
     result
 }
 
-fn lowercase_character(character: char, language: CaseLanguage) -> String {
+fn push_lowercase(result: &mut String, character: char, language: CaseLanguage) {
     if language == CaseLanguage::Turkic {
         match character {
-            'I' => return "ı".to_owned(),
-            'İ' => return "i".to_owned(),
+            'I' => return result.push('ı'),
+            'İ' => return result.push('i'),
             _ => {}
         }
     }
-    character.to_lowercase().collect()
+    result.extend(character.to_lowercase());
 }
 
-fn uppercase_character(character: char, language: CaseLanguage) -> String {
+fn push_uppercase(result: &mut String, character: char, language: CaseLanguage) {
     if language == CaseLanguage::Turkic {
         match character {
-            'i' => return "İ".to_owned(),
-            'ı' => return "I".to_owned(),
+            'i' => return result.push('İ'),
+            'ı' => return result.push('I'),
             _ => {}
         }
     }
-    character.to_uppercase().collect()
+    result.extend(character.to_uppercase());
 }
 
 #[derive(Clone, Debug)]
@@ -3655,8 +3680,12 @@ fn normalize_affix_text_for_ignored_characters(
         return;
     }
     for rule in parsed.prefixes.iter_mut().chain(&mut parsed.suffixes) {
-        rule.strip = remove_ignored_characters(&rule.strip, &parsed.ignored_characters);
-        rule.add = remove_ignored_characters(&rule.add, &parsed.ignored_characters);
+        rule.strip = remove_ignored_characters(
+            Cow::Borrowed(rule.strip.as_ref()),
+            &parsed.ignored_characters,
+        );
+        rule.add =
+            remove_ignored_characters(Cow::Borrowed(rule.add.as_ref()), &parsed.ignored_characters);
         for atom in &rule.condition.atoms {
             if matches!(atom, ConditionAtom::Literal(character) if parsed.ignored_characters.contains(character))
             {
@@ -3684,13 +3713,22 @@ fn normalize_affix_text_for_ignored_characters(
     }
 }
 
-fn remove_ignored_characters(value: &str, ignored_characters: &BTreeSet<char>) -> Box<str> {
-    Box::from(
-        value
+fn remove_ignored_characters(value: Cow<'_, str>, ignored_characters: &BTreeSet<char>) -> Box<str> {
+    if ignored_characters.is_empty()
+        || !value
             .chars()
-            .filter(|character| !ignored_characters.contains(character))
-            .collect::<String>(),
-    )
+            .any(|character| ignored_characters.contains(&character))
+    {
+        return match value {
+            Cow::Borrowed(value) => Box::from(value),
+            Cow::Owned(value) => value.into_boxed_str(),
+        };
+    }
+    value
+        .chars()
+        .filter(|character| !ignored_characters.contains(character))
+        .collect::<String>()
+        .into_boxed_str()
 }
 
 fn parse_replacement_rules(
@@ -4928,10 +4966,10 @@ fn parse_dic(
             ));
             break;
         }
-        let fields = line.split_whitespace().collect::<Vec<_>>();
-        let field = fields.first().copied().unwrap_or_default();
+        let mut fields = line.split_whitespace();
+        let field = fields.next().unwrap_or_default();
         let (stem, flags) = split_dictionary_entry(field);
-        let stem = remove_ignored_characters(&stem, ignored_characters);
+        let stem = remove_ignored_characters(stem, ignored_characters);
         if stem.is_empty() {
             diagnostics.push(diagnostic(
                 source,
@@ -4947,7 +4985,7 @@ fn parse_dic(
             // A handful of real-world dictionaries use `word/ morphology` to
             // attach morphology without assigning flags. Retain that metadata
             // while continuing to reject a bare trailing delimiter.
-            Some("") if fields.len() > 1 => Box::default(),
+            Some("") if fields.clone().next().is_some() => Box::default(),
             Some("") => {
                 diagnostics.push(diagnostic(
                     source,
@@ -4958,24 +4996,22 @@ fn parse_dic(
                 ));
                 continue;
             }
-            Some(value)
-                if !is_flag_alias_reference(value, flag_aliases)
-                    && flag_mode
-                        .flag_count(value)
-                        .is_none_or(|count| count > MAX_FLAGS_PER_ENTRY) =>
-            {
-                diagnostics.push(diagnostic(
-                    source,
-                    index + 1,
-                    "entry",
-                    Severity::Error,
-                    "dictionary entry exceeds the 4096-flag importer limit",
-                ));
-                continue;
-            }
             Some(value) => {
-                if let Some(flags) = decode_entry_flags(value, flag_mode, flag_aliases) {
-                    flags
+                if let Some((flags, flag_count)) =
+                    decode_entry_flags_with_count(value, flag_mode, flag_aliases)
+                {
+                    if flag_count <= MAX_FLAGS_PER_ENTRY {
+                        flags
+                    } else {
+                        diagnostics.push(diagnostic(
+                            source,
+                            index + 1,
+                            "entry",
+                            Severity::Error,
+                            "dictionary entry exceeds the 4096-flag importer limit",
+                        ));
+                        continue;
+                    }
                 } else {
                     diagnostics.push(diagnostic(
                         source,
@@ -4991,7 +5027,7 @@ fn parse_dic(
         let morphology = decode_entry_morphology(
             source,
             index + 1,
-            &fields[1..],
+            fields,
             morphology_aliases,
             morphology_table,
             diagnostics,
@@ -5031,11 +5067,23 @@ fn decode_entry_flags(
     flag_mode: FlagMode,
     aliases: &[Option<FlagSet>],
 ) -> Option<FlagSet> {
+    decode_entry_flags_with_count(value, flag_mode, aliases).map(|(flags, _)| flags)
+}
+
+fn decode_entry_flags_with_count(
+    value: &str,
+    flag_mode: FlagMode,
+    aliases: &[Option<FlagSet>],
+) -> Option<(FlagSet, usize)> {
     if is_flag_alias_reference(value, aliases) {
         let alias = value.parse::<usize>().ok()?.checked_sub(1)?;
-        aliases.get(alias)?.clone()
+        let flags = aliases.get(alias)?.clone()?;
+        let count = flags.len();
+        Some((flags, count))
     } else {
-        decode_flags(value, flag_mode)
+        let flags = decode_flag_sequence(value, flag_mode)?;
+        let count = flags.len();
+        Some((flag_set(flags), count))
     }
 }
 
@@ -5043,15 +5091,16 @@ fn is_flag_alias_reference(value: &str, aliases: &[Option<FlagSet>]) -> bool {
     !aliases.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn decode_entry_morphology(
+fn decode_entry_morphology<'field>(
     source: &str,
     line: usize,
-    fields: &[&str],
+    fields: impl Iterator<Item = &'field str> + Clone,
     aliases: &[Option<Morphology>],
     table: &mut MorphologyTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Morphology {
-    let Some((first, remaining)) = fields.split_first() else {
+    let mut fields = fields;
+    let Some(first) = fields.next() else {
         return Box::default();
     };
     let mut morphology = if !aliases.is_empty() && first.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -5075,12 +5124,12 @@ fn decode_entry_morphology(
             Vec::new()
         }
     } else {
-        intern_morphology_fields(std::slice::from_ref(first), table).unwrap_or_else(|message| {
+        intern_morphology_field_iter(std::iter::once(first), table).unwrap_or_else(|message| {
             diagnostics.push(diagnostic(source, line, "entry", Severity::Error, message));
             Vec::new()
         })
     };
-    match intern_morphology_fields(remaining, table) {
+    match intern_morphology_field_iter(fields, table) {
         Ok(fields) => morphology.extend(fields),
         Err(message) => {
             diagnostics.push(diagnostic(source, line, "entry", Severity::Error, message));
@@ -5093,11 +5142,17 @@ fn intern_morphology_fields(
     fields: &[&str],
     table: &mut MorphologyTable,
 ) -> Result<Vec<MorphologyId>, &'static str> {
-    if fields.len() > MAX_MORPHOLOGY_FIELDS_PER_RECORD {
+    intern_morphology_field_iter(fields.iter().copied(), table)
+}
+
+fn intern_morphology_field_iter<'field>(
+    fields: impl Iterator<Item = &'field str> + Clone,
+    table: &mut MorphologyTable,
+) -> Result<Vec<MorphologyId>, &'static str> {
+    if fields.clone().count() > MAX_MORPHOLOGY_FIELDS_PER_RECORD {
         return Err("morphology fields exceed the 256-field importer limit");
     }
     fields
-        .iter()
         .map(|field| {
             table
                 .intern(field)
@@ -5219,7 +5274,7 @@ fn is_ignored_dictionary_line(line: &str) -> bool {
     is_ignored_line(line) || line.starts_with('/')
 }
 
-fn split_dictionary_entry(field: &str) -> (String, Option<&str>) {
+fn split_dictionary_entry(field: &str) -> (Cow<'_, str>, Option<&str>) {
     let mut escaped = false;
     for (index, character) in field.char_indices() {
         if escaped {
@@ -5240,7 +5295,14 @@ fn split_dictionary_entry(field: &str) -> (String, Option<&str>) {
     (unescape_dictionary_stem(field), None)
 }
 
-fn unescape_dictionary_stem(value: &str) -> String {
+fn unescape_dictionary_stem(value: &str) -> Cow<'_, str> {
+    if !value
+        .as_bytes()
+        .windows(2)
+        .any(|pair| pair[0] == b'\\' && matches!(pair[1], b'/' | b'\\'))
+    {
+        return Cow::Borrowed(value);
+    }
     let mut stem = String::with_capacity(value.len());
     let mut characters = value.chars();
     while let Some(character) = characters.next() {
@@ -5250,7 +5312,7 @@ fn unescape_dictionary_stem(value: &str) -> String {
             stem.push(character);
         }
     }
-    stem
+    Cow::Owned(stem)
 }
 
 fn enforce_input_limit(
@@ -5349,6 +5411,7 @@ fn diagnostic(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
     use std::fmt::Write as _;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::Arc;
@@ -5371,6 +5434,47 @@ mod tests {
     #[test]
     fn runtime_flags_use_one_compact_machine_word() {
         assert_eq!(std::mem::size_of::<super::Flag>(), 8);
+    }
+
+    #[test]
+    fn allocation_free_case_classification_matches_string_mappings() {
+        for language in [super::CaseLanguage::Default, super::CaseLanguage::Turkic] {
+            for character in ['A', 'a', 'İ', 'ı', 'ß', 'Σ', 'ς', 'ǅ', '1', '中'] {
+                let lowercase = match (language, character) {
+                    (super::CaseLanguage::Turkic, 'I') => "ı".to_owned(),
+                    (super::CaseLanguage::Turkic, 'İ') => "i".to_owned(),
+                    _ => character.to_lowercase().collect(),
+                };
+                let uppercase = match (language, character) {
+                    (super::CaseLanguage::Turkic, 'i') => "İ".to_owned(),
+                    (super::CaseLanguage::Turkic, 'ı') => "I".to_owned(),
+                    _ => character.to_uppercase().collect(),
+                };
+                let original = character.to_string();
+
+                assert_eq!(super::is_cased(character, language), lowercase != uppercase);
+                assert_eq!(
+                    super::is_uppercase(character, language),
+                    original != lowercase
+                );
+                assert_eq!(
+                    super::is_lowercase(character, language),
+                    original != uppercase
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dictionary_stem_unescaping_borrows_no_op_inputs() {
+        assert!(matches!(
+            super::unescape_dictionary_stem("plain"),
+            Cow::Borrowed("plain")
+        ));
+        assert_eq!(
+            super::unescape_dictionary_stem(r"path\/name"),
+            Cow::<str>::Owned("path/name".to_owned())
+        );
     }
 
     #[test]
