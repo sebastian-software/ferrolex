@@ -1,3 +1,15 @@
 {
-  ".": "0.3.0"
+  ".": "0.4.0",
+  "crates/ferrolex-cli": "0.3.1",
+  "crates/ferrolex-code": "0.3.1",
+  "crates/ferrolex-compiler": "0.3.1",
+  "crates/ferrolex-core": "0.3.1",
+  "crates/ferrolex-dictionaries": "0.3.1",
+  "crates/ferrolex-ffi": "0.3.1",
+  "crates/ferrolex-hunspell": "0.3.1",
+  "crates/ferrolex-lsp": "0.3.1",
+  "crates/ferrolex-node": "0.3.1",
+  "crates/ferrolex-python": "0.3.1",
+  "crates/ferrolex-suggest": "0.3.1",
+  "crates/ferrolex-text": "0.3.1"
 }
