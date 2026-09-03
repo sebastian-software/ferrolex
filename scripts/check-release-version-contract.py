@@ -142,6 +142,12 @@ def main() -> int:
                 f"{name} is pinned to {version}, expected workspace version {root_version}"
             )
 
+    node_loader = (ROOT / "crates/ferrolex-node/index.js").read_text(encoding="utf-8")
+    if "const packageVersion = require('./package.json').version" not in node_loader:
+        errors.append("the generated Node.js loader must read its version dynamically")
+    if root_version in node_loader:
+        errors.append("the generated Node.js loader must not embed the release version")
+
     metadata = cargo_metadata()
     workspace_ids = set(metadata["workspace_members"])
     packages = [

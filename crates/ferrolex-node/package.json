@@ -28,7 +28,9 @@
     "build": "napi build --platform --release -- --locked",
     "build:debug": "napi build --platform -- --locked",
     "create-npm-dirs": "napi create-npm-dirs && node scripts/prepare-package.mjs",
-    "prepack": "node scripts/prepare-package.mjs",
+    "postbuild": "node scripts/normalize-loader.mjs",
+    "postbuild:debug": "node scripts/normalize-loader.mjs",
+    "prepack": "node scripts/normalize-loader.mjs && node scripts/prepare-package.mjs",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
