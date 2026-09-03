@@ -1,11 +1,57 @@
 {
-  "name": "@ferrolex/node-spike",
-  "private": true,
-  "version": "0.1.0",
+  "name": "@ferrolex/node",
+  "version": "0.4.0",
+  "description": "Native Node.js bindings for the ferrolex spell-checking engine",
+  "license": "MIT OR Apache-2.0",
+  "author": "sebastian-software",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sebastian-software/ferrolex.git",
+    "directory": "crates/ferrolex-node"
+  },
+  "homepage": "https://github.com/sebastian-software/ferrolex",
+  "bugs": "https://github.com/sebastian-software/ferrolex/issues",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "README.md"
+  ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts --output-dir artifacts --npm-dir npm",
+    "build": "napi build --platform --release -- --locked",
+    "build:debug": "napi build --platform -- --locked",
+    "create-npm-dirs": "napi create-npm-dirs && node scripts/prepare-package.mjs",
+    "postbuild": "node scripts/normalize-loader.mjs",
+    "postbuild:debug": "node scripts/normalize-loader.mjs",
+    "prepack": "node scripts/normalize-loader.mjs && node scripts/prepare-package.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.9.0"
+  },
+  "optionalDependencies": {
+    "@ferrolex/node-darwin-arm64": "0.4.0",
+    "@ferrolex/node-linux-x64-gnu": "0.4.0",
+    "@ferrolex/node-win32-x64-msvc": "0.4.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "napi": {
-    "binaryName": "ferrolex_node"
+    "binaryName": "ferrolex_node",
+    "packageName": "@ferrolex/node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu"
+    ]
   }
 }

@@ -12,7 +12,54 @@
   "packages": {
     ".": {
       "component": "ferrolex",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-darwin-arm64']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-linux-x64-gnu']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-win32-x64-msvc']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['version']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-darwin-arm64']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-x64-gnu']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-win32-x64-msvc']"
+        }
+      ]
     }
   }
 }

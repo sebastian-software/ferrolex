@@ -1,9 +1,9 @@
 # Native integrations
 
 ferrolex is a Rust spell-checking engine with one selected direct runtime
-integration: Node.js. The Node package should expose the same dictionary,
+integration: Node.js. The Node package exposes the same dictionary,
 recognition, suggestion, and managed-acquisition concepts as the Rust API. It
-must not fork recognition behavior or bundle dictionary data.
+does not fork recognition behavior or bundle dictionary data.
 
 [ADR-0010](adr/0010-external-integration-support-tiers.md) records this focus.
 The checked-in C ABI and Python binding remain evaluation prototypes without a
