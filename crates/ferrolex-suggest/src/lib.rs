@@ -16,12 +16,30 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use ferrolex_core::{UserDictionary, WordList};
+use ferrolex_core::{Dictionary, UserDictionary, WordList};
 
 /// A stable source of suggestion candidates.
 pub trait CandidateSource: Send + Sync {
     /// Visits candidates in deterministic byte-lexicographic order.
     fn visit_candidates(&self, visitor: &mut dyn FnMut(&str) -> bool);
+
+    /// Returns whether the source stores `word` as an exact suggestion candidate.
+    ///
+    /// The default scans the deterministic candidate stream. Sources with a
+    /// faster exact lookup may override this when presenting a re-cased
+    /// suggestion.
+    fn contains_candidate(&self, word: &str) -> bool {
+        let mut found = false;
+        self.visit_candidates(&mut |candidate| {
+            if candidate == word {
+                found = true;
+                false
+            } else {
+                true
+            }
+        });
+        found
+    }
 
     /// Visits candidates that may be within the requested query distance.
     ///
@@ -84,6 +102,10 @@ impl CandidateSource for WordList {
         }
     }
 
+    fn contains_candidate(&self, word: &str) -> bool {
+        self.contains(word)
+    }
+
     fn visit_nearby_candidates(
         &self,
         query: &[char],
@@ -110,6 +132,10 @@ impl CandidateSource for UserDictionary {
                 break;
             }
         }
+    }
+
+    fn contains_candidate(&self, word: &str) -> bool {
+        self.contains(word)
     }
 }
 
@@ -610,8 +636,20 @@ fn consider_candidate<S: CandidateSource + ?Sized>(
         )
     };
     if let Some(distance) = distance {
+        let displayed = present(candidate, query);
+        let word = if is_title_case_query(query)
+            && displayed != candidate
+            && !source.contains_candidate(&displayed)
+        {
+            candidate.to_owned()
+        } else {
+            displayed
+        };
+        if is_title_case_query(query) && word == query {
+            return true;
+        }
         suggestions.push(Suggestion {
-            word: present(candidate, query),
+            word,
             distance,
             ranking_distance: ranking_distance(
                 query_chars,
@@ -757,9 +795,7 @@ fn compare_suggestions(left: &Suggestion, right: &Suggestion) -> Ordering {
 fn present(candidate: &str, query: &str) -> String {
     if !query.is_empty() && query.chars().all(char::is_uppercase) {
         candidate.to_uppercase()
-    } else if query.chars().next().is_some_and(char::is_uppercase)
-        && query.chars().skip(1).all(char::is_lowercase)
-    {
+    } else if is_title_case_query(query) {
         let mut chars = candidate.chars();
         chars.next().map_or_else(String::new, |first| {
             first
@@ -770,6 +806,11 @@ fn present(candidate: &str, query: &str) -> String {
     } else {
         candidate.to_owned()
     }
+}
+
+fn is_title_case_query(query: &str) -> bool {
+    query.chars().next().is_some_and(char::is_uppercase)
+        && query.chars().skip(1).all(char::is_lowercase)
 }
 
 fn lowercase_chars_bounded_into<'scratch>(
@@ -1031,6 +1072,28 @@ mod tests {
                 .completeness(),
             Completeness::QueryTooLong
         );
+    }
+
+    #[test]
+    fn falls_back_to_stored_casing_when_re_casing_is_not_a_candidate() {
+        let words = WordList::new(["NATO", "iPhone"]).expect("valid words");
+        let suggester = Suggester::new(&words, SuggestConfig::default());
+
+        assert_eq!(suggester.suggest("Nato").suggestions()[0].word(), "NATO");
+        assert_eq!(
+            suggester.suggest("Iphone").suggestions()[0].word(),
+            "iPhone"
+        );
+    }
+
+    #[test]
+    fn omits_a_suggestion_that_is_identical_to_the_query() {
+        let words = WordList::new(["Hello"]).expect("valid words");
+
+        assert!(Suggester::new(&words, SuggestConfig::default())
+            .suggest("Hello")
+            .suggestions()
+            .is_empty());
     }
 
     #[test]

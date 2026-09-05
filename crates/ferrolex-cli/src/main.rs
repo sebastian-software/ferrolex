@@ -785,6 +785,10 @@ impl CandidateSource for AnalysisDictionary {
         }
     }
 
+    fn contains_candidate(&self, word: &str) -> bool {
+        self.contains(word)
+    }
+
     fn visit_nearby_candidates(
         &self,
         query: &[char],
@@ -979,6 +983,10 @@ impl CandidateSource for ArtifactDictionary {
             Self::Exact(dictionary) => dictionary.visit_candidates(visitor),
             Self::Hunspell(dictionary) => dictionary.visit_candidates(visitor),
         }
+    }
+
+    fn contains_candidate(&self, word: &str) -> bool {
+        self.contains(word)
     }
 
     fn visit_nearby_candidates(

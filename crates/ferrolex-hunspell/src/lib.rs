@@ -1506,6 +1506,10 @@ impl CandidateSource for HunspellDictionary {
         }
     }
 
+    fn contains_candidate(&self, word: &str) -> bool {
+        self.stems().any(|stem| stem == word) && self.is_suggestable_stem(word)
+    }
+
     fn visit_nearby_candidates(
         &self,
         query: &[char],
@@ -6000,6 +6004,38 @@ mod tests {
 
         assert_eq!(candidates, ["kind", "party"]);
         assert!(!candidates.contains(&"parties".to_owned()));
+    }
+
+    #[test]
+    fn title_case_suggestions_fall_back_to_the_stored_hunspell_stem() {
+        let result = import(
+            "casing.aff",
+            "SET UTF-8\n",
+            "casing.dic",
+            "1\nNATO\n",
+            ImportMode::Strict,
+        )
+        .expect("the casing fixture imports cleanly");
+
+        let result = Suggester::new(result.dictionary(), SuggestConfig::default()).suggest("Nato");
+
+        assert_eq!(result.suggestions()[0].word(), "NATO");
+    }
+
+    #[test]
+    fn title_case_suggestions_do_not_use_policy_rejected_spellings() {
+        let result = import(
+            "policy-casing.aff",
+            "SET UTF-8\nNOSUGGEST S\n",
+            "policy-casing.dic",
+            "2\nnato\nNato/S\n",
+            ImportMode::Strict,
+        )
+        .expect("the policy casing fixture imports cleanly");
+
+        let result = Suggester::new(result.dictionary(), SuggestConfig::default()).suggest("Nato");
+
+        assert_eq!(result.suggestions()[0].word(), "nato");
     }
 
     #[test]
