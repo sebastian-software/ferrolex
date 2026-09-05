@@ -49,6 +49,6 @@ pub use ferrolex_hunspell::{
     Diagnostic, DictionaryIr, HunspellDictionary, ImportError, ImportMode, ImportResult, Severity,
 };
 pub use ferrolex_suggest::{
-    CandidateSource, Completeness, RankingSignals, ReplacementRule, SuggestConfig, SuggestScratch,
-    Suggester, Suggestion, SuggestionResult,
+    Completeness, RankingSignals, ReplacementRule, SuggestConfig, SuggestScratch, Suggester,
+    Suggestion, SuggestionResult,
 };

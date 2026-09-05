@@ -768,6 +768,10 @@ impl Dictionary for AnalysisDictionary {
             AnalysisSource::Hunspell(dictionary) => dictionary.contains(word),
         })
     }
+
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        Some(self)
+    }
 }
 
 impl CandidateSource for AnalysisDictionary {
@@ -980,6 +984,10 @@ impl Dictionary for ArtifactDictionary {
             Self::Exact(dictionary) => dictionary.contains(word),
             Self::Hunspell(dictionary) => dictionary.contains(word),
         }
+    }
+
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        Some(self)
     }
 }
 

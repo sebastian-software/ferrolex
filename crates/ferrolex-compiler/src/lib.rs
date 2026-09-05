@@ -1032,6 +1032,10 @@ impl Dictionary for CompiledDictionary {
     fn contains(&self, word: &str) -> bool {
         self.word_index(word).is_some()
     }
+
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        Some(self)
+    }
 }
 
 fn align_to_eight(value: usize) -> Option<usize> {

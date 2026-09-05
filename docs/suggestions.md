@@ -21,6 +21,20 @@ values and reports
 Sources without morphological expansion skip seed traversal entirely. Thus an
 incomplete result remains explicit through `Completeness`.
 
+`Checker` also implements `CandidateSource`. It delegates candidate traversal,
+ranking metadata, and bounded morphology to each constituent whose
+`Dictionary::as_candidate_source` returns a source. The built-in word-list,
+user-dictionary, compiled-dictionary, and Hunspell implementations opt in.
+Checking-only custom dictionaries remain part of `Checker::contains` but do not
+contribute suggestions. A custom dictionary opts in by returning `Some(self)`
+from its `Dictionary::as_candidate_source` implementation. This lets one
+`Suggester` preserve the deterministic candidate and budget policy across the
+layers:
+
+```rust
+let result = Suggester::new(&checker, SuggestConfig::default()).suggest("teh");
+```
+
 The `max_word_scalars` limit is measured after Unicode lowercase expansion, so
 an input scalar such as `İ` can consume two scalar values of the budget.
 
