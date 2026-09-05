@@ -33,7 +33,9 @@ use ferrolex_compiler::{
 use ferrolex_core::{CandidateIndex, Dictionary};
 
 pub use ferrolex_compiler::DictionaryIr;
-pub use ferrolex_suggest::{CandidateSource, RankingSignals, ReplacementRule};
+pub use ferrolex_suggest::{
+    CandidateSource, RankingSignals, ReplacementRule, SuggestConfig, Suggester,
+};
 
 pub use cache::{
     compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, is_runtime_artifact,
@@ -529,6 +531,45 @@ impl HunspellDictionary {
     #[must_use]
     pub fn ranking_signals(&self) -> RankingSignals<'_> {
         RankingSignals::new(self.keyboard.as_deref(), &self.character_maps)
+    }
+
+    /// Creates a suggester preconfigured with this dictionary's `REP`, `KEY`,
+    /// and `MAP` data.
+    ///
+    /// Hunspell `OCONV` rules transform suggestion output rather than the
+    /// candidate source. Apply [`Self::normalize_output`] to every returned
+    /// spelling before displaying or storing it.
+    ///
+    /// ```
+    /// use ferrolex_hunspell::{import, ImportMode, SuggestConfig};
+    ///
+    /// let imported = import(
+    ///     "example.aff",
+    ///     "SET UTF-8\nREP 1\nREP teh the\nOCONV 1\nOCONV the æ\n",
+    ///     "example.dic",
+    ///     "1\nthe\n",
+    ///     ImportMode::Strict,
+    /// )?;
+    /// let dictionary = imported.dictionary();
+    /// let result = dictionary
+    ///     .suggester(SuggestConfig {
+    ///         max_edit_distance: 0,
+    ///         ..SuggestConfig::default()
+    ///     })
+    ///     .suggest("teh");
+    /// let output: Vec<_> = result
+    ///     .suggestions()
+    ///     .iter()
+    ///     .map(|suggestion| dictionary.normalize_output(suggestion.word()))
+    ///     .collect();
+    /// assert_eq!(output, ["æ"]);
+    /// # Ok::<(), ferrolex_hunspell::ImportError>(())
+    /// ```
+    #[must_use]
+    pub fn suggester(&self, config: SuggestConfig) -> Suggester<'_, Self> {
+        Suggester::new(self, config)
+            .with_replacement_rules(self.replacement_rules())
+            .with_ranking_signals(self.ranking_signals())
     }
 
     /// Returns whether a stored stem is valid to offer as a suggestion.
