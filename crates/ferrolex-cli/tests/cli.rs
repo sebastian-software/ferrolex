@@ -144,6 +144,52 @@ fn compile_reports_long_running_phases_on_stderr() {
 }
 
 #[test]
+fn inspect_labels_hunspell_features_as_format_capabilities() {
+    let directory = temporary_directory("inspect-capabilities");
+    fs::write(directory.join("fixture.aff"), "SET UTF-8\n").expect("affix fixture is written");
+    fs::write(directory.join("fixture.dic"), "1\nbook\n").expect("dictionary fixture is written");
+
+    fs::write(directory.join("words.txt"), "alpha\nbeta\n").expect("word fixture is written");
+    let native_compile = run_in(
+        &directory,
+        &[
+            "compile",
+            "--dictionary",
+            "words.txt",
+            "-o",
+            "words.flexdic",
+        ],
+    );
+    assert!(native_compile.status.success());
+
+    let native_inspect = run_in(&directory, &["inspect", "words.flexdic"]);
+    assert!(native_inspect.status.success());
+    let native_stdout = String::from_utf8(native_inspect.stdout).expect("inspection is UTF-8");
+    assert!(native_stdout.contains("format-capabilities: exact-word-lookup"));
+    assert!(!native_stdout.contains("required-features:"));
+
+    let compile = run_in(
+        &directory,
+        &[
+            "compile",
+            "fixture.aff",
+            "fixture.dic",
+            "-o",
+            "fixture.flexhsp",
+        ],
+    );
+    assert!(compile.status.success());
+
+    let inspect = run_in(&directory, &["inspect", "fixture.flexhsp"]);
+    assert!(inspect.status.success());
+    let stdout = String::from_utf8(inspect.stdout).expect("inspection is UTF-8");
+    assert!(stdout.contains("format-capabilities: flag-modes, case-fallback, language-casing, morphology, lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, keyboard-layout, character-maps, compounds, breaks, word-characters, replacement-rules, ignored-characters, input-conversions, output-conversions, full-strip, complex-prefixes"));
+    assert!(!stdout.contains("required-features:"));
+
+    fs::remove_dir_all(directory).expect("temporary fixture is removed");
+}
+
+#[test]
 fn check_accepts_stdin_and_reports_its_source() {
     let directory = temporary_directory("check-stdin");
     fs::write(directory.join("words.txt"), "correct\n").expect("dictionary fixture is written");
