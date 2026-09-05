@@ -1580,8 +1580,28 @@ fn sharp_uppercase_forms(lexemes: &[Lexeme], special_flags: &SpecialFlags) -> BT
     };
     lexemes
         .iter()
-        .filter(|lexeme| has_flag(&lexeme.flags, *keep_case) && lexeme.stem.contains('ß'))
-        .map(|lexeme| Box::<str>::from(lexeme.stem.to_uppercase()))
+        .filter(|lexeme| {
+            has_flag(&lexeme.flags, *keep_case)
+                && lexeme.stem.contains('ß')
+                && !special_flags
+                    .forbidden_word
+                    .is_some_and(|flag| has_flag(&lexeme.flags, flag))
+                && !special_flags
+                    .need_affix
+                    .is_some_and(|flag| has_flag(&lexeme.flags, flag))
+                && !special_flags
+                    .only_in_compound
+                    .is_some_and(|flag| has_flag(&lexeme.flags, flag))
+        })
+        .flat_map(|lexeme| {
+            [
+                Box::<str>::from(initial_case_for_language(
+                    &lexeme.stem,
+                    CaseLanguage::Default,
+                )),
+                Box::<str>::from(lexeme.stem.to_uppercase()),
+            ]
+        })
         .collect()
 }
 
@@ -6778,21 +6798,44 @@ mod tests {
     }
 
     #[test]
-    fn checksharps_accepts_only_the_keepcase_ss_uppercase_form() {
+    fn checksharps_accepts_keepcase_initial_and_ss_uppercase_forms() {
         let imported = import(
             "test.aff",
             "CHECKSHARPS\nKEEPCASE K\n",
             "test.dic",
-            "2\nStraße/K\nMaße\n",
+            "2\nstraße/K\nMaße\n",
             ImportMode::Strict,
         )
         .expect("CHECKSHARPS imports");
 
         let dictionary = imported.dictionary();
+        assert!(dictionary.contains("straße"));
         assert!(dictionary.contains("Straße"));
         assert!(dictionary.contains("STRASSE"));
         assert!(!dictionary.contains("STRAẞE"));
         assert!(!dictionary.contains("MASSE"));
+    }
+
+    #[test]
+    fn checksharps_does_not_bypass_restricted_keepcase_flags() {
+        let imported = import(
+            "test.aff",
+            "CHECKSHARPS\nKEEPCASE K\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\n",
+            "test.dic",
+            "3\nstraße/KF\nbedarf/KN\nteil/KO\n",
+            ImportMode::Strict,
+        )
+        .expect("CHECKSHARPS imports");
+
+        let dictionary = imported.dictionary();
+        for word in [
+            "straße", "Straße", "STRASSE", "bedarf", "Bedarf", "BEDARF", "teil", "Teil", "TEIL",
+        ] {
+            assert!(
+                !dictionary.contains(word),
+                "restricted word `{word}` accepted"
+            );
+        }
     }
 
     #[test]

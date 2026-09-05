@@ -128,8 +128,9 @@ is serialized into the runtime cache and remains bounded by the input's
 256-scalar lookup limit.
 
 With `CHECKSHARPS`, a `KEEPCASE` stem containing `ß` additionally recognizes
-its all-uppercase spelling with `SS`. No other case fallback is implied, and
-an uppercase-sharp-S spelling is not accepted as that variant.
+its initial-capital spelling and its all-uppercase spelling with `SS`. No other
+case fallback is implied, and an uppercase-sharp-S spelling is not accepted as
+that variant.
 
 Hunspell-style capitalization fallback applies to initial-capital and
 all-uppercase lookup input even without `LANG`. These fallbacks try lower- and
