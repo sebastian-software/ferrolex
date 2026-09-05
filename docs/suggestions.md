@@ -44,6 +44,26 @@ its provenance-bound runtime cache. A `REP` rule is two non-empty,
 whitespace-free literal spellings; unsupported variants produce a warning and
 never affect word recognition.
 
+For a direct Hunspell-backed library flow, use
+`HunspellDictionary::suggester` so `REP`, `KEY`, and `MAP` metadata is wired
+into the generic engine automatically:
+
+```rust
+let result = dictionary
+    .suggester(SuggestConfig::default())
+    .suggest("teh");
+let words = result
+    .suggestions()
+    .iter()
+    .map(|suggestion| dictionary.normalize_output(suggestion.word()));
+```
+
+`OCONV` is a presentation conversion, so apply `normalize_output` to every
+returned spelling before displaying or storing it. When combining Hunspell
+with other candidate sources, retain the layered-source policy described by
+the caller's application; only candidates belonging to the Hunspell source
+should receive that source's output conversion.
+
 Hunspell `KEY` and counted `MAP` directives are retained as ranking signals.
 For an otherwise single-character substitution, an adjacent `KEY` neighbor or
 two characters from one `MAP` group receives a better ranking distance. The
