@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.5.0](https://github.com/sebastian-software/ferrolex/compare/ferrolex-v0.4.0...ferrolex-v0.5.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** report progress for long operations ([#187](https://github.com/sebastian-software/ferrolex/issues/187)) ([e9c9c0f](https://github.com/sebastian-software/ferrolex/commit/e9c9c0f0082c8a598cae664198f61877a2475fdc))
+* compose layered candidate sources ([#235](https://github.com/sebastian-software/ferrolex/issues/235)) ([677748a](https://github.com/sebastian-software/ferrolex/commit/677748a8df4ad90c9a9b006a176cc012f870f094))
+* expose product APIs from umbrella crate ([#234](https://github.com/sebastian-software/ferrolex/issues/234)) ([03ede49](https://github.com/sebastian-software/ferrolex/commit/03ede49a2118ceba7a51f540ddfd6a80f1da269f))
+* **hunspell:** add owned dictionary extraction ([#232](https://github.com/sebastian-software/ferrolex/issues/232)) ([8c9e24a](https://github.com/sebastian-software/ferrolex/commit/8c9e24ae604d87b59345cd210fe980fa53636205))
+* **hunspell:** provide configured suggester ([#233](https://github.com/sebastian-software/ferrolex/issues/233)) ([86d843c](https://github.com/sebastian-software/ferrolex/commit/86d843c502f10c00660d2085bef417f4865a8470))
+* **node:** complete managed package contract ([#189](https://github.com/sebastian-software/ferrolex/issues/189)) ([7c7939c](https://github.com/sebastian-software/ferrolex/commit/7c7939c4d8a4944173bc82cbf045e6317ed83733))
+
+
+### Bug Fixes
+
+* **check:** align unicode normalization across entry points ([#224](https://github.com/sebastian-software/ferrolex/issues/224)) ([b0d3863](https://github.com/sebastian-software/ferrolex/commit/b0d386305c0f3090c5dea3b4c0380bdaf81b1c26))
+* **cli:** align frequency word list handling ([#226](https://github.com/sebastian-software/ferrolex/issues/226)) ([172a420](https://github.com/sebastian-software/ferrolex/commit/172a42088975648366128108258c5ea6d1d82ff5))
+* **core:** preserve user dictionary round trips ([#190](https://github.com/sebastian-software/ferrolex/issues/190)) ([#223](https://github.com/sebastian-software/ferrolex/issues/223)) ([319fd9f](https://github.com/sebastian-software/ferrolex/commit/319fd9f8b4837be9c65a994ae6c33c7d522e1234))
+* expose catalog encoding import policy ([#236](https://github.com/sebastian-software/ferrolex/issues/236)) ([2455fff](https://github.com/sebastian-software/ferrolex/commit/2455fff7c079b704a9a3f333323d02c58b7eeb42))
+* **hunspell:** allow capitalized checksharps keepcase forms ([#228](https://github.com/sebastian-software/ferrolex/issues/228)) ([d9cc1c9](https://github.com/sebastian-software/ferrolex/commit/d9cc1c913693b6dcef98c0f66fad2283c7faf646))
+* **hunspell:** re-export public API result types ([#231](https://github.com/sebastian-software/ferrolex/issues/231)) ([345dbf0](https://github.com/sebastian-software/ferrolex/commit/345dbf096477d3cfa93cba9325aeb000aa02ccde))
+* **hunspell:** skip ignored counted lines ([#183](https://github.com/sebastian-software/ferrolex/issues/183)) ([f6155f5](https://github.com/sebastian-software/ferrolex/commit/f6155f5c284a8a3b99192f870b2a132f0f9bbe4c))
+* **io:** harden dictionary write durability ([#182](https://github.com/sebastian-software/ferrolex/issues/182)) ([029cfc2](https://github.com/sebastian-software/ferrolex/commit/029cfc2632ed5ff9629766f57c0c437585d79cca))
+* normalize leading BOMs in Hunspell sources ([#179](https://github.com/sebastian-software/ferrolex/issues/179)) ([568b557](https://github.com/sebastian-software/ferrolex/commit/568b557ba66ba7712bd6413d15a3cec300dfcb39))
+* relax library dependency pins ([#237](https://github.com/sebastian-software/ferrolex/issues/237)) ([d43940b](https://github.com/sebastian-software/ferrolex/commit/d43940bff00a8e50d137e858ebfcd80c46ad9202))
+* render actionable import diagnostics ([#238](https://github.com/sebastian-software/ferrolex/issues/238)) ([5fecb30](https://github.com/sebastian-software/ferrolex/commit/5fecb3021485194652be89f0b26c13c346cc88d4))
+* repair 0.4.0 workspace release contract ([#180](https://github.com/sebastian-software/ferrolex/issues/180)) ([d662d49](https://github.com/sebastian-software/ferrolex/commit/d662d49aa5fa3f4bec86e5ce36bca0c86f09cd4b))
+* **suggest:** preserve valid suggestion casing ([#225](https://github.com/sebastian-software/ferrolex/issues/225)) ([37b430c](https://github.com/sebastian-software/ferrolex/commit/37b430c1b8e710d45fe2b25bf491a9f21224d033))
+* **text:** ignore digit-adjacent word fragments ([#227](https://github.com/sebastian-software/ferrolex/issues/227)) ([d6e8096](https://github.com/sebastian-software/ferrolex/commit/d6e809641c9aaade9f873a8e2968149986bf8ee5))
+
+
+### Performance Improvements
+
+* **hunspell:** bound empty-add miss lookup ([#185](https://github.com/sebastian-software/ferrolex/issues/185)) ([6c4b927](https://github.com/sebastian-software/ferrolex/commit/6c4b9275fe8f6adc16a343a238923f4b1d4553c1))
+* **hunspell:** reduce lookup and import allocations ([#186](https://github.com/sebastian-software/ferrolex/issues/186)) ([afa9491](https://github.com/sebastian-software/ferrolex/commit/afa9491e55d6db5f19ef9674969aca3ca9c070e1))
+* remove redundant artifact loading work ([#184](https://github.com/sebastian-software/ferrolex/issues/184)) ([147d5f2](https://github.com/sebastian-software/ferrolex/commit/147d5f2702aeacad049090064466bcca6db1ee2d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * ferrolex-core bumped from 0.4.0 to 0.4.1
+    * ferrolex-dictionaries bumped from 0.4.0 to 0.4.1
+    * ferrolex-hunspell bumped from 0.4.0 to 0.4.1
+    * ferrolex-suggest bumped from 0.4.0 to 0.4.1
+
 ## [0.4.0](https://github.com/sebastian-software/ferrolex/compare/ferrolex-v0.3.0...ferrolex-v0.4.0) (2026-09-02)
 
 
