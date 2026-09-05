@@ -224,6 +224,20 @@ impl Diagnostic {
     }
 }
 
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let severity = match self.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+        };
+        write!(
+            formatter,
+            "{}:{}: {severity}[{}]: {}",
+            self.source, self.line, self.directive, self.message
+        )
+    }
+}
+
 /// An import rejected in [`ImportMode::Strict`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImportError {
@@ -244,7 +258,11 @@ impl fmt::Display for ImportError {
             formatter,
             "Hunspell import failed with {} diagnostic(s)",
             self.diagnostics.len()
-        )
+        )?;
+        if let Some(first) = self.diagnostics.first() {
+            write!(formatter, "; first: {first}")?;
+        }
+        Ok(())
     }
 }
 

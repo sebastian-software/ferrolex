@@ -1930,17 +1930,7 @@ fn print_import_diagnostic_to_stderr(diagnostic: &ImportDiagnostic) {
 }
 
 fn render_import_diagnostic(diagnostic: &ImportDiagnostic) -> String {
-    let severity = match diagnostic.severity() {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-    };
-    format!(
-        "{}:{}: {severity}[{}]: {}",
-        diagnostic.source(),
-        diagnostic.line(),
-        diagnostic.directive(),
-        diagnostic.message()
-    )
+    diagnostic.to_string()
 }
 
 fn print_finding(

@@ -80,3 +80,24 @@ fn dictionary_suggester_preserves_hunspell_suggestion_metadata() {
         "z"
     );
 }
+
+#[test]
+fn import_errors_render_actionable_diagnostics() {
+    let error = import(
+        "unsupported.aff",
+        "SET KOI8-R\n",
+        "unsupported.dic",
+        "1\nword\n",
+        ImportMode::Strict,
+    )
+    .expect_err("unsupported byte encodings are strict import failures");
+
+    assert_eq!(
+        error.diagnostics()[0].to_string(),
+        "unsupported.aff:1: error[SET]: SET must name UTF-8, ISO-8859-1, or ISO-8859-2"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Hunspell import failed with 1 diagnostic(s); first: unsupported.aff:1: error[SET]: SET must name UTF-8, ISO-8859-1, or ISO-8859-2"
+    );
+}
