@@ -27,11 +27,13 @@ use std::sync::{Arc, OnceLock};
 use encoding_rs::ISO_8859_2;
 use ferrolex_compiler::{
     AffixKindIr, AffixRuleIr, BreakPatternIr, CaseLanguageIr, CompoundConfigIr, CompoundPatternIr,
-    CompoundSyllableLimitIr, ConditionAtomIr, ConditionIr, DictionaryIr, FlagIr, FlagModeIr,
-    InputConversionIr, LexemeIr, ReplacementRuleIr, SpecialFlagsIr,
+    CompoundSyllableLimitIr, ConditionAtomIr, ConditionIr, FlagIr, FlagModeIr, InputConversionIr,
+    LexemeIr, ReplacementRuleIr, SpecialFlagsIr,
 };
 use ferrolex_core::{CandidateIndex, Dictionary};
-use ferrolex_suggest::{CandidateSource, RankingSignals, ReplacementRule};
+
+pub use ferrolex_compiler::DictionaryIr;
+pub use ferrolex_suggest::{CandidateSource, RankingSignals, ReplacementRule};
 
 pub use cache::{
     compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, is_runtime_artifact,
