@@ -74,8 +74,8 @@ The build places the binary at `target/debug/ferrolex`; `cargo install` adds
 
 ## Try it
 
-Create a UTF-8 plain-word-list file with one word per line, then check either
-one word or a plain-text file:
+Create a UTF-8 word-list file with one word per line, then check either one
+word or a plain-text file:
 
 ```sh
 ferrolex check --dictionary words.txt Straße
@@ -96,7 +96,12 @@ ferrolex suggest --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff slowami
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
 lines beginning with `#`. Exact matching is the default. Library users can
 opt into NFC or NFKC normalization explicitly; case folding remains a separate
-future policy.
+future policy. A complete tab-separated list in the form
+`word<TAB>unsigned-frequency` is also accepted by `compile --dictionary` and
+`check --dictionary`; the frequency is used for suggestion ranking and the
+word portion is used for recognition. Format detection ignores blank lines and
+comments, including comments containing tabs. A file with plain data or a
+trailing tab remains a plain word list.
 
 `validate` imports a Hunspell-style pair under ferrolex's documented
 compatibility subset and reports structured diagnostics. It decodes UTF-8,
@@ -159,8 +164,8 @@ segmentation has its own contract. The
 acquisition from strict import and recognition evidence. Successful strict
 installs also create a [versioned Hunspell runtime cache](docs/hunspell-runtime-cache.md).
 
-`compile --dictionary` turns the same plain-word-list syntax used by `check`
-into a deterministic native artifact. `compile <AFF> <DIC>` produces a
+`compile --dictionary` turns the same word-list syntax used by `check` into a
+deterministic native artifact. `compile <AFF> <DIC>` produces a
 standalone Hunspell artifact that retains ferrolex's supported affix semantics
 and can be copied to a machine without the source pair. `check --compiled`
 loads either artifact type and can be layered with plain or installed Hunspell
