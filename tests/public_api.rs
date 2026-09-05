@@ -1,6 +1,6 @@
 use ferrolex::{
-    find_locale, import, Checker, Dictionary, HunspellDictionary, ImportMode, SuggestConfig,
-    Suggester, WordList,
+    catalog_import_encodings, find_locale, import, ByteEncoding, Checker, Dictionary,
+    HunspellDictionary, ImportMode, SourceEncoding, SuggestConfig, Suggester, WordList,
 };
 
 #[test]
@@ -47,4 +47,22 @@ fn checker_composes_layered_suggestion_sources() {
             .word(),
         "ferrolex"
     );
+}
+
+#[test]
+fn catalog_encoding_mapping_is_available_to_library_consumers() {
+    let mixed_latin = catalog_import_encodings(SourceEncoding::MixedUtf8AndIso8859_1)
+        .expect("mixed catalog encoding needs an explicit policy");
+    assert_eq!(mixed_latin.aff(), ByteEncoding::Iso8859_1);
+    assert_eq!(mixed_latin.dic(), ByteEncoding::Utf8);
+
+    let mixed_central_european =
+        catalog_import_encodings(SourceEncoding::MixedUtf8AndIso8859_2Fallback)
+            .expect("fallback catalog encoding needs an explicit policy");
+    assert_eq!(
+        mixed_central_european.aff(),
+        ByteEncoding::Utf8WithIso8859_2Fallback
+    );
+    assert_eq!(mixed_central_european.dic(), ByteEncoding::Utf8);
+    assert!(catalog_import_encodings(SourceEncoding::Utf8).is_none());
 }
