@@ -99,9 +99,11 @@ opt into NFC or NFKC normalization explicitly; case folding remains a separate
 future policy. A complete tab-separated list in the form
 `word<TAB>unsigned-frequency` is also accepted by `compile --dictionary` and
 `check --dictionary`; the frequency is used for suggestion ranking and the
-word portion is used for recognition. Format detection ignores blank lines and
-comments, including comments containing tabs. A file with plain data or a
-trailing tab remains a plain word list.
+word portion is used for recognition. Directly loaded lists use only the word
+portion, so frequency-ranked suggestions require the compiled artifact.
+Format detection ignores blank lines and comments, including comments
+containing tabs. A file with plain data or a trailing tab remains a plain word
+list.
 
 `validate` imports a Hunspell-style pair under ferrolex's documented
 compatibility subset and reports structured diagnostics. It decodes UTF-8,
