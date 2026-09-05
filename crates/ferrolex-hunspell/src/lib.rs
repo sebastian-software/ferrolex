@@ -1507,7 +1507,7 @@ impl CandidateSource for HunspellDictionary {
     }
 
     fn contains_candidate(&self, word: &str) -> bool {
-        self.contains(word)
+        self.stems().any(|stem| stem == word)
     }
 
     fn visit_nearby_candidates(
@@ -6004,6 +6004,22 @@ mod tests {
 
         assert_eq!(candidates, ["kind", "party"]);
         assert!(!candidates.contains(&"parties".to_owned()));
+    }
+
+    #[test]
+    fn title_case_suggestions_fall_back_to_the_stored_hunspell_stem() {
+        let result = import(
+            "casing.aff",
+            "SET UTF-8\n",
+            "casing.dic",
+            "1\nNATO\n",
+            ImportMode::Strict,
+        )
+        .expect("the casing fixture imports cleanly");
+
+        let result = Suggester::new(result.dictionary(), SuggestConfig::default()).suggest("Nato");
+
+        assert_eq!(result.suggestions()[0].word(), "NATO");
     }
 
     #[test]
