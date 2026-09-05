@@ -10,6 +10,53 @@
 //!
 //! assert_eq!(find_locale("en_US").expect("catalogued locale").locale(), "en_US");
 //! ```
+//!
+//! An installer receives an explicit cache root and a fetcher, so acquisition
+//! can be tested without a network and the cache location never comes from
+//! ambient process state:
+//!
+//! ```
+//! use ferrolex_dictionaries::{
+//!     DictionaryInstaller, FetchError, Fetcher, VerifiedDictionary, VerifiedFile,
+//! };
+//! use std::fs;
+//!
+//! struct FixtureFetcher;
+//!
+//! impl Fetcher for FixtureFetcher {
+//!     fn fetch(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+//!         match url {
+//!             "https://example.invalid/example.aff" => Ok(b"SET UTF-8\n".to_vec()),
+//!             "https://example.invalid/example.dic" => Ok(b"1\nferrolex\n".to_vec()),
+//!             _ => Err(FetchError::Transport("unexpected fixture URL".into())),
+//!         }
+//!     }
+//! }
+//!
+//! let dictionary = VerifiedDictionary::new(
+//!     "example",
+//!     "fixture",
+//!     "MIT",
+//!     "Fixture license",
+//!     "https://example.invalid/LICENSE",
+//!     VerifiedFile::new(
+//!         "example.aff",
+//!         "https://example.invalid/example.aff",
+//!         "7f6d7c55043d4b09d0a4380720847457b7954048bf1dac70512593006bae8c37",
+//!     )?,
+//!     VerifiedFile::new(
+//!         "example.dic",
+//!         "https://example.invalid/example.dic",
+//!         "699fd74b184227da79bbb57e50cfe42e362dc08b0206529efdba3f4ffba17f88",
+//!     )?,
+//! )?;
+//! let cache_root = std::env::temp_dir().join("ferrolex-dictionaries-doctest");
+//! let installed = DictionaryInstaller::new(FixtureFetcher).install(&dictionary, &cache_root)?;
+//! assert!(installed.aff_path().is_file());
+//! assert!(installed.dic_path().is_file());
+//! fs::remove_dir_all(cache_root)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
