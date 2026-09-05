@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::{LockResult, PoisonError, RwLock};
 
@@ -72,12 +73,11 @@ impl UserDictionary {
     /// # Errors
     ///
     /// Returns [`WordListError::EmptyEntry`] when `word` is empty after
-    /// normalization.
+    /// line-oriented whitespace is removed. Returns
+    /// [`WordListError::InvalidEntry`] when `word` contains a comment marker or
+    /// line break that would be lost or reinterpreted by [`Self::to_text`].
     pub fn insert(&self, word: &str) -> Result<bool, WordListError> {
-        let word = self.normalization.normalize(word);
-        if word.is_empty() {
-            return Err(WordListError::EmptyEntry { position: 1 });
-        }
+        let word = self.normalize_word(word)?;
 
         Ok(recover_lock(self.words.write()).insert(Box::<str>::from(word.as_ref())))
     }
@@ -89,12 +89,11 @@ impl UserDictionary {
     /// # Errors
     ///
     /// Returns [`WordListError::EmptyEntry`] when `word` is empty after
-    /// normalization.
+    /// line-oriented whitespace is removed. Returns
+    /// [`WordListError::InvalidEntry`] when `word` contains a comment marker or
+    /// line break that would be lost or reinterpreted by [`Self::to_text`].
     pub fn remove(&self, word: &str) -> Result<bool, WordListError> {
-        let word = self.normalization.normalize(word);
-        if word.is_empty() {
-            return Err(WordListError::EmptyEntry { position: 1 });
-        }
+        let word = self.normalize_word(word)?;
 
         Ok(recover_lock(self.words.write()).remove(word.as_ref()))
     }
@@ -109,6 +108,28 @@ impl UserDictionary {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         recover_lock(self.words.read()).is_empty()
+    }
+
+    fn normalize_word<'a>(&self, word: &'a str) -> Result<Cow<'a, str>, WordListError> {
+        if word.contains(['\r', '\n']) {
+            return Err(WordListError::InvalidEntry { position: 1 });
+        }
+
+        let word = word.trim();
+        let normalized = self.normalization.normalize(word);
+        let trimmed = normalized.trim();
+
+        if trimmed.is_empty() {
+            return Err(WordListError::EmptyEntry { position: 1 });
+        }
+        if trimmed.contains(['\r', '\n']) || trimmed.starts_with('#') {
+            return Err(WordListError::InvalidEntry { position: 1 });
+        }
+        if trimmed.len() == normalized.len() {
+            Ok(normalized)
+        } else {
+            Ok(Cow::Owned(trimmed.to_owned()))
+        }
     }
 }
 
@@ -151,6 +172,43 @@ mod tests {
         assert_eq!(
             dictionary.insert("").expect_err("empty words are invalid"),
             WordListError::EmptyEntry { position: 1 }
+        );
+    }
+
+    #[test]
+    fn rejects_entries_that_cannot_round_trip() {
+        let dictionary = UserDictionary::new(Normalization::Exact);
+
+        for word in ["#hashtag", "multi\nline", "multi\rline"] {
+            assert_eq!(
+                dictionary
+                    .insert(word)
+                    .expect_err("non-round-trippable words are invalid"),
+                WordListError::InvalidEntry { position: 1 }
+            );
+        }
+        assert!(dictionary.is_empty());
+
+        let compatibility_dictionary = UserDictionary::new(Normalization::Nfkc);
+        assert_eq!(
+            compatibility_dictionary
+                .insert("＃hashtag")
+                .expect_err("normalized comment markers are invalid"),
+            WordListError::InvalidEntry { position: 1 }
+        );
+    }
+
+    #[test]
+    fn trims_line_oriented_input_before_persisting() {
+        let dictionary = UserDictionary::new(Normalization::Exact);
+
+        assert!(dictionary
+            .insert("  padded  ")
+            .expect("trimmed word is valid"));
+        assert_eq!(dictionary.to_text(), "padded\n");
+        assert!(
+            UserDictionary::from_text(Normalization::Exact, &dictionary.to_text())
+                .contains("padded")
         );
     }
 
