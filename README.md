@@ -139,12 +139,33 @@ comparison and ranking contract is documented in [Suggestions](docs/suggestions.
 ## Rust library quick start
 
 ```rust
-use ferrolex::{Dictionary, WordList};
+use ferrolex::{import, Dictionary, ImportMode, SuggestConfig};
 
-let dictionary = WordList::new(["ferrolex"])?;
+let imported = import(
+    "example.aff",
+    "SET UTF-8\n",
+    "example.dic",
+    "1\nferrolex\n",
+    ImportMode::Strict,
+)?;
+let dictionary = imported.dictionary();
 assert!(dictionary.contains("ferrolex"));
-# Ok::<(), ferrolex::WordListError>(())
+assert_eq!(
+    dictionary
+        .suggester(SuggestConfig::default())
+        .suggest("ferolex")
+        .suggestions()[0]
+        .word(),
+    "ferrolex"
+);
+# Ok::<(), ferrolex::ImportError>(())
 ```
+
+The `ferrolex` umbrella package re-exports the supported product crates as
+`ferrolex::hunspell`, `ferrolex::suggest`, and `ferrolex::dictionaries`. The
+common importer, dictionary, suggestion, and catalog types are also available
+at the crate root. Depending only on `ferrolex` keeps these APIs on the same
+version-locked release line.
 
 The [Node.js binding](docs/bindings.md) is the only current foreign-runtime
 integration direction. The checked-in C ABI, Python, LSP, and VS Code work is
