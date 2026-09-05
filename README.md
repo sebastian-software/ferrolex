@@ -94,9 +94,11 @@ ferrolex suggest --hunspell .ferrolex-dictionaries/pl_PL/pl_PL.aff slowami
 ```
 
 Plain-word-list files ignore blank lines, leading or trailing whitespace, and
-lines beginning with `#`. Exact matching is the default. Library users can
-opt into NFC or NFKC normalization explicitly; case folding remains a separate
-future policy. A complete tab-separated list in the form
+lines beginning with `#`. Exact matching, including casing, is the default for
+plain word-list and compiled-dictionary checks; Hunspell imports apply
+Hunspell-style capitalization fallback for initial-capital and all-uppercase
+input. Library users can opt into NFC or NFKC normalization explicitly; case
+folding remains a separate future policy. A complete tab-separated list in the form
 `word<TAB>unsigned-frequency` is also accepted by `compile --dictionary` and
 `check --dictionary`; the frequency is used for suggestion ranking and the
 word portion is used for recognition. Directly loaded lists use only the word

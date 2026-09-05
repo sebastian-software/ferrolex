@@ -146,7 +146,8 @@ pub struct SuggestConfig {
     pub max_results: usize,
     /// Maximum OSA edit distance.
     pub max_edit_distance: usize,
-    /// Maximum Unicode scalar values in the query or candidate.
+    /// Maximum Unicode scalar values after lowercase expansion in the query or
+    /// candidate.
     pub max_word_scalars: usize,
     /// Maximum source candidates inspected.
     pub max_candidates: usize,
@@ -258,7 +259,11 @@ impl Suggestion {
     pub fn word(&self) -> &str {
         &self.word
     }
-    /// Returns the OSA edit distance used for ranking.
+    /// Returns the actual edit distance used for the suggestion.
+    ///
+    /// Ordinary matches use OSA distance; a direct `REP` replacement match
+    /// reports zero. Keyboard and character-map ranking signals do not change
+    /// this value.
     #[must_use]
     pub const fn distance(&self) -> usize {
         self.distance

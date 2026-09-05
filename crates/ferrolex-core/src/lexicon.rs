@@ -160,10 +160,11 @@ impl WordList {
 
     /// Builds a dictionary from UTF-8 plain-word-list text.
     ///
-    /// Each non-empty, non-comment line supplies one word. Leading and
-    /// trailing whitespace is ignored, and comments begin with `#` after that
-    /// whitespace is removed. This deliberately small syntax is independent
-    /// of Hunspell dictionary files.
+    /// Each non-empty line supplies one word. Leading and trailing whitespace
+    /// is ignored, and a line is a comment only when its first non-whitespace
+    /// character is `#`. Internal whitespace and inline `#` remain part of the
+    /// entry. This deliberately small syntax is independent of Hunspell
+    /// dictionary files.
     #[must_use]
     pub fn from_text(normalization: Normalization, text: &str) -> Self {
         let entries = text
@@ -324,5 +325,17 @@ mod tests {
         );
 
         assert_eq!(dictionary.words().collect::<Vec<_>>(), ["Straße", "東京"]);
+    }
+
+    #[test]
+    fn preserves_inline_hashes_and_internal_whitespace_in_plain_word_lists() {
+        let dictionary = WordList::from_text(
+            Normalization::Exact,
+            "word # data\n two words \n# comment\n",
+        );
+
+        assert!(dictionary.contains("word # data"));
+        assert!(dictionary.contains("two words"));
+        assert!(!dictionary.contains("word"));
     }
 }
