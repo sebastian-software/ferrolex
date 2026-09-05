@@ -263,6 +263,16 @@ impl ImportResult {
         &self.dictionary
     }
 
+    /// Consumes the import result and returns its runtime dictionary.
+    ///
+    /// This moves the dictionary out without cloning its potentially large
+    /// lexeme and index structures. The source-neutral IR and diagnostics are
+    /// dropped.
+    #[must_use]
+    pub fn into_dictionary(self) -> HunspellDictionary {
+        self.dictionary
+    }
+
     /// Returns the source-neutral semantic representation used for compilation.
     #[must_use]
     pub fn ir(&self) -> &DictionaryIr {

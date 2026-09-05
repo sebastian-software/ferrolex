@@ -1120,7 +1120,7 @@ fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDiction
             for diagnostic in imported.diagnostics() {
                 print_import_diagnostic_to_stderr(diagnostic);
             }
-            return Ok(imported.dictionary().clone());
+            return Ok(imported.into_dictionary());
         }
         Err(source) => {
             return Err(CliError::ReadHunspellCache {
