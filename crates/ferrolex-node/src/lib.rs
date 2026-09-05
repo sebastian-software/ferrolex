@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ferrolex_core::{Dictionary, Normalization, WordList};
+use ferrolex_core::{contains_normalized, Normalization, WordList};
 use ferrolex_dictionaries::{
     find_locale, DictionaryInstaller, SourceEncoding, UreqFetcher, LIBREOFFICE_CATALOG,
 };
@@ -81,8 +81,8 @@ impl Checker {
     #[must_use]
     pub fn check(&self, word: String) -> bool {
         match &self.backend {
-            CheckerBackend::WordList(dictionary) => dictionary.contains(&word),
-            CheckerBackend::Hunspell(import) => import.dictionary().contains(&word),
+            CheckerBackend::WordList(dictionary) => contains_normalized(dictionary, &word),
+            CheckerBackend::Hunspell(import) => contains_normalized(import.dictionary(), &word),
         }
     }
 
@@ -275,6 +275,13 @@ mod tests {
         assert!(checker.check("ferrolex".to_owned()));
         assert!(!checker.check("ferolex".to_owned()));
         assert_eq!(checker.suggest("ferolex".to_owned()), ["ferrolex"]);
+    }
+
+    #[test]
+    fn checks_word_lists_with_nfc_fallback() {
+        let checker = Checker::new("café\n".to_owned());
+
+        assert!(checker.check("cafe\u{301}".to_owned()));
     }
 
     #[test]

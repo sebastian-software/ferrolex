@@ -16,10 +16,9 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use std::borrow::Cow;
 use std::ops::Range;
 
-use ferrolex_core::{Dictionary, Normalization};
+use ferrolex_core::{contains_normalized, Dictionary};
 use unicode_normalization::char::canonical_combining_class;
 
 /// A misspelled natural-language token and its byte range in the input text.
@@ -120,16 +119,6 @@ impl<'text> Iterator for WordTokens<'text> {
 
         self.next_byte = self.text.len();
         Some((start..end, &self.text[start..end]))
-    }
-}
-
-fn contains_normalized(dictionary: &dyn Dictionary, token: &str) -> bool {
-    if dictionary.contains(token) {
-        return true;
-    }
-    match Normalization::Nfc.normalize(token) {
-        Cow::Borrowed(_) => false,
-        Cow::Owned(normalized) => dictionary.contains(&normalized),
     }
 }
 

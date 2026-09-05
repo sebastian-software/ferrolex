@@ -22,5 +22,5 @@ mod overlay;
 
 pub use candidate_index::CandidateIndex;
 pub use composition::{Checker, CheckerBuilder};
-pub use lexicon::{Dictionary, Normalization, WordList, WordListError};
+pub use lexicon::{contains_normalized, Dictionary, Normalization, WordList, WordListError};
 pub use overlay::UserDictionary;
