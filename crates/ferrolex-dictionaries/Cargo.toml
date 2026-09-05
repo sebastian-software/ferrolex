@@ -11,9 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-fs2 = "=0.4.3"
-sha2 = "=0.10.9"
-ureq = { version = "=3.2.1", default-features = false, features = ["rustls"] }
+fs2 = "0.4.3"
+sha2 = "0.10.9"
+ureq = { version = "3.2.1", default-features = false, features = ["rustls"] }
 
 [lints]
 workspace = true
