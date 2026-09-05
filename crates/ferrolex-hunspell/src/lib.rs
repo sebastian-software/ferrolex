@@ -1506,6 +1506,10 @@ impl CandidateSource for HunspellDictionary {
         }
     }
 
+    fn contains_candidate(&self, word: &str) -> bool {
+        self.contains(word)
+    }
+
     fn visit_nearby_candidates(
         &self,
         query: &[char],
