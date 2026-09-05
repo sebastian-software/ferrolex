@@ -119,7 +119,9 @@ impl<'text> Iterator for WordTokens<'text> {
             }
 
             self.next_byte = end;
-            if is_adjacent_to_numeric(self.text, start, end) {
+            if is_adjacent_to_numeric(self.text, start, end)
+                || contains_numeric_character(self.text, start, end)
+            {
                 continue;
             }
             return Some((start..end, &self.text[start..end]));
@@ -137,6 +139,10 @@ fn is_adjacent_to_numeric(text: &str, start: usize, end: usize) -> bool {
         .next_back()
         .is_some_and(char::is_numeric)
         || text[end..].chars().next().is_some_and(char::is_numeric)
+}
+
+fn contains_numeric_character(text: &str, start: usize, end: usize) -> bool {
+    text[start..end].chars().any(char::is_numeric)
 }
 
 #[cfg(test)]
@@ -229,8 +235,11 @@ mod tests {
     fn ignores_alphabetic_fragments_adjacent_to_numbers() {
         let dictionary = WordList::new(["place"]).expect("test entries are valid");
 
-        assert!(check_text(&dictionary, "1st MP3 1990s model2 2nd-place")
-            .next()
-            .is_none());
+        assert!(check_text(
+            &dictionary,
+            "1st MP3 1990s model2 2nd-place Ⅻ Ⅻth fooⅫ Ⅻfoo"
+        )
+        .next()
+        .is_none());
     }
 }
