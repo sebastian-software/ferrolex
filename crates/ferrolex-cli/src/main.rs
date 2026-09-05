@@ -19,9 +19,9 @@ use ferrolex_code::{
     ProjectConfigError,
 };
 use ferrolex_compiler::{
-    compile_frequency_word_list, compile_words, inspect_compiled_artifact, CompileError,
-    CompiledDictionary, FrequencyListError, LoadError, ValidationError,
-    MAX_COMPILED_ARTIFACT_BYTES,
+    compile_frequency_word_list, compile_words, inspect_compiled_artifact, is_frequency_word_list,
+    parse_frequency_word_list, CompileError, CompiledDictionary, FrequencyListError, LoadError,
+    ValidationError, MAX_COMPILED_ARTIFACT_BYTES,
 };
 use ferrolex_core::{
     contains_normalized, Checker, Dictionary, Normalization, UserDictionary, WordList,
@@ -581,7 +581,7 @@ fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> {
                 path: path.clone(),
                 source,
             })?;
-            if text.lines().any(|line| line.contains('\t')) {
+            if is_frequency_word_list(&text) {
                 eprintln!("building frequency-annotated word-list artifact...");
                 (
                     compile_frequency_word_list(&text).map_err(CliError::CompileFrequencyList)?,
@@ -654,6 +654,15 @@ fn check(command: &CheckCommand) -> Result<RunOutcome, CliError> {
     }
 }
 
+fn load_word_list(text: &str) -> Result<WordList, CliError> {
+    if is_frequency_word_list(text) {
+        let entries = parse_frequency_word_list(text).map_err(CliError::CompileFrequencyList)?;
+        return WordList::new(entries.into_iter().map(|(word, _)| word))
+            .map_err(CliError::InvalidDictionary);
+    }
+    Ok(WordList::from_text(Normalization::Exact, text))
+}
+
 fn load_checker(
     dictionary_paths: &[PathBuf],
     compiled_paths: &[PathBuf],
@@ -678,7 +687,7 @@ fn load_checker(
             path: path.clone(),
             source,
         })?;
-        builder = builder.dictionary(WordList::from_text(Normalization::Exact, &text));
+        builder = builder.dictionary(load_word_list(&text)?);
     }
     for path in compiled_paths {
         builder = builder.dictionary(load_artifact(path)?);
@@ -923,10 +932,7 @@ fn load_analysis_dictionary(
             path: path.clone(),
             source,
         })?;
-        sources.push(AnalysisSource::WordList(WordList::from_text(
-            Normalization::Exact,
-            &text,
-        )));
+        sources.push(AnalysisSource::WordList(load_word_list(&text)?));
     }
     for path in compiled_paths {
         sources.push(AnalysisSource::Artifact(load_artifact(path)?));
@@ -2978,6 +2984,7 @@ enum CliError {
     },
     CompileDictionary(CompileError),
     CompileFrequencyList(FrequencyListError),
+    InvalidDictionary(ferrolex_core::WordListError),
     LoadArtifact {
         path: PathBuf,
         source: LoadError,
@@ -3083,6 +3090,9 @@ impl fmt::Display for CliError {
             }
             Self::CompileFrequencyList(source) => {
                 write!(formatter, "could not compile frequency word list: {source}")
+            }
+            Self::InvalidDictionary(source) => {
+                write!(formatter, "invalid dictionary: {source}")
             }
             Self::LoadArtifact { path, source } => {
                 write!(
@@ -3190,7 +3200,7 @@ impl Error for CliError {
             Self::ApplyProjectConfig { source, .. } => Some(source),
             Self::DictionaryManifest(source) => Some(source),
             Self::FetchDictionary(source) => Some(source),
-            Self::InvalidUserWord(source) => Some(source),
+            Self::InvalidDictionary(source) | Self::InvalidUserWord(source) => Some(source),
         }
     }
 }
@@ -4330,6 +4340,70 @@ mod tests {
         assert!(compiled.contains("Straße"));
         assert!(compiled.contains("東京"));
         compiled.validate().expect("the artifact is fully valid");
+    }
+
+    #[test]
+    fn compile_and_check_share_frequency_word_list_semantics() {
+        let dictionary = temporary_dictionary("# comment\t5\ncat\t1\ncut\t9\n");
+        assert_eq!(
+            run([
+                "ferrolex".to_owned(),
+                "check".to_owned(),
+                "--dictionary".to_owned(),
+                dictionary.path.to_string_lossy().into_owned(),
+                "cat".to_owned(),
+            ])
+            .expect("frequency word lists are recognized by check"),
+            RunOutcome::Success
+        );
+
+        let output = temporary_file("");
+        run([
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            output.path.to_string_lossy().into_owned(),
+        ])
+        .expect("frequency word list compiles");
+        let compiled = CompiledDictionary::load(
+            fs::read(&output.path).expect("the compiler wrote the artifact"),
+        )
+        .expect("the artifact loads");
+        assert!(compiled.contains("cat"));
+        assert!(!compiled.contains("cat\t1"));
+    }
+
+    #[test]
+    fn tabs_in_comments_and_trailing_tabs_remain_plain_word_list_syntax() {
+        let dictionary = temporary_dictionary("# comment\t5\ncat\t\n");
+        let output = temporary_file("");
+        run([
+            "ferrolex".to_owned(),
+            "compile".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "-o".to_owned(),
+            output.path.to_string_lossy().into_owned(),
+        ])
+        .expect("plain word list with tabs compiles");
+        let compiled = CompiledDictionary::load(
+            fs::read(&output.path).expect("the compiler wrote the artifact"),
+        )
+        .expect("the artifact loads");
+        assert!(compiled.contains("cat"));
+        assert_eq!(
+            run([
+                "ferrolex".to_owned(),
+                "check".to_owned(),
+                "--dictionary".to_owned(),
+                dictionary.path.to_string_lossy().into_owned(),
+                "cat".to_owned(),
+            ])
+            .expect("plain word list remains usable by check"),
+            RunOutcome::Success
+        );
     }
 
     #[test]

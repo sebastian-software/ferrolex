@@ -76,12 +76,14 @@ unsupported.
 
 ## Frequency word lists
 
-`ferrolex compile` treats a tab-separated source as a frequency word list:
-each data row is `word<TAB>unsigned-frequency`. Empty lines and `#` comments
-are ignored. Duplicate words retain their highest frequency, making the native
-artifact reproducible regardless of source order. Compile it, then use the
-result with `ferrolex suggest --compiled …`; plain word lists retain the
-frequency-free format and behavior.
+`ferrolex compile --dictionary` and `ferrolex check --dictionary` recognize a
+complete tab-separated source as a frequency word list: each data row is
+`word<TAB>unsigned-frequency`. Empty lines and `#` comments are ignored,
+including comments containing tabs. Duplicate words retain their highest
+frequency, making the native artifact reproducible regardless of source order.
+Compile it, then use the result with `ferrolex suggest --compiled …`; check uses
+the word portion for recognition. A file that is not entirely in the frequency
+format remains a plain word list.
 
 ## Inspection
 

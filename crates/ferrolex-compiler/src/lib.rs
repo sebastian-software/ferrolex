@@ -138,6 +138,53 @@ pub enum FrequencyListError {
     Compile(CompileError),
 }
 
+/// Parses a tab-separated `word<TAB>unsigned-frequency` list.
+///
+/// Empty lines and `#` comments are ignored. The returned word slices borrow
+/// from `text`, which lets callers that only need exact recognition reuse the
+/// same format without compiling an artifact first.
+///
+/// # Errors
+///
+/// Returns [`FrequencyListError`] when a data line does not have the documented
+/// tab-separated shape or contains a non-numeric frequency.
+pub fn parse_frequency_word_list(text: &str) -> Result<Vec<(&str, u64)>, FrequencyListError> {
+    let mut entries = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = if index == 0 {
+            line.strip_prefix('\u{feff}').unwrap_or(line)
+        } else {
+            line
+        }
+        .trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((word, frequency)) = line.split_once('\t') else {
+            return Err(FrequencyListError::InvalidEntry { line: index + 1 });
+        };
+        if word.is_empty() || frequency.is_empty() || frequency.contains('\t') {
+            return Err(FrequencyListError::InvalidEntry { line: index + 1 });
+        }
+        let frequency = frequency
+            .parse::<u64>()
+            .map_err(|_| FrequencyListError::InvalidFrequency { line: index + 1 })?;
+        entries.push((word, frequency));
+    }
+    Ok(entries)
+}
+
+/// Returns whether `text` is a complete frequency-annotated word list.
+///
+/// Automatic CLI format detection is intentionally conservative: a file is a
+/// frequency list only when every data line has the documented syntax and at
+/// least one data row exists. This keeps comments containing tabs and plain
+/// words with trailing tabs in the plain-word-list format.
+#[must_use]
+pub fn is_frequency_word_list(text: &str) -> bool {
+    matches!(parse_frequency_word_list(text), Ok(entries) if !entries.is_empty())
+}
+
 impl fmt::Display for FrequencyListError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -502,28 +549,7 @@ where
 /// Returns [`FrequencyListError`] when a data line is malformed or the
 /// resulting artifact exceeds native bounds.
 pub fn compile_frequency_word_list(text: &str) -> Result<Vec<u8>, FrequencyListError> {
-    let mut entries = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let line = if index == 0 {
-            line.strip_prefix('\u{feff}').unwrap_or(line)
-        } else {
-            line
-        }
-        .trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((word, frequency)) = line.split_once('\t') else {
-            return Err(FrequencyListError::InvalidEntry { line: index + 1 });
-        };
-        if word.is_empty() || frequency.is_empty() || frequency.contains('\t') {
-            return Err(FrequencyListError::InvalidEntry { line: index + 1 });
-        }
-        let frequency = frequency
-            .parse::<u64>()
-            .map_err(|_| FrequencyListError::InvalidFrequency { line: index + 1 })?;
-        entries.push((word, frequency));
-    }
+    let entries = parse_frequency_word_list(text)?;
     let ir = ExactDictionaryIr::with_frequencies(entries).map_err(FrequencyListError::Compile)?;
     compile_exact_ir(&ir).map_err(FrequencyListError::Compile)
 }
@@ -1081,9 +1107,9 @@ mod tests {
 
     use super::{
         checksum, compile_exact_ir, compile_frequency_word_list, compile_words,
-        inspect_compiled_artifact, put_u64, CompileError, CompiledDictionary, ExactDictionaryIr,
-        FrequencyListError, LoadError, ValidationError, CHECKSUM_END, CHECKSUM_OFFSET, DATA_OFFSET,
-        INDEX_OFFSET,
+        inspect_compiled_artifact, is_frequency_word_list, parse_frequency_word_list, put_u64,
+        CompileError, CompiledDictionary, ExactDictionaryIr, FrequencyListError, LoadError,
+        ValidationError, CHECKSUM_END, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
     use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
@@ -1149,6 +1175,17 @@ mod tests {
             compile_frequency_word_list("word\tfrequent\n"),
             Err(FrequencyListError::InvalidFrequency { line: 1 })
         );
+    }
+
+    #[test]
+    fn frequency_detection_ignores_comments_and_requires_complete_data_rows() {
+        assert!(is_frequency_word_list("# note\t5\ncat\t1\n"));
+        assert_eq!(
+            parse_frequency_word_list("# note\t5\ncat\t1\n").expect("comments are ignored"),
+            [("cat", 1)]
+        );
+        assert!(!is_frequency_word_list("# note\t5\ncat\n"));
+        assert!(!is_frequency_word_list("cat\t\n"));
     }
 
     #[test]
