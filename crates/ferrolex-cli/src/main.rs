@@ -1846,7 +1846,7 @@ fn inspect_artifact(path: &Path) -> Result<RunOutcome, CliError> {
             println!("format: FLEXDIC");
             println!("format-version: {}", metadata.format_version());
             println!("source-metadata: not recorded (plain word-list artifact)");
-            println!("required-features: exact-word-lookup");
+            println!("format-capabilities: exact-word-lookup");
             println!("feature-bits: {:#x}", metadata.feature_bits());
             println!("entries: {}", metadata.word_count());
         }
@@ -1863,7 +1863,7 @@ fn inspect_artifact(path: &Path) -> Result<RunOutcome, CliError> {
             println!("semantics-version: {}", metadata.semantics_version());
             println!("source-aff-sha256: {}", hex_digest(sources.aff()));
             println!("source-dic-sha256: {}", hex_digest(sources.dic()));
-            println!("required-features: lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, compounds, breaks, input-conversions, replacement-rules, output-conversions");
+            println!("format-capabilities: lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, compounds, breaks, input-conversions, replacement-rules, output-conversions");
         }
         Err(source) => {
             return Err(CliError::LoadArtifact {

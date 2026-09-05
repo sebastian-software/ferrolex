@@ -92,4 +92,6 @@ exact-word entry count, and source-metadata availability without decoding every
 word. `FLEXDIC` version 1 requires only `exact-word-lookup` and deliberately
 does not record source provenance. The command reports a `FLXHSP` artifact's
 format and semantics versions, embedded source SHA-256 digests, and the full
-Hunspell feature set required by that format.
+Hunspell capability set supported by that format. These capabilities describe
+the reader contract for `FLXHSP`; they are not a per-artifact inventory of
+optional source directives.

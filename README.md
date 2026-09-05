@@ -179,8 +179,10 @@ and compatibility policy.
 
 `inspect` makes the compatibility boundary visible before deployment. It prints
 the artifact format and version, source metadata where the format records it,
-and the recognition features the reader must support. This gives release and
-locale-matrix automation a stable, human-readable artifact report.
+and the capabilities supported by the artifact format. For `FLXHSP`, this is
+the format-wide reader contract rather than a claim about which optional
+directives a particular source pair used. This gives release and locale-matrix
+automation a stable, human-readable artifact report.
 
 ## Product boundaries
 
