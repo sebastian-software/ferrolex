@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-text"
-version = "0.4.0"
+version = "0.4.1"
 description = "Plain-text analysis for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
+ferrolex-core = { path = "../ferrolex-core", version = "0.4.1" }
 unicode-normalization = "0.1.25"
 
 [lints]
