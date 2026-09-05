@@ -61,8 +61,9 @@ impl<'text> Iterator for Misspellings<'_, 'text> {
 /// Checks natural-language words in `text` against `dictionary`.
 ///
 /// Tokens comprise Unicode alphabetic characters and may contain a straight
-/// or curly apostrophe between letters. All returned ranges are valid UTF-8
-/// byte boundaries in `text`.
+/// or curly apostrophe between letters. Alphabetic fragments directly adjacent
+/// to Unicode numeric characters are treated as part of an alphanumeric token
+/// and skipped. All returned ranges are valid UTF-8 byte boundaries in `text`.
 #[must_use]
 pub fn check_text<'dictionary, 'text>(
     dictionary: &'dictionary impl Dictionary,
@@ -89,41 +90,59 @@ impl<'text> Iterator for WordTokens<'text> {
     type Item = (Range<usize>, &'text str);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let remaining = &self.text[self.next_byte..];
-        let (start_offset, first_character) = remaining
-            .char_indices()
-            .find(|(_, character)| character.is_alphabetic())?;
-        let start = self.next_byte + start_offset;
-        let mut end = start + first_character.len_utf8();
-        let tail_start = end;
-        let mut characters = self.text[tail_start..].char_indices().peekable();
+        loop {
+            let remaining = &self.text[self.next_byte..];
+            let (start_offset, first_character) = remaining
+                .char_indices()
+                .find(|(_, character)| character.is_alphabetic())?;
+            let start = self.next_byte + start_offset;
+            let mut end = start + first_character.len_utf8();
+            let tail_start = end;
+            let mut characters = self.text[tail_start..].char_indices().peekable();
 
-        while let Some((offset, character)) = characters.next() {
-            let character_end = tail_start + offset + character.len_utf8();
-            if is_word_character(character) {
-                end = character_end;
-                continue;
-            }
+            while let Some((offset, character)) = characters.next() {
+                let character_end = tail_start + offset + character.len_utf8();
+                if is_word_character(character) {
+                    end = character_end;
+                    continue;
+                }
 
-            let next_is_letter = characters
-                .peek()
-                .is_some_and(|(_, next_character)| next_character.is_alphabetic());
-            if matches!(character, '\'' | '’') && next_is_letter {
-                end = character_end;
-                continue;
+                let next_is_letter = characters
+                    .peek()
+                    .is_some_and(|(_, next_character)| next_character.is_alphabetic());
+                if matches!(character, '\'' | '’') && next_is_letter {
+                    end = character_end;
+                    continue;
+                }
+
+                break;
             }
 
             self.next_byte = end;
+            if is_adjacent_to_numeric(self.text, start, end)
+                || contains_numeric_character(self.text, start, end)
+            {
+                continue;
+            }
             return Some((start..end, &self.text[start..end]));
         }
-
-        self.next_byte = self.text.len();
-        Some((start..end, &self.text[start..end]))
     }
 }
 
 fn is_word_character(character: char) -> bool {
     character.is_alphabetic() || canonical_combining_class(character) != 0
+}
+
+fn is_adjacent_to_numeric(text: &str, start: usize, end: usize) -> bool {
+    text[..start]
+        .chars()
+        .next_back()
+        .is_some_and(char::is_numeric)
+        || text[end..].chars().next().is_some_and(char::is_numeric)
+}
+
+fn contains_numeric_character(text: &str, start: usize, end: usize) -> bool {
+    text[start..end].chars().any(char::is_numeric)
 }
 
 #[cfg(test)]
@@ -210,5 +229,17 @@ mod tests {
         let dictionary = WordList::new(["version"]).expect("test entries are valid");
 
         assert!(check_text(&dictionary, "version 1.81!!!").next().is_none());
+    }
+
+    #[test]
+    fn ignores_alphabetic_fragments_adjacent_to_numbers() {
+        let dictionary = WordList::new(["place"]).expect("test entries are valid");
+
+        assert!(check_text(
+            &dictionary,
+            "1st MP3 1990s model2 2nd-place Ⅻ Ⅻth fooⅫ Ⅻfoo"
+        )
+        .next()
+        .is_none());
     }
 }
