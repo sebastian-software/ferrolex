@@ -3196,7 +3196,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
-    use ferrolex_core::Dictionary;
+    use ferrolex_core::{Dictionary, WordListError};
     use ferrolex_hunspell::{
         import, load_runtime_cache, CacheSource, ImportMode, RuntimeCacheError, SourceDigests,
     };
@@ -4726,6 +4726,23 @@ mod tests {
         assert_eq!(
             run(arguments("Strasse")).expect("dictionary is readable"),
             RunOutcome::Misspelled
+        );
+    }
+
+    #[test]
+    fn add_word_rejects_entries_that_would_be_lost_on_reload() {
+        let dictionary = temporary_dictionary("normal\n");
+
+        let error = add_user_dictionary_word("#tag", &dictionary.path)
+            .expect_err("comment-looking words cannot be persisted");
+
+        assert!(matches!(
+            error,
+            CliError::InvalidUserWord(WordListError::InvalidEntry { position: 1 })
+        ));
+        assert_eq!(
+            fs::read_to_string(&dictionary.path).expect("dictionary remains readable"),
+            "normal\n"
         );
     }
 

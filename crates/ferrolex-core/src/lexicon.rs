@@ -48,11 +48,17 @@ impl Normalization {
     }
 }
 
-/// A structured error encountered while building a [`WordList`].
+/// A structured error encountered while building or updating a plain-word-list
+/// dictionary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WordListError {
     /// An entry was empty after line-oriented input whitespace was removed.
     EmptyEntry {
+        /// One-based position of the invalid entry.
+        position: usize,
+    },
+    /// An entry contains syntax that cannot survive a plain-word-list round-trip.
+    InvalidEntry {
         /// One-based position of the invalid entry.
         position: usize,
     },
@@ -64,6 +70,10 @@ impl fmt::Display for WordListError {
             Self::EmptyEntry { position } => {
                 write!(formatter, "dictionary entry {position} is empty")
             }
+            Self::InvalidEntry { position } => write!(
+                formatter,
+                "dictionary entry {position} cannot be represented by plain-word-list syntax"
+            ),
         }
     }
 }
