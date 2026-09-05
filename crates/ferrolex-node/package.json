@@ -1,6 +1,6 @@
 {
   "name": "@ferrolex/node",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Native Node.js bindings for the ferrolex spell-checking engine",
   "license": "MIT OR Apache-2.0",
   "author": "sebastian-software",
@@ -37,9 +37,9 @@
     "@napi-rs/cli": "3.9.0"
   },
   "optionalDependencies": {
-    "@ferrolex/node-darwin-arm64": "0.4.0",
-    "@ferrolex/node-linux-x64-gnu": "0.4.0",
-    "@ferrolex/node-win32-x64-msvc": "0.4.0"
+    "@ferrolex/node-darwin-arm64": "0.5.0",
+    "@ferrolex/node-linux-x64-gnu": "0.5.0",
+    "@ferrolex/node-win32-x64-msvc": "0.5.0"
   },
   "publishConfig": {
     "access": "public",

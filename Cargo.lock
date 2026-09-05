@@ -381,7 +381,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrolex"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ferrolex-core",
  "ferrolex-dictionaries",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ferrolex",
  "ferrolex-code",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-code"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ferrolex-core",
  "regex",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-compiler"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "criterion",
  "ferrolex-core",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "criterion",
  "proptest",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-dictionaries"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "fs2",
  "sha2",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-ffi"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cbindgen",
  "ferrolex-core",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-hunspell"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "criterion",
  "encoding_rs",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-lsp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ferrolex-code",
  "ferrolex-core",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-node"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ferrolex-core",
  "ferrolex-dictionaries",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-python"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ferrolex-core",
  "ferrolex-suggest",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-suggest"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "criterion",
  "ferrolex-core",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "ferrolex-text"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ferrolex-core",
  "unicode-normalization",

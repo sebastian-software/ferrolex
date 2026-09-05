@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex"
-version = "0.4.0"
+version = "0.5.0"
 description = "Modern Rust spell-checking engine with Hunspell-compatible dictionaries"
 include = ["/src/**", "/Cargo.toml", "/CHANGELOG.md", "/LICENSE-*", "/README.md"]
 edition.workspace = true
@@ -12,10 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ferrolex-core = { path = "crates/ferrolex-core", version = "0.4.0" }
-ferrolex-dictionaries = { path = "crates/ferrolex-dictionaries", version = "0.4.0" }
-ferrolex-hunspell = { path = "crates/ferrolex-hunspell", version = "0.4.0" }
-ferrolex-suggest = { path = "crates/ferrolex-suggest", version = "0.4.0" }
+ferrolex-core = { path = "crates/ferrolex-core", version = "0.4.1" }
+ferrolex-dictionaries = { path = "crates/ferrolex-dictionaries", version = "0.4.1" }
+ferrolex-hunspell = { path = "crates/ferrolex-hunspell", version = "0.4.1" }
+ferrolex-suggest = { path = "crates/ferrolex-suggest", version = "0.4.1" }
 
 [lints]
 workspace = true
