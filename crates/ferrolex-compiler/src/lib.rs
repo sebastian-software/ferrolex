@@ -182,9 +182,7 @@ pub fn parse_frequency_word_list(text: &str) -> Result<Vec<(&str, u64)>, Frequen
 /// words with trailing tabs in the plain-word-list format.
 #[must_use]
 pub fn is_frequency_word_list(text: &str) -> bool {
-    parse_frequency_word_list(text)
-        .map(|entries| !entries.is_empty())
-        .unwrap_or(false)
+    matches!(parse_frequency_word_list(text), Ok(entries) if !entries.is_empty())
 }
 
 impl fmt::Display for FrequencyListError {
