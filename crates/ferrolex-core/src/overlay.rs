@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::{LockResult, PoisonError, RwLock};
 
-use crate::{Dictionary, Normalization, WordListError};
+use crate::{CandidateSource, Dictionary, Normalization, WordListError};
 
 /// A small, mutable dictionary layer for user- or project-specific words.
 ///
@@ -137,6 +137,10 @@ impl Dictionary for UserDictionary {
     fn contains(&self, word: &str) -> bool {
         let word = self.normalization.normalize(word);
         recover_lock(self.words.read()).contains(word.as_ref())
+    }
+
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        Some(self)
     }
 }
 

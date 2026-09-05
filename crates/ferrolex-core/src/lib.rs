@@ -16,11 +16,13 @@
 #![warn(missing_docs)]
 
 mod candidate_index;
+mod candidate_source;
 mod composition;
 mod lexicon;
 mod overlay;
 
 pub use candidate_index::CandidateIndex;
+pub use candidate_source::CandidateSource;
 pub use composition::{Checker, CheckerBuilder};
 pub use lexicon::{contains_normalized, Dictionary, Normalization, WordList, WordListError};
 pub use overlay::UserDictionary;

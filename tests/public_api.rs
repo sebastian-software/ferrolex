@@ -1,5 +1,6 @@
 use ferrolex::{
-    find_locale, import, Dictionary, HunspellDictionary, ImportMode, SuggestConfig, Suggester,
+    find_locale, import, Checker, Dictionary, HunspellDictionary, ImportMode, SuggestConfig,
+    Suggester, WordList,
 };
 
 #[test]
@@ -29,4 +30,21 @@ fn umbrella_exposes_the_product_api_to_external_consumers() {
     assert_eq!(module_dictionary.stems().next(), Some("ferrolex"));
     let _ = ferrolex::suggest::SuggestConfig::default();
     let _ = ferrolex::dictionaries::find_locale("en_US");
+}
+
+#[test]
+fn checker_composes_layered_suggestion_sources() {
+    let checker = Checker::builder()
+        .dictionary(WordList::new(["ferrolex"]).expect("fixture should be valid"))
+        .dictionary(WordList::new(["ferrous"]).expect("fixture should be valid"))
+        .build();
+
+    assert!(checker.contains("ferrolex"));
+    assert_eq!(
+        Suggester::new(&checker, SuggestConfig::default())
+            .suggest("ferolex")
+            .suggestions()[0]
+            .word(),
+        "ferrolex"
+    );
 }

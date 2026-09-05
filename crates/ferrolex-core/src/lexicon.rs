@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use unicode_normalization::{is_nfc, is_nfkc, UnicodeNormalization};
 
-use crate::CandidateIndex;
+use crate::{CandidateIndex, CandidateSource};
 
 /// An immutable collection that can recognize words.
 ///
@@ -13,6 +13,15 @@ use crate::CandidateIndex;
 pub trait Dictionary: Send + Sync {
     /// Returns whether this dictionary recognizes `word`.
     fn contains(&self, word: &str) -> bool;
+
+    /// Returns this dictionary's suggestion source, when it provides one.
+    ///
+    /// Checking-only dictionaries keep the default `None`. This optional
+    /// boundary lets [`crate::Checker`] compose dictionaries for lookup while
+    /// delegating suggestions only to constituents that support them.
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        None
+    }
 }
 
 /// The lookup transformation applied to both dictionary entries and queries.
@@ -235,6 +244,10 @@ impl Dictionary for WordList {
         self.words
             .binary_search_by(|candidate| candidate.as_ref().cmp(word.as_ref()))
             .is_ok()
+    }
+
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        Some(self)
     }
 }
 

@@ -334,6 +334,10 @@ impl Dictionary for HunspellDictionary {
                 .into_iter()
                 .any(|candidate| self.contains_normalized(&candidate, false))
     }
+
+    fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
+        Some(self)
+    }
 }
 
 impl HunspellDictionary {
