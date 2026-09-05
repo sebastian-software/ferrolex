@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use ferrolex_core::{Dictionary, Normalization, WordList};
+use ferrolex_core::{contains_normalized, Normalization, WordList};
 use ferrolex_suggest::{SuggestConfig, Suggester};
 use pyo3::prelude::*;
 
@@ -34,7 +34,7 @@ impl Checker {
     /// Returns whether this checker recognizes a word.
     #[must_use]
     fn check(&self, word: String) -> bool {
-        self.words.contains(&word)
+        contains_normalized(&self.words, &word)
     }
 
     /// Returns deterministic bounded spelling suggestions for a word.

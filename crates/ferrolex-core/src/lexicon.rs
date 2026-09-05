@@ -48,6 +48,23 @@ impl Normalization {
     }
 }
 
+/// Returns whether `dictionary` recognizes `word` exactly or after an NFC
+/// fallback.
+///
+/// The exact lookup remains the fast path. NFC is attempted only after an
+/// exact miss so callers that need canonical-equivalence behavior can share
+/// one explicit policy without changing the [`Dictionary`] trait contract.
+#[must_use]
+pub fn contains_normalized(dictionary: &dyn Dictionary, word: &str) -> bool {
+    if dictionary.contains(word) {
+        return true;
+    }
+    match Normalization::Nfc.normalize(word) {
+        Cow::Borrowed(_) => false,
+        Cow::Owned(normalized) => dictionary.contains(&normalized),
+    }
+}
+
 /// A structured error encountered while building or updating a plain-word-list
 /// dictionary.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -280,6 +297,14 @@ mod tests {
 
         assert!(dictionary.contains("cafe\u{301}"));
         assert_eq!(dictionary.words().collect::<Vec<_>>(), ["café"]);
+    }
+
+    #[test]
+    fn contains_normalized_uses_an_nfc_fallback_after_an_exact_miss() {
+        let dictionary = WordList::new(["café"]).expect("test entry is non-empty");
+
+        assert!(super::contains_normalized(&dictionary, "cafe\u{301}"));
+        assert!(!super::contains_normalized(&dictionary, "coffee"));
     }
 
     #[test]

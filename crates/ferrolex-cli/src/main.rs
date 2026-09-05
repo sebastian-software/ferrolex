@@ -23,7 +23,9 @@ use ferrolex_compiler::{
     CompiledDictionary, FrequencyListError, LoadError, ValidationError,
     MAX_COMPILED_ARTIFACT_BYTES,
 };
-use ferrolex_core::{Checker, Dictionary, Normalization, UserDictionary, WordList};
+use ferrolex_core::{
+    contains_normalized, Checker, Dictionary, Normalization, UserDictionary, WordList,
+};
 use ferrolex_dictionaries::{
     find_locale, DictionaryInstaller, FetchError as DictionaryFetchError, InstalledDictionary,
     LibreOfficeDictionary, ManifestError as DictionaryManifestError, SourceEncoding, UreqFetcher,
@@ -1125,7 +1127,7 @@ fn load_installed_hunspell_dictionary(aff_path: &Path) -> Result<HunspellDiction
 }
 
 fn check_word(checker: &Checker, word: &str, output_format: OutputFormat) -> RunOutcome {
-    let accepted = checker.contains(word);
+    let accepted = contains_normalized(checker, word);
     if output_format == OutputFormat::Json {
         print_json(json!({
             "type": "word",
@@ -4726,6 +4728,23 @@ mod tests {
         assert_eq!(
             run(arguments("Strasse")).expect("dictionary is readable"),
             RunOutcome::Misspelled
+        );
+    }
+
+    #[test]
+    fn checks_single_words_with_the_same_nfc_fallback_as_files() {
+        let dictionary = temporary_dictionary("café\n");
+        let arguments = [
+            "ferrolex".to_owned(),
+            "check".to_owned(),
+            "--dictionary".to_owned(),
+            dictionary.path.to_string_lossy().into_owned(),
+            "cafe\u{301}".to_owned(),
+        ];
+
+        assert_eq!(
+            run(arguments).expect("dictionary and word are readable"),
+            RunOutcome::Success
         );
     }
 

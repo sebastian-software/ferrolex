@@ -12,7 +12,7 @@ mod c_abi {
     use std::slice;
     use std::str;
 
-    use ferrolex_core::{Dictionary, Normalization, WordList};
+    use ferrolex_core::{contains_normalized, Normalization, WordList};
     use ferrolex_suggest::{SuggestConfig, Suggester};
 
     /// Opaque immutable checker handle owned by the C caller.
@@ -150,8 +150,11 @@ mod c_abi {
                 Err(status) => return status,
             };
 
-            write_output(out_is_correct, u8::from(checker.words.contains(word)))
-                .map_or_else(|status| status, |()| FerrolexStatus::Ok)
+            write_output(
+                out_is_correct,
+                u8::from(contains_normalized(&checker.words, word)),
+            )
+            .map_or_else(|status| status, |()| FerrolexStatus::Ok)
         })
     }
 
@@ -266,6 +269,23 @@ mod c_abi {
                 unsafe { ferrolex_checker_check(checker, ptr::null(), 1, &mut is_correct) },
                 FerrolexStatus::NullPointer
             );
+
+            unsafe { ferrolex_checker_free(checker) };
+        }
+
+        #[test]
+        fn checks_canonically_equivalent_utf8_words() {
+            let checker = checker("café");
+            let mut is_correct = 0;
+            let word = "cafe\u{301}";
+
+            assert_eq!(
+                unsafe {
+                    ferrolex_checker_check(checker, word.as_ptr(), word.len(), &mut is_correct)
+                },
+                FerrolexStatus::Ok
+            );
+            assert_eq!(is_correct, 1);
 
             unsafe { ferrolex_checker_free(checker) };
         }
