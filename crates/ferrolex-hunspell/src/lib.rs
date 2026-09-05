@@ -1580,7 +1580,19 @@ fn sharp_uppercase_forms(lexemes: &[Lexeme], special_flags: &SpecialFlags) -> BT
     };
     lexemes
         .iter()
-        .filter(|lexeme| has_flag(&lexeme.flags, *keep_case) && lexeme.stem.contains('ß'))
+        .filter(|lexeme| {
+            has_flag(&lexeme.flags, *keep_case)
+                && lexeme.stem.contains('ß')
+                && !special_flags
+                    .forbidden_word
+                    .is_some_and(|flag| has_flag(&lexeme.flags, flag))
+                && !special_flags
+                    .need_affix
+                    .is_some_and(|flag| has_flag(&lexeme.flags, flag))
+                && !special_flags
+                    .only_in_compound
+                    .is_some_and(|flag| has_flag(&lexeme.flags, flag))
+        })
         .flat_map(|lexeme| {
             [
                 Box::<str>::from(initial_case_for_language(
@@ -6802,6 +6814,28 @@ mod tests {
         assert!(dictionary.contains("STRASSE"));
         assert!(!dictionary.contains("STRAẞE"));
         assert!(!dictionary.contains("MASSE"));
+    }
+
+    #[test]
+    fn checksharps_does_not_bypass_restricted_keepcase_flags() {
+        let imported = import(
+            "test.aff",
+            "CHECKSHARPS\nKEEPCASE K\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\n",
+            "test.dic",
+            "3\nstraße/KF\nbedarf/KN\nteil/KO\n",
+            ImportMode::Strict,
+        )
+        .expect("CHECKSHARPS imports");
+
+        let dictionary = imported.dictionary();
+        for word in [
+            "straße", "Straße", "STRASSE", "bedarf", "Bedarf", "BEDARF", "teil", "Teil", "TEIL",
+        ] {
+            assert!(
+                !dictionary.contains(word),
+                "restricted word `{word}` accepted"
+            );
+        }
     }
 
     #[test]
