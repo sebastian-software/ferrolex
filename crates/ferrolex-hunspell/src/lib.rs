@@ -1507,7 +1507,7 @@ impl CandidateSource for HunspellDictionary {
     }
 
     fn contains_candidate(&self, word: &str) -> bool {
-        self.stems().any(|stem| stem == word)
+        self.stems().any(|stem| stem == word) && self.is_suggestable_stem(word)
     }
 
     fn visit_nearby_candidates(
@@ -6020,6 +6020,22 @@ mod tests {
         let result = Suggester::new(result.dictionary(), SuggestConfig::default()).suggest("Nato");
 
         assert_eq!(result.suggestions()[0].word(), "NATO");
+    }
+
+    #[test]
+    fn title_case_suggestions_do_not_use_policy_rejected_spellings() {
+        let result = import(
+            "policy-casing.aff",
+            "SET UTF-8\nNOSUGGEST S\n",
+            "policy-casing.dic",
+            "2\nnato\nNato/S\n",
+            ImportMode::Strict,
+        )
+        .expect("the policy casing fixture imports cleanly");
+
+        let result = Suggester::new(result.dictionary(), SuggestConfig::default()).suggest("Nato");
+
+        assert_eq!(result.suggestions()[0].word(), "nato");
     }
 
     #[test]
