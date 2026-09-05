@@ -45,9 +45,11 @@ reviewed upstream sources / local Hunspell pairs / plain word lists
 - `ferrolex-node` is the selected direct non-Rust adapter. It should expose the
   same engine concepts rather than grow a separate spell-checker.
 
-The root `ferrolex` crate currently re-exports the small core API. The public
-Rust package boundary should be aligned with the product crates before a stable
-release instead of declaring every workspace crate supported.
+The root `ferrolex` crate is the one-product Rust release boundary. It
+re-exports the supported product crates as `ferrolex::hunspell`,
+`ferrolex::suggest`, and `ferrolex::dictionaries`, with common entry points
+also available at the crate root. The remaining workspace crates are not part
+of that public package boundary.
 
 ## Supporting and historical crates
 

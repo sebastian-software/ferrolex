@@ -13,6 +13,9 @@ categories.workspace = true
 
 [dependencies]
 ferrolex-core = { path = "crates/ferrolex-core", version = "0.4.0" }
+ferrolex-dictionaries = { path = "crates/ferrolex-dictionaries", version = "0.4.0" }
+ferrolex-hunspell = { path = "crates/ferrolex-hunspell", version = "0.4.0" }
+ferrolex-suggest = { path = "crates/ferrolex-suggest", version = "0.4.0" }
 
 [lints]
 workspace = true
