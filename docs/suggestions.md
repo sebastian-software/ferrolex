@@ -15,10 +15,14 @@ expansion and checks bounded query split positions for valid compounds. It
 never pre-expands a dictionary: both the number of generated forms per seed and
 the number of compound splits are fixed internal limits, and emitted forms use
 the caller's ordinary candidate and edit-cell budgets. Seed normalization stops
-after `max_word_scalars + 2 * max_edit_distance` scalar values and reports
+after `max_word_scalars + 2 * max_edit_distance` lowercase-expanded scalar
+values and reports
 `RelatedSeedTooLong` when a skipped seed could conceal a valid shortened form.
 Sources without morphological expansion skip seed traversal entirely. Thus an
 incomplete result remains explicit through `Completeness`.
+
+The `max_word_scalars` limit is measured after Unicode lowercase expansion, so
+an input scalar such as `İ` can consume two scalar values of the budget.
 
 Before ranking, a Hunspell source filters stored stems through its recognition
 rules. `FORBIDDENWORD`, `NEEDAFFIX`, and `ONLYINCOMPOUND` pseudo-stems are not
