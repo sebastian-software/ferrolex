@@ -14,6 +14,7 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
+use ferrolex::catalog_import_encodings;
 use ferrolex_code::{
     Analyzer, AnalyzerConfigError, CommentSyntax, DirectiveProblem, Document, ProjectConfig,
     ProjectConfigError,
@@ -28,14 +29,14 @@ use ferrolex_core::{
 };
 use ferrolex_dictionaries::{
     find_locale, DictionaryInstaller, FetchError as DictionaryFetchError, InstalledDictionary,
-    LibreOfficeDictionary, ManifestError as DictionaryManifestError, SourceEncoding, UreqFetcher,
+    LibreOfficeDictionary, ManifestError as DictionaryManifestError, UreqFetcher,
     LIBREOFFICE_CATALOG,
 };
 use ferrolex_hunspell::{
     compile_runtime_artifact, compile_runtime_cache, import_bytes as import_hunspell_bytes,
     import_bytes_with_encodings as import_hunspell_bytes_with_encodings, inspect_runtime_cache,
     is_runtime_artifact, load_runtime_artifact, load_runtime_cache, Acceptance, AcceptanceKind,
-    AppliedAffixKind, ByteEncoding, ByteImportEncodings, CasingPath, CompoundComponentRole,
+    AppliedAffixKind, ByteImportEncodings, CasingPath, CompoundComponentRole,
     Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError, ImportMode, ImportResult,
     LookupExplanation, Rejection, RejectionReason, RuntimeCacheError, Severity, SourceDigests,
 };
@@ -535,20 +536,6 @@ fn sync_parent_directory(parent: &Path) -> io::Result<()> {
 )]
 fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     Ok(())
-}
-
-fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodings> {
-    match encoding {
-        SourceEncoding::MixedUtf8AndIso8859_1 => Some(ByteImportEncodings::new(
-            ByteEncoding::Iso8859_1,
-            ByteEncoding::Utf8,
-        )),
-        SourceEncoding::MixedUtf8AndIso8859_2Fallback => Some(ByteImportEncodings::new(
-            ByteEncoding::Utf8WithIso8859_2Fallback,
-            ByteEncoding::Utf8,
-        )),
-        SourceEncoding::Utf8 | SourceEncoding::Iso8859_1 | SourceEncoding::Iso8859_2 => None,
-    }
 }
 
 fn fetch_catalog_dictionary(
@@ -3225,21 +3212,21 @@ mod tests {
 
     use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
     use ferrolex_core::{Dictionary, WordListError};
+    use ferrolex_dictionaries::SourceEncoding;
     use ferrolex_hunspell::{
         import, load_runtime_cache, CacheSource, ImportMode, RuntimeCacheError, SourceDigests,
     };
 
     use super::{
-        add_user_dictionary_word, analysis_paths, analyze, catalog_import_encodings,
-        comment_syntax_for_path, glob_matches, hidden_sibling, incomplete_suggestion_hint,
-        install_hunspell_runtime_cache, load_analysis_dictionary, parse_arguments,
-        read_analysis_source, read_compiled_artifact, render_explanation, run, runtime_cache_path,
-        validate_hunspell, AnalysisDictionary, AnalysisSource, AnalysisSuggestionEngine,
-        AnalyzeCommand, Analyzer, CandidateSource, CheckCommand, CheckInput, CheckTarget, CliError,
-        Command, CommentSyntax, CompileCommand, CompileInput, DictionaryCommand, Document,
-        ExplainCommand, LineIndex, Normalization, OutputFormat, RunOutcome, SourceEncoding,
-        SuggestCommand, SuggestConfig, UserDictionaryLock, ValidateCommand, WordList, HELP_CHECK,
-        STALE_TEMPORARY_FILE_AGE,
+        add_user_dictionary_word, analysis_paths, analyze, comment_syntax_for_path, glob_matches,
+        hidden_sibling, incomplete_suggestion_hint, install_hunspell_runtime_cache,
+        load_analysis_dictionary, parse_arguments, read_analysis_source, read_compiled_artifact,
+        render_explanation, run, runtime_cache_path, validate_hunspell, AnalysisDictionary,
+        AnalysisSource, AnalysisSuggestionEngine, AnalyzeCommand, Analyzer, CandidateSource,
+        CheckCommand, CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand,
+        CompileInput, DictionaryCommand, Document, ExplainCommand, LineIndex, Normalization,
+        OutputFormat, RunOutcome, SuggestCommand, SuggestConfig, UserDictionaryLock,
+        ValidateCommand, WordList, HELP_CHECK, STALE_TEMPORARY_FILE_AGE,
     };
 
     static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -4669,7 +4656,7 @@ mod tests {
                 true,
                 &affix.path,
                 &dictionary.path,
-                catalog_import_encodings(SourceEncoding::MixedUtf8AndIso8859_1),
+                ferrolex::catalog_import_encodings(SourceEncoding::MixedUtf8AndIso8859_1),
                 OutputFormat::Text,
             )
             .expect("mixed-encoding files are readable"),

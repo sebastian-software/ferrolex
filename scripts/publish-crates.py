@@ -24,8 +24,8 @@ PUBLISH_ORDER = (
     "ferrolex-text",
     "ferrolex-compiler",
     "ferrolex-hunspell",
-    "ferrolex-cli",
     "ferrolex",
+    "ferrolex-cli",
 )
 INDEX_TIMEOUT_SECONDS = 300
 INDEX_POLL_SECONDS = 10

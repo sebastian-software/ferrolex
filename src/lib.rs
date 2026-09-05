@@ -52,3 +52,23 @@ pub use ferrolex_suggest::{
     Completeness, RankingSignals, ReplacementRule, SuggestConfig, SuggestScratch, Suggester,
     Suggestion, SuggestionResult,
 };
+
+/// Maps reviewed catalog encoding metadata to the byte-import policy.
+///
+/// `Some` is required for catalog entries whose affix and dictionary files use
+/// different decoding rules. `None` means [`import_bytes`] can discover the
+/// shared encoding from the affix file's `SET` declaration.
+#[must_use]
+pub const fn catalog_import_encodings(encoding: SourceEncoding) -> Option<ByteImportEncodings> {
+    match encoding {
+        SourceEncoding::MixedUtf8AndIso8859_1 => Some(ByteImportEncodings::new(
+            ByteEncoding::Iso8859_1,
+            ByteEncoding::Utf8,
+        )),
+        SourceEncoding::MixedUtf8AndIso8859_2Fallback => Some(ByteImportEncodings::new(
+            ByteEncoding::Utf8WithIso8859_2Fallback,
+            ByteEncoding::Utf8,
+        )),
+        SourceEncoding::Utf8 | SourceEncoding::Iso8859_1 | SourceEncoding::Iso8859_2 => None,
+    }
+}

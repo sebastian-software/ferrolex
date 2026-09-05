@@ -140,6 +140,17 @@ recognition directive makes `install` return exit status `1`, while leaving the
 verified source cache available for diagnostic work. `fetch` remains useful
 when acquisition and validation need to be separate steps.
 
+Library consumers using the umbrella crate should reuse the catalog's reviewed
+encoding policy instead of matching the mixed-encoding variants themselves:
+
+```rust
+let encodings = ferrolex::catalog_import_encodings(source.encoding());
+```
+
+Pass the returned value to `import_bytes_with_encodings` when it is `Some`.
+For `None`, use `import_bytes`, which discovers the shared encoding from the
+affix file's `SET` declaration.
+
 After a successful strict import, `install` also writes a versioned,
 provenance-bound runtime cache beside the affix source. See
 [Hunspell runtime cache](hunspell-runtime-cache.md) for its validity and
