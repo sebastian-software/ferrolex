@@ -149,6 +149,25 @@ fn inspect_labels_hunspell_features_as_format_capabilities() {
     fs::write(directory.join("fixture.aff"), "SET UTF-8\n").expect("affix fixture is written");
     fs::write(directory.join("fixture.dic"), "1\nbook\n").expect("dictionary fixture is written");
 
+    fs::write(directory.join("words.txt"), "alpha\nbeta\n").expect("word fixture is written");
+    let native_compile = run_in(
+        &directory,
+        &[
+            "compile",
+            "--dictionary",
+            "words.txt",
+            "-o",
+            "words.flexdic",
+        ],
+    );
+    assert!(native_compile.status.success());
+
+    let native_inspect = run_in(&directory, &["inspect", "words.flexdic"]);
+    assert!(native_inspect.status.success());
+    let native_stdout = String::from_utf8(native_inspect.stdout).expect("inspection is UTF-8");
+    assert!(native_stdout.contains("format-capabilities: exact-word-lookup"));
+    assert!(!native_stdout.contains("required-features:"));
+
     let compile = run_in(
         &directory,
         &[
@@ -164,7 +183,7 @@ fn inspect_labels_hunspell_features_as_format_capabilities() {
     let inspect = run_in(&directory, &["inspect", "fixture.flexhsp"]);
     assert!(inspect.status.success());
     let stdout = String::from_utf8(inspect.stdout).expect("inspection is UTF-8");
-    assert!(stdout.contains("format-capabilities: lexemes, prefixes, suffixes"));
+    assert!(stdout.contains("format-capabilities: flag-modes, case-fallback, language-casing, morphology, lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, keyboard-layout, character-maps, compounds, breaks, word-characters, replacement-rules, ignored-characters, input-conversions, output-conversions, full-strip, complex-prefixes"));
     assert!(!stdout.contains("required-features:"));
 
     fs::remove_dir_all(directory).expect("temporary fixture is removed");

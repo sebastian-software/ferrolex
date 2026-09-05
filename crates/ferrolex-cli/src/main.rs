@@ -1863,7 +1863,7 @@ fn inspect_artifact(path: &Path) -> Result<RunOutcome, CliError> {
             println!("semantics-version: {}", metadata.semantics_version());
             println!("source-aff-sha256: {}", hex_digest(sources.aff()));
             println!("source-dic-sha256: {}", hex_digest(sources.dic()));
-            println!("format-capabilities: lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, compounds, breaks, input-conversions, replacement-rules, output-conversions");
+            println!("format-capabilities: flag-modes, case-fallback, language-casing, morphology, lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, keyboard-layout, character-maps, compounds, breaks, word-characters, replacement-rules, ignored-characters, input-conversions, output-conversions, full-strip, complex-prefixes");
         }
         Err(source) => {
             return Err(CliError::LoadArtifact {
