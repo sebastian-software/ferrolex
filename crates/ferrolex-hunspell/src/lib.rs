@@ -312,34 +312,63 @@ impl ImportResult {
 /// lookup, so importing does not pre-expand a potentially unbounded word set.
 #[derive(Clone, Debug, Default)]
 pub struct HunspellDictionary {
+    /// Encoding used to interpret flags in the imported AFF/DIC pair.
     flag_mode: FlagMode,
+    /// Whether Hunspell capitalization fallback is enabled for this pair.
     case_fallback: bool,
+    /// Language-specific casing policy used by capitalization fallback.
     case_language: CaseLanguage,
+    /// Stable stem indices used when lowering the runtime dictionary to IR.
     unique_stem_indices: Vec<u32>,
+    /// Interned morphology fields retained for explanations and IR lowering.
     morphology: MorphologyTable,
+    /// Stored stems together with their flags and morphology references.
     lexemes: Vec<Lexeme>,
+    /// Prefix rules evaluated during lazy derivation.
     prefixes: Vec<AffixRule>,
+    /// Suffix rules evaluated during lazy derivation.
     suffixes: Vec<AffixRule>,
+    /// Reverse lookup index for prefix additions.
     prefix_rules_by_add_edge: AffixRuleIndex,
+    /// Reverse lookup index for suffix additions.
     suffix_rules_by_add_edge: AffixRuleIndex,
+    /// Forward prefix rules grouped by the flag that enables them.
     prefix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
+    /// Forward suffix rules grouped by the flag that enables them.
     suffix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
+    /// Stored lexemes grouped by their enabling flag.
     lexeme_indices_by_flag: BTreeMap<Flag, Vec<usize>>,
+    /// Transitive prefix continuation flags used to find derived candidates.
     prefix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
+    /// Transitive suffix continuation flags used to find derived candidates.
     suffix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
+    /// Special Hunspell markers such as KEEPCASE and ONLYINCOMPOUND.
     special_flags: SpecialFlags,
+    /// Compound flags, limits, patterns, and boundary safeguards.
     compound: CompoundConfig,
+    /// BREAK rules used to retry recognition on bounded word fragments.
     break_patterns: Vec<BreakPattern>,
+    /// Accepted CHECKSHARPS-derived uppercase spellings.
     sharp_uppercase_forms: BTreeSet<Box<str>>,
+    /// WORDCHARS metadata retained for tokenization-aware consumers.
     word_characters: BTreeSet<char>,
+    /// REP rules used for suggestion ranking and compound safeguards.
     replacement_rules: Vec<ReplacementRule>,
+    /// KEY keyboard layout used for suggestion ranking.
     keyboard: Option<Box<str>>,
+    /// MAP character substitutions used for suggestion ranking.
     character_maps: Vec<String>,
+    /// IGNORE characters removed before recognition.
     ignored_characters: BTreeSet<char>,
+    /// ICONV rules applied before recognition.
     input_conversions: Vec<InputConversion>,
+    /// OCONV rules applied when rendering suggestion spellings.
     output_conversions: Vec<InputConversion>,
+    /// Whether FULLSTRIP permits stripping an entire stem.
     full_strip: bool,
+    /// Whether COMPLEXPREFIXES permits a second prefix.
     complex_prefixes: bool,
+    /// Lazily initialized candidate index for bounded suggestions.
     candidate_index: Arc<OnceLock<CandidateIndex>>,
 }
 
@@ -430,6 +459,14 @@ impl HunspellDictionary {
             || self.matches_break_word(word, allow_keep_case)
     }
 
+    /// Runs the direct, affix, and compound recognition cascade.
+    ///
+    /// `allow_keep_case` is true for the caller's exact spelling and false for
+    /// synthetic capitalization-fallback candidates. This preserves the
+    /// `KEEPCASE` contract: an exact flagged entry may match, but lower- or
+    /// initial-case fallback must not admit it. The affix and compound stages
+    /// are lazy and bounded; their detailed directive contracts live in
+    /// `docs/affix-semantics.md` and `docs/compound-semantics.md`.
     fn matches_without_break(&self, word: &str, allow_keep_case: bool) -> bool {
         self.lexemes_for_stem(word).any(|lexeme| {
             !self.is_forbidden(&lexeme.flags)
@@ -883,6 +920,19 @@ impl HunspellDictionary {
         Some(())
     }
 
+    /// Resolves one lexeme's lazily derived affix forms with bounded DFS.
+    ///
+    /// A [`FormState`] is one unique affix chain: `can_apply` prevents a rule
+    /// from repeating, keeps prefixes before suffixes, and enforces the
+    /// `COMPLEXPREFIXES`/cross-product limits. `MAX_AFFIX_CHAIN` bounds the
+    /// depth and `MAX_DERIVATIONS_PER_LEXEME` bounds the number of expanded
+    /// states. A false result from `expand_matching_rules` means that the
+    /// derivation budget was exhausted, not that the current state simply had
+    /// no matching rule, so the lookup rejects the incomplete search.
+    ///
+    /// This implements the lazy derivation contract in
+    /// `docs/affix-semantics.md`, including `CIRCUMFIX`, `NEEDAFFIX`,
+    /// `ONLYINCOMPOUND`, and `FORBIDDENWORD` acceptance checks.
     fn matches_derived_word<'source>(
         &'source self,
         lexeme: &'source Lexeme,
@@ -1027,6 +1077,13 @@ impl HunspellDictionary {
             .is_some_and(|flag| has_flag(flags, *flag))
     }
 
+    /// Evaluates the bounded compound-recognition entry point.
+    ///
+    /// This dispatches `COMPOUNDFLAG`, `COMPOUNDRULE`, positioned
+    /// `COMPOUNDBEGIN`/`COMPOUNDMIDDLE`/`COMPOUNDEND`, and the replacement and
+    /// triple safeguards described in `docs/compound-semantics.md`. The input
+    /// is first reduced to Unicode-scalar boundaries so every downstream DP
+    /// transition shares the 256-scalar query limit.
     fn matches_simple_compound(&self, word: &str, allow_keep_case: bool) -> bool {
         if self.compound.flag.is_none()
             && self.compound.rules.is_empty()
@@ -1096,6 +1153,13 @@ impl HunspellDictionary {
         )
     }
 
+    /// Matches either a generic `COMPOUNDFLAG` segmentation or one literal
+    /// `COMPOUNDRULE` pattern over the bounded boundary set.
+    ///
+    /// `reachable[i]` means that the prefix ending at `boundaries[i]` can be
+    /// formed by the flags consumed so far. Each transition only extends those
+    /// reachable prefixes, so an unreachable suffix cannot become accepted by
+    /// a later component.
     fn matches_compound_pattern(
         &self,
         word: &str,
@@ -1143,6 +1207,8 @@ impl HunspellDictionary {
         false
     }
 
+    /// Matches one fixed `COMPOUNDRULE` flag sequence using the same bounded
+    /// reachability representation as the generic compound path.
     fn matches_fixed_compound_pattern(
         &self,
         word: &str,
@@ -1174,6 +1240,12 @@ impl HunspellDictionary {
             && self.compound_component_count_is_allowed(word, pattern.len())
     }
 
+    /// Adds one component transition to a compound reachability frontier.
+    ///
+    /// `minimum_length` counts Unicode scalar boundaries, not bytes. Therefore
+    /// `first_end = start + minimum_length` skips every candidate that is too
+    /// short while keeping slicing valid through the precomputed UTF-8 byte
+    /// offsets in `boundaries`.
     fn extend_compound_components(
         &self,
         word: &str,
@@ -1224,6 +1296,15 @@ impl HunspellDictionary {
         })
     }
 
+    /// Matches `COMPOUNDBEGIN`/`COMPOUNDMIDDLE`/`COMPOUNDEND` compounds.
+    ///
+    /// After the initial begin transition, `reachable[i]` means that a valid
+    /// begin/middle parse covers `word[..boundaries[i]]`. Each loop iteration
+    /// first tries an end component, so the `2..` range starts with the
+    /// smallest valid two-component compound; only when it cannot terminate
+    /// does it add one middle component for the next iteration. The same
+    /// scalar-boundary `minimum_length` rule is applied by the transition
+    /// helper.
     fn matches_positioned_compound(
         &self,
         word: &str,
@@ -1283,6 +1364,12 @@ impl HunspellDictionary {
         clippy::too_many_arguments,
         reason = "compound position, casing, and triple policy describe one bounded transition"
     )]
+    /// Extends one positioned-compound DP frontier by a single component.
+    ///
+    /// `next[end]` is true exactly when some `reachable[start]` prefix can
+    /// append an eligible component from `start` to `end` at the requested
+    /// position. The returned vector is a new frontier so a middle transition
+    /// cannot mutate the set being used for the current end attempt.
     fn extend_positioned_components(
         &self,
         word: &str,
@@ -1344,6 +1431,12 @@ impl HunspellDictionary {
         )
     }
 
+    /// Resolves one `COMPOUNDPERMITFLAG` affix inside a positioned component.
+    ///
+    /// Permit-affix matching is intentionally one inverse rule application;
+    /// multi-step permit chains remain outside the documented compatibility
+    /// subset. Position checks keep prefixes at the beginning, suffixes at the
+    /// end, and reject both in the middle.
     fn matches_one_affix_compound_component(
         &self,
         word: &str,
@@ -1494,6 +1587,11 @@ impl HunspellDictionary {
         })
     }
 
+    /// Applies `CHECKCOMPOUNDPATTERN` to one candidate component boundary.
+    ///
+    /// The left and right strings are checked against the declared ending and
+    /// beginning patterns, with optional flags validated against the selected
+    /// components. This is a boundary guard, not a recursive compound match.
     fn compound_pattern_forbids(&self, word: &str, start: usize, right: &str) -> bool {
         self.compound.patterns.iter().any(|pattern| {
             pattern.replacement.is_none()
