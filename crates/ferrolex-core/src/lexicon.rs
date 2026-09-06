@@ -88,6 +88,8 @@ pub enum WordListError {
         /// One-based position of the invalid entry.
         position: usize,
     },
+    /// The concatenated dictionary data exceeds the compact offset limit.
+    DictionaryTooLarge,
 }
 
 impl fmt::Display for WordListError {
@@ -100,6 +102,10 @@ impl fmt::Display for WordListError {
                 formatter,
                 "dictionary entry {position} cannot be represented by plain-word-list syntax"
             ),
+            Self::DictionaryTooLarge => write!(
+                formatter,
+                "dictionary data exceeds the 4 GiB plain-word-list limit"
+            ),
         }
     }
 }
@@ -109,17 +115,22 @@ impl std::error::Error for WordListError {}
 /// An immutable, sorted plain-word-list dictionary.
 ///
 /// Entries are deduplicated at construction time. The sorted contiguous
-/// representation keeps exact lookup deterministic and allocation-free.
+/// representation keeps exact lookup deterministic and allocation-free. The
+/// word bytes live in one arena; `offsets` stores one 32-bit start offset per
+/// word, with each end offset derived from the next entry.
 #[derive(Clone, Debug)]
 pub struct WordList {
-    words: Vec<Box<str>>,
+    arena: String,
+    offsets: Vec<u32>,
     normalization: Normalization,
     candidate_index: Arc<OnceLock<CandidateIndex>>,
 }
 
 impl PartialEq for WordList {
     fn eq(&self, other: &Self) -> bool {
-        self.words == other.words && self.normalization == other.normalization
+        self.arena == other.arena
+            && self.offsets == other.offsets
+            && self.normalization == other.normalization
     }
 }
 
@@ -130,7 +141,9 @@ impl WordList {
     ///
     /// # Errors
     ///
-    /// Returns [`WordListError::EmptyEntry`] when an input entry is empty.
+    /// Returns [`WordListError::EmptyEntry`] when an input entry is empty, or
+    /// [`WordListError::DictionaryTooLarge`] when the arena cannot be indexed
+    /// by compact 32-bit offsets.
     pub fn new<I, S>(words: I) -> Result<Self, WordListError>
     where
         I: IntoIterator<Item = S>,
@@ -143,7 +156,9 @@ impl WordList {
     ///
     /// # Errors
     ///
-    /// Returns [`WordListError::EmptyEntry`] when an input entry is empty.
+    /// Returns [`WordListError::EmptyEntry`] when an input entry is empty, or
+    /// [`WordListError::DictionaryTooLarge`] when the arena cannot be indexed
+    /// by compact 32-bit offsets.
     pub fn with_normalization<I, S>(
         normalization: Normalization,
         words: I,
@@ -152,19 +167,7 @@ impl WordList {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let mut entries = Vec::new();
-
-        for (index, word) in words.into_iter().enumerate() {
-            let word = normalization.normalize(word.as_ref());
-            if word.is_empty() {
-                return Err(WordListError::EmptyEntry {
-                    position: index + 1,
-                });
-            }
-            entries.push(Box::<str>::from(word.as_ref()));
-        }
-
-        Ok(Self::from_entries(normalization, entries))
+        Self::from_entries(normalization, words)
     }
 
     /// Builds a dictionary from UTF-8 plain-word-list text.
@@ -174,37 +177,36 @@ impl WordList {
     /// character is `#`. Internal whitespace and inline `#` remain part of the
     /// entry. This deliberately small syntax is independent of Hunspell
     /// dictionary files.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the resulting arena exceeds the 4 GiB compact-offset limit.
     #[must_use]
     pub fn from_text(normalization: Normalization, text: &str) -> Self {
-        let entries = text
-            .lines()
-            .enumerate()
-            .filter_map(|(line_number, line)| {
-                let line = if line_number == 0 {
-                    line.strip_prefix('\u{feff}').unwrap_or(line)
-                } else {
-                    line
-                };
-                let word = line.trim();
+        let entries = text.lines().enumerate().filter_map(|(line_number, line)| {
+            let line = if line_number == 0 {
+                line.strip_prefix('\u{feff}').unwrap_or(line)
+            } else {
+                line
+            };
+            let word = line.trim();
 
-                (!word.is_empty() && !word.starts_with('#')).then_some(word)
-            })
-            .map(|word| Box::<str>::from(normalization.normalize(word).as_ref()))
-            .collect();
-
+            (!word.is_empty() && !word.starts_with('#')).then_some(word)
+        });
         Self::from_entries(normalization, entries)
+            .expect("plain word-list exceeds the 4 GiB offset-table limit")
     }
 
     /// Returns the number of unique words in this dictionary.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.words.len()
+        self.offsets.len()
     }
 
     /// Returns whether this dictionary has no entries.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty()
+        self.offsets.is_empty()
     }
 
     /// Returns the normalization policy used by this dictionary.
@@ -214,8 +216,12 @@ impl WordList {
     }
 
     /// Returns an iterator over entries in deterministic lexical order.
+    #[must_use]
     pub fn words(&self) -> impl ExactSizeIterator<Item = &str> + DoubleEndedIterator + '_ {
-        self.words.iter().map(Box::as_ref)
+        self.offsets
+            .iter()
+            .enumerate()
+            .map(|(index, _)| self.word_at(index))
     }
 
     /// Returns the lazily-built spelling-candidate index.
@@ -226,24 +232,87 @@ impl WordList {
             .get_or_init(|| CandidateIndex::new(self.words(), maximum_word_scalars))
     }
 
-    fn from_entries(normalization: Normalization, mut entries: Vec<Box<str>>) -> Self {
-        entries.sort_unstable();
-        entries.dedup();
+    fn from_entries<I, S>(normalization: Normalization, words: I) -> Result<Self, WordListError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut arena = String::new();
+        let mut ranges = Vec::new();
 
-        Self {
-            words: entries,
+        for (index, word) in words.into_iter().enumerate() {
+            let word = normalization.normalize(word.as_ref());
+            if word.is_empty() {
+                return Err(WordListError::EmptyEntry {
+                    position: index + 1,
+                });
+            }
+
+            let start =
+                u32::try_from(arena.len()).map_err(|_| WordListError::DictionaryTooLarge)?;
+            arena.push_str(word.as_ref());
+            let end = u32::try_from(arena.len()).map_err(|_| WordListError::DictionaryTooLarge)?;
+            ranges.push((start, end));
+        }
+
+        ranges.sort_unstable_by(|left, right| {
+            word_slice(&arena, *left).cmp(word_slice(&arena, *right))
+        });
+        ranges.dedup_by(|left, right| word_slice(&arena, *left) == word_slice(&arena, *right));
+
+        let mut sorted_arena = String::with_capacity(arena.len());
+        let mut offsets = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            let word = word_slice(&arena, range);
+            offsets.push(
+                u32::try_from(sorted_arena.len())
+                    .expect("sorted word-list arena cannot exceed the source arena"),
+            );
+            sorted_arena.push_str(word);
+        }
+
+        Ok(Self {
+            arena: sorted_arena,
+            offsets,
             normalization,
             candidate_index: Arc::new(OnceLock::new()),
-        }
+        })
     }
+
+    fn word_at(&self, index: usize) -> &str {
+        let start = self.offsets[index];
+        let end = self.offsets.get(index + 1).copied().unwrap_or_else(|| {
+            u32::try_from(self.arena.len())
+                .expect("word-list arena cannot exceed the offset-table limit")
+        });
+        word_slice(&self.arena, (start, end))
+    }
+}
+
+fn word_slice(arena: &str, (start, end): (u32, u32)) -> &str {
+    let start = usize::try_from(start).expect("word offset fits in the process address space");
+    let end = usize::try_from(end).expect("word offset fits in the process address space");
+    arena
+        .get(start..end)
+        .expect("word-list offsets must describe valid UTF-8 boundaries")
 }
 
 impl Dictionary for WordList {
     fn contains(&self, word: &str) -> bool {
         let word = self.normalization.normalize(word);
-        self.words
-            .binary_search_by(|candidate| candidate.as_ref().cmp(word.as_ref()))
-            .is_ok()
+        let mut left = 0;
+        let mut right = self.len();
+
+        while left < right {
+            let middle = left + (right - left) / 2;
+            match self.word_at(middle).cmp(word.as_ref()) {
+                std::cmp::Ordering::Less => left = middle + 1,
+                std::cmp::Ordering::Greater => right = middle,
+                std::cmp::Ordering::Equal => return true,
+            }
+        }
+
+        false
     }
 
     fn as_candidate_source(&self) -> Option<&dyn CandidateSource> {
@@ -294,6 +363,19 @@ mod tests {
 
         assert_eq!(dictionary.len(), 2);
         assert_eq!(dictionary.words().collect::<Vec<_>>(), ["apple", "zebra"]);
+    }
+
+    #[test]
+    fn stores_sorted_words_in_one_arena_with_compact_offsets() {
+        let dictionary =
+            WordList::new(["zebra", "apple", "zebra"]).expect("all test entries are non-empty");
+
+        assert_eq!(dictionary.arena, "applezebra");
+        assert_eq!(dictionary.offsets, [0, 5]);
+        assert_eq!(
+            dictionary.words().rev().collect::<Vec<_>>(),
+            ["zebra", "apple"]
+        );
     }
 
     #[test]

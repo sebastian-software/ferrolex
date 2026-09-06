@@ -122,6 +122,14 @@ deterministically generated ASCII entries at 1,000, 10,000, and 100,000 words.
 Dictionary construction is outside the measured closure; only `contains()` is
 timed.
 
+`WordList` stores unique entries in one contiguous UTF-8 arena and keeps one
+32-bit start offset per entry. This avoids one heap allocation per word while
+preserving deterministic lexical iteration and allocation-free exact lookup.
+For repeated editor or CLI checks, compile the source once and use
+`ferrolex check --compiled dictionary.flexh`; the compiled artifact is the
+intended startup path when reparsing a plain-text list for every invocation
+would be unnecessary overhead.
+
 ## Plain text versus compiled dictionary
 
 `cargo bench -p ferrolex-compiler` compares ferrolex's exact-word
