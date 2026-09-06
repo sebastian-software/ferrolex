@@ -70,10 +70,19 @@ every Monday. The smoke pass is evidence that every fuzz boundary builds and
 executes; the weekly jobs provide sustained coverage and remain a complement
 to focused local campaigns.
 
-Run the complete repository gate with the commands in CI:
+Run the deterministic repository gate locally with
+[`just gate`](../justfile). It covers the Rust workspace checks, benchmark
+compilation, the approved suggestion-quality regression, dependency policy,
+and release/package contracts without silently downloading fixtures or tools.
+The equivalent core commands are:
 
 ```sh
 cargo +1.88 fmt --all -- --check
 cargo +1.88 clippy --workspace --all-targets -- -D warnings
 cargo +1.88 test --workspace
 ```
+
+CI also has explicit network-, credential-, licensed-fixture-, and
+platform-dependent jobs for compatibility evidence, fuzzing, bindings, and
+prototype integrations. Those are not hidden inside the local gate; consult
+the workflow and the relevant integration documentation before running them.

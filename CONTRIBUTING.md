@@ -41,6 +41,27 @@ cargo +1.88 test --workspace
 RUSTDOCFLAGS="-D warnings" cargo +1.88 doc --workspace --no-deps
 ```
 
+The repository also provides a tiered local runner when
+[just](https://github.com/casey/just) is installed:
+
+```sh
+just quick
+just gate
+```
+
+`quick` is the short feedback loop for formatting, the workspace clippy
+configuration promoted to errors, and focused product-crate tests. `gate`
+adds the workspace documentation and tests, benchmark compilation, the
+approved suggestion-quality regression, cargo-deny, release-contract checks,
+and package validation. It intentionally does not download licensed fixtures,
+install tools, access registries, or require publishing credentials; those
+network- and credential-dependent workflows remain explicit.
+
+CI enables `clippy::pedantic` as a workspace warning and passes `-D warnings`,
+so locally ignoring a pedantic warning still fails the CI gate. The
+Conventional Commits workflow validates the pull-request title, not only the
+commit history; use a Conventional Commit title before requesting review.
+
 The real-world Hunspell fixture suite is opt-in because it needs separately
 obtained, licensed dictionary sources; see
 [Compatibility fixtures](docs/compatibility-fixtures.md). The `scripts/`
@@ -53,6 +74,12 @@ ferrolex is independently implemented and licensed `MIT OR Apache-2.0`.
 Studying documented formats, observable behavior, concepts, and existing
 implementations is permitted. Copying, file-by-file translation, mechanical
 conversion, and side-by-side porting of incompatible implementations are not.
+
+Spellbook must not be used as porting material. AI-assisted contributions are
+reviewed for obvious structural closeness to known implementations and should
+be prompted against ferrolex-owned behavior documentation rather than asking
+for reproductions of other implementations. The pull-request template asks
+contributors to attest to this review.
 
 ## Dependency policy exceptions
 
@@ -81,11 +108,6 @@ or its license expression no longer needs it.
 | `unicode-ident` 1.0.24 | `Unicode-3.0` | Transitive Unicode identifier tables used by Rust procedural-macro tooling; the crate otherwise declares `MIT OR Apache-2.0`. | Reassess at every `unicode-ident` upgrade; remove if its license expression no longer includes this term. |
 
 [issue-84]: https://github.com/sebastian-software/ferrolex/issues/84
-
-Spellbook must not be used as porting material. AI-assisted contributions are
-reviewed for obvious structural closeness to known implementations and should
-be prompted against ferrolex-owned behavior documentation rather than asking
-for reproductions of other implementations.
 
 See [ADR-0001](docs/adr/0001-code-provenance-policy.md) for the rationale and
 the [GitHub delivery epics](https://github.com/sebastian-software/ferrolex/issues?q=is%3Aissue%20label%3Aepic)
