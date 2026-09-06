@@ -35,14 +35,22 @@ does not change recognition, but retaining it makes the imported representation
 lossless for later analysis features without multiplying repeated tags in
 memory.
 
-### Measured footprint
+### Measured footprint: component scope and whole-dictionary characterization
 
 The pinned de_DE fixture has 258,219 dictionary entries and no morphology
-fields. On the 64-bit CI/runtime target, retaining the empty compact slice costs
-16 bytes per entry (about 3.94 MiB) and the cache's empty-field count costs four
-bytes per entry (about 0.99 MiB). There are no morphology-string allocations for
-that fixture. A populated field is stored once in the intern table and each use
-adds only its four-byte ID to the cache.
+fields. The earlier 16-byte and four-byte figures below describe only the empty
+morphology representation; they are not the resident size of a full imported
+dictionary. On the 64-bit CI/runtime target, retaining the empty compact slice
+costs 16 bytes per entry (about 3.94 MiB) and the cache's empty-field count
+costs four bytes per entry (about 0.99 MiB). There are no morphology-string
+allocations for that fixture. A populated field is stored once in the intern
+table and each use adds only its four-byte ID to the cache.
+
+An audit measurement of the same 258,219-entry de_DE scale, including lexemes,
+flags, rules, indexes, and allocator/runtime overhead, observed about 89 MiB of
+heap and 119 MB of process RSS. Treat the component figures and the whole
+dictionary figure as separate characterizations: neither is a portable memory
+promise, and both must be refreshed when the runtime representation changes.
 
 `install` writes the cache only after a strict import succeeds. A failed strict
 import leaves the verified source cache available for diagnostics but does not

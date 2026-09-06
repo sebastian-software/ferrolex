@@ -58,6 +58,37 @@ a development-only black-box oracle: do not add it as a production dependency,
 do not report cross-machine ratios as a product guarantee, and investigate any
 recognition mismatch before interpreting timing results.
 
+### Real-world startup, memory, and miss-path characterization
+
+The following audit measurements answer deployment questions that the
+in-memory Criterion lanes intentionally do not answer. They were recorded on
+an Apple M1 Pro in a release build using a counting allocator, `ps`/`time -l`
+RSS sampling, and hyperfine against the pinned 258,219-entry de_DE scale. They
+are local characterizations, not CI gates or cross-machine product promises.
+
+| Path or workload | Observed result | Scope |
+| --- | ---: | --- |
+| Runtime-cache load | ~200 ms | In-process load at de_DE scale; filesystem and process startup are not separated by this number. |
+| Cold single-word CLI check | ~0.22 s | One process invocation including startup and local dictionary/cache setup. |
+| Whole-dictionary heap | ~89 MiB | Full imported representation, not the empty morphology slice alone. |
+| Whole-dictionary process RSS | ~119 MB | Same scale, including allocator and process/runtime overhead. |
+| Hit-heavy text checking | ~24 MB/s | Realistic tokenization/checking path with mostly recognized words. |
+| Mixed real Markdown checking | ~0.03 MB/s | Miss-dominated path; the effective ceiling is not the exact-hit lookup lane. |
+
+Miss cost varies with the spelling and casing path: the audit measured roughly
+79 µs for short lowercase misses, 103–110 µs for long lowercase misses,
+173–185 µs for capitalized misses, and 210–222 µs for uppercase misses. The
+capitalized and uppercase paths repeat case analysis, while affix-shaped
+misses spend most of their time collecting and checking derived candidates.
+These figures are tracked with the [round-2 miss-path issue](https://github.com/sebastian-software/ferrolex/issues/212)
+and should be rerun after that implementation changes or when the memory work
+in [#111](https://github.com/sebastian-software/ferrolex/issues/111) lands.
+
+The memory figures are intentionally also repeated in
+[Hunspell runtime cache](hunspell-runtime-cache.md), where the 3.94 MiB empty
+morphology slice and 0.99 MiB empty-field count are scoped as component costs
+rather than presented as the full dictionary footprint.
+
 ## Suggestions
 
 `cargo bench -p ferrolex-suggest` measures the reused-buffer
@@ -164,6 +195,14 @@ Other candidates are not adopted:
 - Perfect hashing favors static membership only; it does not preserve the
   deterministic lexicographic traversal required for suggestion candidates,
   and its generated tables would need a new reproducibility contract.
+- A hash sidecar could retain the sorted table for candidate traversal while
+  accelerating exact rejection. It would add a second serialized structure,
+  hash computation and lookup work, memory overhead, and another deterministic
+  format/versioning contract. More importantly, it would not remove the
+  affix-derived candidate search that dominates real Hunspell misses. The
+  option is therefore not adopted without a benchmark that measures the full
+  de_DE-scale workload, including artifact size, cache load, hit/miss mixes,
+  suggestions, and resident memory.
 - Hunspell stems map to one or more lexeme records and then need affix and
   compound evaluation. Replacing their `BTreeMap` with an FST would require
   serializing terminal payload lists and revalidating that richer semantic
