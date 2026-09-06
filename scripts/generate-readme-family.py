@@ -22,10 +22,7 @@ TOOLS = (
 )
 FAMILY_URL = "https://ferramenta.dev"
 COMPANY_URL = "https://oss.sebastian-software.com"
-LOGO_URL = (
-    "https://raw.githubusercontent.com/sebastian-software/ferramenta/main/"
-    "app/assets/logos/sebastian-software.svg"
-)
+ROOT_README = Path(__file__).resolve().parent.parent / "README.md"
 
 MARKERS = {
     "github": ("<!-- ferramenta-family:start -->", "<!-- ferramenta-family:end -->"),
@@ -86,34 +83,31 @@ def registry_block(current: str) -> str:
     )
 
 
-def footer() -> str:
-    return "\n".join(
-        (
-            FOOTER_MARKERS[0],
-            '<p align="center">',
-            f'  <a href="{COMPANY_URL}">',
-            f'    <img src="{LOGO_URL}" alt="Sebastian Software" width="240" />',
-            "  </a>",
-            "</p>",
-            "",
-            '<p align="center">',
-            f'  <a href="{COMPANY_URL}">Open Source at Sebastian Software</a><br />',
-            "  Copyright &copy; 2026 Sebastian Software GmbH",
-            "</p>",
-            FOOTER_MARKERS[1],
-        )
-    )
-
-
-def replace_block(
-    text: str, markers: tuple[str, str], replacement: str, path: Path
-) -> str:
+def find_block(text: str, markers: tuple[str, str], path: Path) -> re.Match[str]:
     start, end = (re.escape(marker) for marker in markers)
     pattern = re.compile(f"{start}.*?{end}", re.DOTALL)
     matches = list(pattern.finditer(text))
     if len(matches) != 1:
         raise ValueError(f"{path}: expected exactly one {markers[0]} block")
-    match = matches[0]
+    return matches[0]
+
+
+def footer() -> str:
+    """Return the company footer as owned by @sebastian-software/standards.
+
+    The root README carries the standards-owned branding section; it is written
+    by ``standards apply`` and must not be hand-edited or regenerated here. The
+    crate READMEs mirror that block verbatim so both surfaces stay identical
+    without this script duplicating standards-owned content.
+    """
+    text = ROOT_README.read_text(encoding="utf-8")
+    return find_block(text, FOOTER_MARKERS, ROOT_README).group(0)
+
+
+def replace_block(
+    text: str, markers: tuple[str, str], replacement: str, path: Path
+) -> str:
+    match = find_block(text, markers, path)
     return f"{text[:match.start()]}{replacement}{text[match.end():]}"
 
 
@@ -134,7 +128,11 @@ def main() -> int:
         else registry_block(args.current),
         args.readme,
     )
-    rendered = replace_block(rendered, FOOTER_MARKERS, footer(), args.readme)
+    if args.readme.resolve() == ROOT_README:
+        # The root footer is the standards-owned source block; only validate it.
+        find_block(rendered, FOOTER_MARKERS, args.readme)
+    else:
+        rendered = replace_block(rendered, FOOTER_MARKERS, footer(), args.readme)
     if args.check:
         if rendered == original:
             return 0

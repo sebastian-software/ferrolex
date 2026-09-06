@@ -16,8 +16,12 @@ the beginning of sentences.
 The repository root uses the GitHub variant for the project page. The eight
 public package-specific READMEs use the compact registry variant. It contains
 the Ferramenta family link and sibling links without HTML, so crates.io and
-docs.rs render it consistently. Both variants use the same generated company
-footer and official logo asset.
+docs.rs render it consistently. Both variants show the same company footer:
+the root README carries the `sebastian-software-branding` section owned by
+[`@sebastian-software/standards`](https://github.com/sebastian-software/standards),
+and the generator mirrors that block verbatim into the crate READMEs. The
+footer is therefore never hand-edited or re-rendered locally; `standards apply`
+is its only writer.
 
 The checked-in generator is intentionally dependency-free:
 
