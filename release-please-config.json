@@ -58,6 +58,26 @@
           "type": "json",
           "path": "crates/ferrolex-node/package-lock.json",
           "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-win32-x64-msvc']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/ferrolex-python/pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "json",
+          "path": "editors/vscode/ferrolex/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "editors/vscode/ferrolex/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "editors/vscode/ferrolex/package-lock.json",
+          "jsonpath": "$['packages']['']['version']"
         }
       ]
     }

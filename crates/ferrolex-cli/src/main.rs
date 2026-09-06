@@ -29,12 +29,12 @@ pub(crate) use args::{
 // ==== Command implementations, output, and diagnostics ====
 #[allow(unused_imports)]
 pub(crate) use commands::{
+    AnalysisDictionary, AnalysisSource, AnalysisSuggestionEngine, UserDictionaryLock,
     add_user_dictionary_word, analysis_paths, analyze, check, comment_syntax_for_path, compile,
     completeness_code, dictionary, explain, glob_matches, hidden_sibling,
     incomplete_suggestion_hint, inspect_artifact, install_hunspell_runtime_cache,
     load_analysis_dictionary, read_analysis_source, read_compiled_artifact, render_explanation,
-    runtime_cache_path, suggest, validate, validate_hunspell, AnalysisDictionary, AnalysisSource,
-    AnalysisSuggestionEngine, UserDictionaryLock,
+    runtime_cache_path, suggest, validate, validate_hunspell,
 };
 
 // ==== CLI dependencies ====
@@ -46,25 +46,26 @@ use ferrolex_code::{
     ProjectConfigError,
 };
 use ferrolex_compiler::{
-    compile_frequency_word_list, compile_words, inspect_compiled_artifact, is_frequency_word_list,
-    parse_frequency_word_list, CompileError, CompiledDictionary, FrequencyListError, LoadError,
-    ValidationError, MAX_COMPILED_ARTIFACT_BYTES,
+    CompileError, CompiledDictionary, FrequencyListError, LoadError, MAX_COMPILED_ARTIFACT_BYTES,
+    ValidationError, compile_frequency_word_list, compile_words, inspect_compiled_artifact,
+    is_frequency_word_list, parse_frequency_word_list,
 };
 use ferrolex_core::{
-    contains_normalized, Checker, Dictionary, Normalization, UserDictionary, WordList,
+    Checker, Dictionary, Normalization, UserDictionary, WordList, contains_normalized,
 };
 use ferrolex_dictionaries::{
-    find_locale, DictionaryInstaller, FetchError as DictionaryFetchError, InstalledDictionary,
-    LibreOfficeDictionary, ManifestError as DictionaryManifestError, UreqFetcher,
-    LIBREOFFICE_CATALOG,
+    DictionaryInstaller, FetchError as DictionaryFetchError, InstalledDictionary,
+    LIBREOFFICE_CATALOG, LibreOfficeDictionary, ManifestError as DictionaryManifestError,
+    UreqFetcher, find_locale,
 };
 use ferrolex_hunspell::{
-    compile_runtime_artifact, compile_runtime_cache, import_bytes as import_hunspell_bytes,
+    Acceptance, AcceptanceKind, AppliedAffixKind, ByteImportEncodings, CasingPath,
+    CompoundComponentRole, Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError,
+    ImportMode, ImportResult, LookupExplanation, Rejection, RejectionReason, RuntimeCacheError,
+    Severity, SourceDigests, compile_runtime_artifact, compile_runtime_cache,
+    import_bytes as import_hunspell_bytes,
     import_bytes_with_encodings as import_hunspell_bytes_with_encodings, inspect_runtime_cache,
-    is_runtime_artifact, load_runtime_artifact, load_runtime_cache, Acceptance, AcceptanceKind,
-    AppliedAffixKind, ByteImportEncodings, CasingPath, CompoundComponentRole,
-    Diagnostic as ImportDiagnostic, HunspellDictionary, ImportError, ImportMode, ImportResult,
-    LookupExplanation, Rejection, RejectionReason, RuntimeCacheError, Severity, SourceDigests,
+    is_runtime_artifact, load_runtime_artifact, load_runtime_cache,
 };
 use ferrolex_suggest::{
     CandidateSource, Completeness, ReplacementRule, SuggestConfig, SuggestScratch, Suggester,
@@ -392,7 +393,7 @@ fn parse_add_word_arguments(
             "--global" => global = true,
             "--help" | "-h" => return Ok(Command::Help(USAGE)),
             option if option.starts_with('-') => {
-                return Err(CliError::Usage(format!("unknown option `{option}`")))
+                return Err(CliError::Usage(format!("unknown option `{option}`")));
             }
             _ => {
                 if word.replace(argument).is_some() {
@@ -489,7 +490,7 @@ fn parse_dictionary_catalog_arguments(
         _ => {
             return Err(CliError::Usage(format!(
                 "unknown dictionary subcommand `{subcommand}`"
-            )))
+            )));
         }
     };
     Ok(Command::Dictionary(command))
@@ -869,7 +870,7 @@ fn set_once_output_format(
         _ => {
             return Err(CliError::Usage(format!(
                 "`{option}` supports only `text` or `json`"
-            )))
+            )));
         }
     };
     if destination.replace(format).is_some() {

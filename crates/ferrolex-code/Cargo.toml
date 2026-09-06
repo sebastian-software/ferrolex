@@ -2,12 +2,14 @@
 name = "ferrolex-code"
 version = "0.4.0"
 description = "Supporting source-code analysis helpers for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "source-code", "identifiers", "unicode"]
+documentation = "https://docs.rs/ferrolex-code"
+keywords = ["spell-checking", "source-code", "identifiers", "unicode", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -15,9 +17,9 @@ readme = "README.md"
 all-features = true
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-regex = "1.13.1"
-unicode-normalization = "0.1.25"
+ferrolex-core.workspace = true
+regex.workspace = true
+unicode-normalization.workspace = true
 
 [lints]
 workspace = true

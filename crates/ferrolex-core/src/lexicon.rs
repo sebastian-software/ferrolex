@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
-use unicode_normalization::{is_nfc, is_nfkc, UnicodeNormalization};
+use unicode_normalization::{UnicodeNormalization, is_nfc, is_nfkc};
 
 use crate::{CandidateIndex, CandidateSource};
 

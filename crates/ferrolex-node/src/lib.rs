@@ -11,13 +11,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ferrolex_core::{contains_normalized, Normalization, WordList};
+use ferrolex_core::{Normalization, WordList, contains_normalized};
 use ferrolex_dictionaries::{
-    find_locale, DictionaryInstaller, SourceEncoding, UreqFetcher, LIBREOFFICE_CATALOG,
+    DictionaryInstaller, LIBREOFFICE_CATALOG, SourceEncoding, UreqFetcher, find_locale,
 };
 use ferrolex_hunspell::{
-    import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings, ImportError,
-    ImportMode, ImportResult,
+    ByteEncoding, ByteImportEncodings, ImportError, ImportMode, ImportResult, import_bytes,
+    import_bytes_with_encodings,
 };
 use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
 use napi::bindgen_prelude::AsyncTask;
@@ -264,7 +264,7 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{dictionary_catalog, Checker};
+    use super::{Checker, dictionary_catalog};
 
     static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -308,9 +308,11 @@ mod tests {
         .expect("fixture imports strictly");
         assert!(checker.check("receives".to_owned()));
         assert_eq!(checker.suggest("recieve".to_owned())[0], "receive");
-        assert!(dictionary_catalog()
-            .iter()
-            .any(|entry| entry.locale == "en_US"));
+        assert!(
+            dictionary_catalog()
+                .iter()
+                .any(|entry| entry.locale == "en_US")
+        );
 
         fs::remove_dir_all(directory).expect("fixture directory is removed");
     }

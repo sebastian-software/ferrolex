@@ -3,11 +3,13 @@ name = "ferrolex"
 version = "0.4.0"
 description = "Modern Rust spell-checking engine with Hunspell-compatible dictionaries"
 include = ["/src/**", "/Cargo.toml", "/CHANGELOG.md", "/LICENSE-*", "/README.md"]
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
@@ -16,10 +18,10 @@ readme = "README.md"
 all-features = true
 
 [dependencies]
-ferrolex-core = { path = "crates/ferrolex-core", version = "0.4.0" }
-ferrolex-dictionaries = { path = "crates/ferrolex-dictionaries", version = "0.4.0" }
-ferrolex-hunspell = { path = "crates/ferrolex-hunspell", version = "0.4.0" }
-ferrolex-suggest = { path = "crates/ferrolex-suggest", version = "0.4.0" }
+ferrolex-core.workspace = true
+ferrolex-dictionaries.workspace = true
+ferrolex-hunspell.workspace = true
+ferrolex-suggest.workspace = true
 
 [lints]
 workspace = true
@@ -53,13 +55,46 @@ default-members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+cbindgen = "0.29.4"
+criterion = "0.5.1"
+encoding_rs = "0.8.35"
+ferrolex = { path = ".", version = "0.4.0" }
+ferrolex-code = { path = "crates/ferrolex-code", version = "0.4.0" }
+ferrolex-compiler = { path = "crates/ferrolex-compiler", version = "0.4.0" }
+ferrolex-core = { path = "crates/ferrolex-core", version = "0.4.0" }
+ferrolex-dictionaries = { path = "crates/ferrolex-dictionaries", version = "0.4.0" }
+ferrolex-ffi = { path = "crates/ferrolex-ffi", version = "0.4.0" }
+ferrolex-hunspell = { path = "crates/ferrolex-hunspell", version = "0.4.0" }
+ferrolex-lsp = { path = "crates/ferrolex-lsp", version = "0.4.0" }
+ferrolex-node = { path = "crates/ferrolex-node", version = "0.4.0" }
+ferrolex-python = { path = "crates/ferrolex-python", version = "0.4.0" }
+ferrolex-suggest = { path = "crates/ferrolex-suggest", version = "0.4.0" }
+ferrolex-text = { path = "crates/ferrolex-text", version = "0.4.0" }
+fs2 = "=0.4.3"
+fst = "0.4.7"
+lsp-server = "=0.8.0"
+napi = { version = "=3.12.1", default-features = false, features = ["dyn-symbols", "napi8"] }
+napi-build = "=2.4.1"
+napi-derive = "=3.6.0"
+proptest = "=1.6.0"
+pyo3 = "=0.29.2"
+regex = "1.13.1"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+ureq = { version = "3.2.1", default-features = false, features = ["rustls"] }
+unicode-normalization = "0.1.25"
+
 [workspace.package]
-edition = "2021"
+authors = ["Sebastian Werner"]
+edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sebastian-software/ferrolex"
 homepage = "https://github.com/sebastian-software/ferrolex"
-keywords = ["spell-checking", "dictionary", "unicode"]
+documentation = "https://docs.rs/ferrolex"
+keywords = ["spell-checking", "dictionary", "unicode", "ferramenta"]
 categories = ["text-processing"]
 
 [workspace.lints.rust]

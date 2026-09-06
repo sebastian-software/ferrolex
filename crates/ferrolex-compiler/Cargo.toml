@@ -2,12 +2,14 @@
 name = "ferrolex-compiler"
 version = "0.4.0"
 description = "Supporting compiled dictionary format for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "dictionary", "compiled-format", "storage"]
+documentation = "https://docs.rs/ferrolex-compiler"
+keywords = ["spell-checking", "dictionary", "compiled-format", "storage", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -15,13 +17,13 @@ readme = "README.md"
 all-features = true
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
+ferrolex-core.workspace = true
+ferrolex-suggest.workspace = true
 
 [dev-dependencies]
-criterion = "0.5.1"
-fst = "0.4.7"
-proptest = "=1.6.0"
+criterion.workspace = true
+fst.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

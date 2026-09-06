@@ -2,12 +2,14 @@
 name = "ferrolex-cli"
 version = "0.4.0"
 description = "Command-line interface for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "hunspell", "command-line", "dictionary"]
+documentation = "https://docs.rs/ferrolex-cli"
+keywords = ["spell-checking", "hunspell", "command-line", "dictionary", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -19,16 +21,16 @@ name = "ferrolex"
 path = "src/main.rs"
 
 [dependencies]
-ferrolex-code = { path = "../ferrolex-code", version = "0.4.0" }
-ferrolex-compiler = { path = "../ferrolex-compiler", version = "0.4.0" }
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-dictionaries = { path = "../ferrolex-dictionaries", version = "0.4.0" }
-ferrolex = { path = "../..", version = "0.4.0" }
-ferrolex-hunspell = { path = "../ferrolex-hunspell", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
-ferrolex-text = { path = "../ferrolex-text", version = "0.4.0" }
-fs2 = "=0.4.3"
-serde_json = "1.0.151"
+ferrolex-code.workspace = true
+ferrolex-compiler.workspace = true
+ferrolex-core.workspace = true
+ferrolex-dictionaries.workspace = true
+ferrolex.workspace = true
+ferrolex-hunspell.workspace = true
+ferrolex-suggest.workspace = true
+ferrolex-text.workspace = true
+fs2.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

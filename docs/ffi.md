@@ -53,7 +53,7 @@ from the exported Rust declarations by `cbindgen`. Regenerate it after an ABI
 change:
 
 ```sh
-cargo run -p ferrolex-ffi --features c-abi --bin generate-header
+FERROLEX_REGENERATE_HEADER=1 cargo build -p ferrolex-ffi --features c-abi
 ```
 
 Normal `c-abi` builds regenerate the same header into Cargo's `OUT_DIR` and

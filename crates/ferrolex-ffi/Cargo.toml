@@ -2,13 +2,16 @@
 name = "ferrolex-ffi"
 version = "0.4.0"
 description = "Experimental C ABI spike for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
+documentation = "https://docs.rs/ferrolex-ffi"
+keywords = ["spell-checking", "c-abi", "ferramenta"]
 categories.workspace = true
+readme = "README.md"
 build = "build.rs"
 publish = false
 
@@ -19,13 +22,15 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 default = []
 c-abi = []
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
-cbindgen = "0.29.4"
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
+ferrolex-core.workspace = true
+ferrolex-suggest.workspace = true
 
 [build-dependencies]
-cbindgen = "0.29.4"
+cbindgen.workspace = true
 
 [lints]
 workspace = true

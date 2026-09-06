@@ -1,7 +1,7 @@
 //! Internal Hunspell runtime model and casing primitives.
 
 use super::{
-    is_variation_selector, BTreeMap, BTreeSet, Cow, MAX_AFFIX_CHAIN, MAX_MORPHOLOGY_STRINGS,
+    BTreeMap, BTreeSet, Cow, MAX_AFFIX_CHAIN, MAX_MORPHOLOGY_STRINGS, is_variation_selector,
 };
 
 #[derive(Clone, Debug)]

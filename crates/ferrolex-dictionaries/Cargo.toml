@@ -2,12 +2,14 @@
 name = "ferrolex-dictionaries"
 version = "0.4.0"
 description = "Verified dictionary acquisition primitives for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "dictionaries", "hunspell", "download"]
+documentation = "https://docs.rs/ferrolex-dictionaries"
+keywords = ["spell-checking", "dictionaries", "hunspell", "download", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -15,9 +17,9 @@ readme = "README.md"
 all-features = true
 
 [dependencies]
-fs2 = "0.4.3"
-sha2 = "0.10.9"
-ureq = { version = "3.2.1", default-features = false, features = ["rustls"] }
+fs2.workspace = true
+sha2.workspace = true
+ureq.workspace = true
 
 [lints]
 workspace = true

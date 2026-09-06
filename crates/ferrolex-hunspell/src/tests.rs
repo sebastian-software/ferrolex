@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::thread;
 
@@ -11,10 +11,10 @@ use ferrolex_core::Dictionary;
 use ferrolex_suggest::{CandidateSource, Completeness, SuggestConfig, Suggester};
 
 use super::{
-    compile_runtime_cache, import, import_bytes, import_bytes_with_encodings, load_runtime_cache,
     AcceptanceKind, AppliedAffixKind, ByteEncoding, ByteImportEncodings, CasingPath, ImportMode,
-    LookupExplanation, RejectionReason, Severity, SourceDigests, MAX_AFF_BYTES,
-    MAX_COMPOUND_SCALARS, MAX_DERIVED_CANDIDATES_PER_LOOKUP, MAX_DIC_BYTES, MAX_FLAGS_PER_ENTRY,
+    LookupExplanation, MAX_AFF_BYTES, MAX_COMPOUND_SCALARS, MAX_DERIVED_CANDIDATES_PER_LOOKUP,
+    MAX_DIC_BYTES, MAX_FLAGS_PER_ENTRY, RejectionReason, Severity, SourceDigests,
+    compile_runtime_cache, import, import_bytes, import_bytes_with_encodings, load_runtime_cache,
 };
 
 const AFFIXES: &str =
@@ -563,11 +563,13 @@ fn malformed_am_aliases_are_warning_diagnostics() {
     )
     .expect("lenient imports preserve the safe subset");
 
-    assert!(result
-        .diagnostics()
-        .iter()
-        .any(|diagnostic| diagnostic.directive() == "AM"
-            && diagnostic.severity() == Severity::Warning));
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "AM"
+                && diagnostic.severity() == Severity::Warning)
+    );
 }
 
 #[test]
@@ -651,11 +653,13 @@ fn suggestions_exclude_rejected_and_no_suggest_stems_after_cache_round_trip() {
             "{word} must never be suggested"
         );
     }
-    assert!(Suggester::new(&dictionary, SuggestConfig::default())
-        .suggest("publi")
-        .suggestions()
-        .iter()
-        .any(|suggestion| suggestion.word() == "public"));
+    assert!(
+        Suggester::new(&dictionary, SuggestConfig::default())
+            .suggest("publi")
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "public")
+    );
     assert!(imported.ir().special_flags.no_suggest.is_some());
 }
 
@@ -680,14 +684,18 @@ fn suggestions_expand_affixes_and_query_aligned_compounds_within_budgets() {
     let affixed = Suggester::new(dictionary, config).suggest("Häusernn");
     let compound = Suggester::new(dictionary, config).suggest("BahnHoff");
 
-    assert!(affixed
-        .suggestions()
-        .iter()
-        .any(|suggestion| suggestion.word() == "Häusern"));
-    assert!(compound
-        .suggestions()
-        .iter()
-        .any(|suggestion| suggestion.word() == "BahnHof"));
+    assert!(
+        affixed
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "Häusern")
+    );
+    assert!(
+        compound
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "BahnHof")
+    );
     assert_eq!(affixed.completeness(), Completeness::Complete);
     assert_eq!(compound.completeness(), Completeness::Complete);
 }
@@ -752,11 +760,13 @@ fn malformed_replacement_rules_remain_warning_diagnostics() {
     .expect("suggestion-only malformed input does not change recognition");
 
     assert!(result.dictionary().replacement_rules().is_empty());
-    assert!(result
-        .diagnostics()
-        .iter()
-        .any(|diagnostic| diagnostic.directive() == "REP"
-            && diagnostic.severity() == Severity::Warning));
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "REP"
+                && diagnostic.severity() == Severity::Warning)
+    );
 }
 
 #[test]
@@ -771,10 +781,12 @@ fn informational_and_warning_directives_do_not_block_strict_import() {
     .expect("non-recognition directives are warnings");
 
     assert!(result.dictionary().contains("word"));
-    assert!(result
-        .diagnostics()
-        .iter()
-        .all(|diagnostic| diagnostic.severity() == Severity::Warning));
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.severity() == Severity::Warning)
+    );
 }
 
 #[test]
@@ -820,14 +832,16 @@ fn lenient_mode_retains_the_safe_subset_while_strict_mode_rejects_errors() {
 
     assert!(lenient.dictionary().contains("東京"));
     assert_eq!(lenient.diagnostics()[0].severity(), Severity::Error);
-    assert!(import(
-        "test.aff",
-        affixes,
-        "test.dic",
-        "1\n東京\n",
-        ImportMode::Strict
-    )
-    .is_err());
+    assert!(
+        import(
+            "test.aff",
+            affixes,
+            "test.dic",
+            "1\n東京\n",
+            ImportMode::Strict
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1004,10 +1018,12 @@ fn byte_import_rejects_an_oversized_affix_before_scanning_or_decoding_it() {
             && diagnostic.directive() == "input"
             && diagnostic.severity() == Severity::Error
     }));
-    assert!(!error
-        .diagnostics()
-        .iter()
-        .any(|diagnostic| diagnostic.directive() == "encoding"));
+    assert!(
+        !error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.directive() == "encoding")
+    );
 }
 
 #[test]
@@ -1073,10 +1089,12 @@ fn resource_limits_produce_diagnostics_without_panicking() {
     let result = import("test.aff", "", "test.dic", &dictionary, ImportMode::Lenient)
         .expect("lenient import returns diagnostics");
 
-    assert!(result
-        .diagnostics()
-        .iter()
-        .any(|item| item.message().contains("4096-flag importer limit")));
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|item| item.message().contains("4096-flag importer limit"))
+    );
     assert!(!result.dictionary().contains("word"));
 }
 
@@ -1091,14 +1109,18 @@ fn reports_malformed_rules_and_count_mismatches_without_panicking() {
     )
     .expect("lenient import returns diagnostics");
 
-    assert!(result
-        .diagnostics()
-        .iter()
-        .any(|item| item.directive() == "PFX" && item.line() == 2));
-    assert!(result
-        .diagnostics()
-        .iter()
-        .any(|item| item.directive() == "count"));
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|item| item.directive() == "PFX" && item.line() == 2)
+    );
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|item| item.directive() == "count")
+    );
 }
 
 #[test]
@@ -1869,7 +1891,9 @@ fn imported_dictionaries_are_safe_to_share_across_threads() {
         })
         .collect::<Vec<_>>();
 
-    assert!(workers
-        .into_iter()
-        .all(|worker| worker.join().expect("worker does not panic")));
+    assert!(
+        workers
+            .into_iter()
+            .all(|worker| worker.join().expect("worker does not panic"))
+    );
 }

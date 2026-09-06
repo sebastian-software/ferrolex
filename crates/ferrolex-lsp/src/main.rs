@@ -13,7 +13,7 @@ use ferrolex_core::{Checker, Normalization, UserDictionary, WordList};
 use ferrolex_suggest::{SuggestConfig, Suggester};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const SOURCE: &str = "ferrolex";
 const UNKNOWN_WORD: &str = "ferrolex.unknown-word";
@@ -519,7 +519,7 @@ fn line_start_byte(text: &str, byte: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        byte_to_position, position_to_byte, Config, LspPosition, LspRange, State, TextChange,
+        Config, LspPosition, LspRange, State, TextChange, byte_to_position, position_to_byte,
     };
 
     #[test]
@@ -583,9 +583,11 @@ mod tests {
                 },
             },
         );
-        assert!(actions.iter().any(|action| action["title"]
-            .as_str()
-            .is_some_and(|title| title.contains("FerrolexProject"))));
+        assert!(actions.iter().any(|action| {
+            action["title"]
+                .as_str()
+                .is_some_and(|title| title.contains("FerrolexProject"))
+        }));
         state.add_user_word("Projec").expect("valid word");
         assert!(state.diagnostics("file:///test").is_empty());
     }

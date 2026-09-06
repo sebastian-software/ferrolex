@@ -288,8 +288,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         dic_path: "fr_FR/dictionaries/fr.dic",
         license_notice_path: "fr_FR/dictionaries/README_dict_fr.txt",
         license_spdx_expression: "MPL-2.0",
-        license_label:
-            "Locale-specific notice in LibreOffice/fr_FR/dictionaries/README_dict_fr.txt",
+        license_label: "Locale-specific notice in LibreOffice/fr_FR/dictionaries/README_dict_fr.txt",
         encoding: SourceEncoding::Utf8,
         aff_sha256: "c176610cd5dc4846806a65ddd029f422d87978bf58f224aa44222662a16a2de5",
         dic_sha256: "b78a868e31dd6e373b6c3217969afb898a9acde828a5e7ef97308da42218c88c",
@@ -343,8 +342,7 @@ pub const LIBREOFFICE_CATALOG: [LibreOfficeDictionary; 18] = [
         aff_path: "pl_PL/pl_PL.aff",
         dic_path: "pl_PL/pl_PL.dic",
         license_notice_path: "pl_PL/README_pl_PL.txt",
-        license_spdx_expression:
-            "GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1 OR Apache-2.0 OR CC-BY-4.0",
+        license_spdx_expression: "GPL-2.0-only OR LGPL-2.1-only OR MPL-1.1 OR Apache-2.0 OR CC-BY-4.0",
         license_label: "Locale-specific notice in LibreOffice/pl_PL/README_pl_PL.txt",
         encoding: SourceEncoding::Iso8859_2,
         aff_sha256: "82973651651aa930335c865b339b98db376ca3dbf3a661b70b9eeb71fdf41dca",
@@ -1297,12 +1295,12 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{
+        CONNECT_TIMEOUT, DEFAULT_MAX_FILE_BYTES, DictionaryInstaller, FetchError, Fetcher,
+        LIBREOFFICE_CATALOG, LIBREOFFICE_REVISION, LibreOfficeDictionary, ManifestError,
+        REQUEST_TIMEOUT, RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT, STALE_TEMPORARY_FILE_AGE,
+        SourceEncoding, UreqFetcher, VerifiedDictionary, VerifiedFile,
         atomic_write_new_with_hard_link, enforce_response_limit, find_locale,
         map_response_read_error, map_ureq_error, read_response_with_limit, reject_redirect, sha256,
-        DictionaryInstaller, FetchError, Fetcher, LibreOfficeDictionary, ManifestError,
-        SourceEncoding, UreqFetcher, VerifiedDictionary, VerifiedFile, CONNECT_TIMEOUT,
-        DEFAULT_MAX_FILE_BYTES, LIBREOFFICE_CATALOG, LIBREOFFICE_REVISION, REQUEST_TIMEOUT,
-        RESPONSE_BODY_TIMEOUT, RESPONSE_HEADER_TIMEOUT, STALE_TEMPORARY_FILE_AGE,
     };
 
     const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -1333,14 +1331,18 @@ mod tests {
             assert_eq!(manifest.dic().sha256_hex().len(), 64);
         }
         assert!(find_locale("en_GB").is_none());
-        assert!(find_locale("de_DE")
-            .expect("German exists")
-            .aff_url()
-            .ends_with("/de/de_DE_frami.aff"));
-        assert!(find_locale("fr_FR")
-            .expect("French exists")
-            .dic_url()
-            .ends_with("/fr_FR/dictionaries/fr.dic"));
+        assert!(
+            find_locale("de_DE")
+                .expect("German exists")
+                .aff_url()
+                .ends_with("/de/de_DE_frami.aff")
+        );
+        assert!(
+            find_locale("fr_FR")
+                .expect("French exists")
+                .dic_url()
+                .ends_with("/fr_FR/dictionaries/fr.dic")
+        );
         assert_eq!(
             find_locale("pl_PL").expect("Polish exists").encoding(),
             SourceEncoding::Iso8859_2

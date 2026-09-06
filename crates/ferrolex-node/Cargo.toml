@@ -2,13 +2,16 @@
 name = "ferrolex-node"
 version = "0.4.0"
 description = "Node.js binding for the ferrolex spell-checking engine"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
+documentation = "https://docs.rs/ferrolex-node"
+keywords = ["spell-checking", "nodejs", "ferramenta"]
 categories.workspace = true
+readme = "README.md"
 build = "build.rs"
 publish = false
 
@@ -17,15 +20,15 @@ name = "ferrolex_node"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-dictionaries = { path = "../ferrolex-dictionaries", version = "0.4.0" }
-ferrolex-hunspell = { path = "../ferrolex-hunspell", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
-napi = { version = "=3.12.1", default-features = false, features = ["dyn-symbols", "napi8"] }
-napi-derive = "=3.6.0"
+ferrolex-core.workspace = true
+ferrolex-dictionaries.workspace = true
+ferrolex-hunspell.workspace = true
+ferrolex-suggest.workspace = true
+napi.workspace = true
+napi-derive.workspace = true
 
 [build-dependencies]
-napi-build = "=2.4.1"
+napi-build.workspace = true
 
 [lints]
 workspace = true

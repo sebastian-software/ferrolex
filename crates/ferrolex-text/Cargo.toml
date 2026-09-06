@@ -2,12 +2,14 @@
 name = "ferrolex-text"
 version = "0.4.0"
 description = "Plain-text analysis for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "text-processing", "tokenization", "unicode"]
+documentation = "https://docs.rs/ferrolex-text"
+keywords = ["spell-checking", "text-processing", "tokenization", "unicode", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -15,8 +17,8 @@ readme = "README.md"
 all-features = true
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-unicode-normalization = "0.1.25"
+ferrolex-core.workspace = true
+unicode-normalization.workspace = true
 
 [lints]
 workspace = true

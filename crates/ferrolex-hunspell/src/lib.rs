@@ -43,16 +43,16 @@ pub(crate) use ir::{
     input_conversion_to_ir, lexeme_to_ir, replacement_rule_to_ir, special_flags_to_ir,
 };
 pub(crate) use model::{
-    case_pattern, decode_text_flag, encode_text_flag, has_flag, initial_case_for_language,
-    lowercase_for_language, AffixKind, AffixRule, AffixRuleIndex, CaseLanguage, CasePattern,
-    CompoundConfig, CompoundPattern, CompoundPosition, CompoundRule, CompoundSyllableLimit,
-    Condition, ConditionAtom, Flag, FlagMode, FlagSet, FormState, InputConversion, Lexeme,
-    Morphology, MorphologyId, MorphologyTable, SpecialFlags,
+    AffixKind, AffixRule, AffixRuleIndex, CaseLanguage, CasePattern, CompoundConfig,
+    CompoundPattern, CompoundPosition, CompoundRule, CompoundSyllableLimit, Condition,
+    ConditionAtom, Flag, FlagMode, FlagSet, FormState, InputConversion, Lexeme, Morphology,
+    MorphologyId, MorphologyTable, SpecialFlags, case_pattern, decode_text_flag, encode_text_flag,
+    has_flag, initial_case_for_language, lowercase_for_language,
 };
 pub(crate) use parse::{
-    apply_conversions, diagnostic, enforce_byte_input_limits, enforce_input_limit,
-    is_variation_selector, normalize_affix_text_for_ignored_characters, parse_aff, parse_dic,
-    BreakPattern, ParsedAff,
+    BreakPattern, ParsedAff, apply_conversions, diagnostic, enforce_byte_input_limits,
+    enforce_input_limit, is_variation_selector, normalize_affix_text_for_ignored_characters,
+    parse_aff, parse_dic,
 };
 
 // ==== Public import surface ====
@@ -62,10 +62,10 @@ pub use ferrolex_suggest::{
 };
 
 pub use cache::{
-    compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache, is_runtime_artifact,
-    load_runtime_artifact, load_runtime_cache, CacheSource, RuntimeCacheError,
-    RuntimeCacheMetadata, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
-    HUNSPELL_CACHE_SEMANTICS_VERSION,
+    CacheSource, HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+    RuntimeCacheError, RuntimeCacheMetadata, SourceDigests, compile_runtime_artifact,
+    compile_runtime_cache, inspect_runtime_cache, is_runtime_artifact, load_runtime_artifact,
+    load_runtime_cache,
 };
 pub use explanation::{
     Acceptance, AcceptanceKind, AppliedAffix, AppliedAffixKind, CasingPath, CompoundComponent,

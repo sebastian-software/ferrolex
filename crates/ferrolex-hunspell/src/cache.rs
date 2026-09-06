@@ -15,15 +15,15 @@ use std::fmt;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    decode_text_flag, encode_text_flag, AffixKind, AffixRule, BreakPattern, CaseLanguage,
-    CompoundConfig, CompoundPattern, CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom,
-    Flag, FlagMode, FlagSet, HunspellDictionary, InputConversion, Lexeme, Morphology, MorphologyId,
-    MorphologyTable, SpecialFlags, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS, MAX_CHARACTER_MAPS,
-    MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS,
-    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS,
-    MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS,
-    MAX_LINE_BYTES, MAX_MORPHOLOGY_FIELDS_PER_RECORD, MAX_MORPHOLOGY_STRINGS,
-    MAX_REPLACEMENT_RULES,
+    AffixKind, AffixRule, BreakPattern, CaseLanguage, CompoundConfig, CompoundPattern,
+    CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Flag, FlagMode, FlagSet,
+    HunspellDictionary, InputConversion, Lexeme, MAX_AFFIX_RULES, MAX_BREAK_PATTERNS,
+    MAX_CHARACTER_MAPS, MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULE_COMPONENTS,
+    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_RULES,
+    MAX_COMPOUND_SCALARS, MAX_CONDITION_ATOMS, MAX_DICTIONARY_ENTRIES, MAX_FLAGS_PER_ENTRY,
+    MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES, MAX_MORPHOLOGY_FIELDS_PER_RECORD,
+    MAX_MORPHOLOGY_STRINGS, MAX_REPLACEMENT_RULES, Morphology, MorphologyId, MorphologyTable,
+    SpecialFlags, decode_text_flag, encode_text_flag,
 };
 use ferrolex_suggest::ReplacementRule;
 
@@ -1476,7 +1476,7 @@ fn read_compound_patterns(
             _ => {
                 return Err(RuntimeCacheError::InvalidArtifact(
                     "invalid compound pattern replacement marker",
-                ))
+                ));
             }
         };
         if ending.is_empty()
@@ -1546,7 +1546,7 @@ fn read_input_conversions(
             _ => {
                 return Err(RuntimeCacheError::InvalidArtifact(
                     "invalid input conversion start marker",
-                ))
+                ));
             }
         };
         let at_word_end = match reader.byte()? {
@@ -1555,7 +1555,7 @@ fn read_input_conversions(
             _ => {
                 return Err(RuntimeCacheError::InvalidArtifact(
                     "invalid input conversion end marker",
-                ))
+                ));
             }
         };
         if from.is_empty() {
@@ -1591,7 +1591,7 @@ fn read_rules(
             _ => {
                 return Err(RuntimeCacheError::InvalidArtifact(
                     "invalid affix rule kind",
-                ))
+                ));
             }
         };
         if kind != expected_kind {
@@ -1609,7 +1609,7 @@ fn read_rules(
             _ => {
                 return Err(RuntimeCacheError::InvalidArtifact(
                     "invalid affix cross-product marker",
-                ))
+                ));
             }
         };
         rules.push(AffixRule {
@@ -1644,7 +1644,7 @@ fn read_special_flags(
             _ => {
                 return Err(RuntimeCacheError::InvalidArtifact(
                     "invalid CHECKSHARPS marker",
-                ))
+                ));
             }
         },
     })
@@ -1715,7 +1715,7 @@ fn read_condition(reader: &mut Reader<'_>) -> Result<Condition, RuntimeCacheErro
         _ => {
             return Err(RuntimeCacheError::InvalidArtifact(
                 "invalid condition start-anchor marker",
-            ))
+            ));
         }
     };
     let not_preceded_by = match reader.byte()? {
@@ -1724,7 +1724,7 @@ fn read_condition(reader: &mut Reader<'_>) -> Result<Condition, RuntimeCacheErro
         _ => {
             return Err(RuntimeCacheError::InvalidArtifact(
                 "invalid condition lookbehind marker",
-            ))
+            ));
         }
     };
     let count = reader.count(MAX_CONDITION_ATOMS, "condition atom count")?;
@@ -1751,7 +1751,7 @@ fn read_condition_atom(reader: &mut Reader<'_>) -> Result<ConditionAtom, Runtime
                 _ => {
                     return Err(RuntimeCacheError::InvalidArtifact(
                         "invalid condition class negation marker",
-                    ))
+                    ));
                 }
             };
             let member_count = reader.count(MAX_LINE_BYTES, "condition class member count")?;
@@ -1918,16 +1918,14 @@ mod tests {
     use sha2::Digest as _;
 
     use super::{
-        compile_runtime_artifact, compile_runtime_cache, inspect_runtime_cache,
-        is_runtime_artifact, load_runtime_artifact, load_runtime_cache, CacheSource,
-        RuntimeCacheError, SourceDigests, HUNSPELL_CACHE_FORMAT_VERSION,
-        HUNSPELL_CACHE_SEMANTICS_VERSION,
+        CacheSource, HUNSPELL_CACHE_FORMAT_VERSION, HUNSPELL_CACHE_SEMANTICS_VERSION,
+        RuntimeCacheError, SourceDigests, compile_runtime_artifact, compile_runtime_cache,
+        inspect_runtime_cache, is_runtime_artifact, load_runtime_artifact, load_runtime_cache,
     };
-    use crate::{import, ImportMode};
+    use crate::{ImportMode, import};
 
     const AFF: &str = "CIRCUMFIX C\nFORBIDDENWORD F\nNEEDAFFIX N\nONLYINCOMPOUND O\nKEEPCASE K\nCHECKSHARPS\nFULLSTRIP\nWORDCHARS -.ß\nREP 1\nREP ^teh$ the\nIGNORE \u{301}\nICONV 3\nICONV æ ae\nICONV -_ x\nICONV q 0\nOCONV 2\nOCONV ae æ\nOCONV r_ 0\nCOMPOUNDFLAG M\nCOMPOUNDBEGIN X\nCOMPOUNDMIDDLE Y\nCOMPOUNDEND Z\nCOMPOUNDMIN 2\nCOMPOUNDRULE 1\nCOMPOUNDRULE XYZ\nBREAK 1\nBREAK -\nPFX A Y 1\nPFX A 0 un/C .\nSFX B Y 1\nSFX B 0 s/C .\nSFX D N 1\nSFX D 0 ed/E .\nSFX E N 1\nSFX E 0 ly .\nSFX G N 1\nSFX G word s .\n";
-    const DIC: &str =
-        "11\nword/ABG\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
+    const DIC: &str = "11\nword/ABG\nbad/AF\nfix/DN\nroot/D\nBahn/X\nHof/Y\nStraße/ZK\nTeil/XO\nMail\naer\nfinx\n";
 
     fn sources() -> SourceDigests {
         SourceDigests::from_source_bytes(AFF.as_bytes(), DIC.as_bytes())

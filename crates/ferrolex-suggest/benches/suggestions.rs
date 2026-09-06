@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ferrolex_core::WordList;
 use ferrolex_suggest::{Completeness, SuggestConfig, SuggestScratch, Suggester, Suggestion};
 

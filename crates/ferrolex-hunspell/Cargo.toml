@@ -2,12 +2,14 @@
 name = "ferrolex-hunspell"
 version = "0.4.0"
 description = "Hunspell-compatible dictionary importer for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "hunspell", "dictionary", "import"]
+documentation = "https://docs.rs/ferrolex-hunspell"
+keywords = ["spell-checking", "hunspell", "dictionary", "import", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -15,17 +17,17 @@ readme = "README.md"
 all-features = true
 
 [dependencies]
-encoding_rs = "0.8.35"
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-compiler = { path = "../ferrolex-compiler", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
-sha2 = "0.10.9"
+encoding_rs.workspace = true
+ferrolex-core.workspace = true
+ferrolex-compiler.workspace = true
+ferrolex-suggest.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
-criterion = "0.5.1"
-ferrolex-code = { path = "../ferrolex-code", version = "0.4.0" }
-ferrolex-text = { path = "../ferrolex-text", version = "0.4.0" }
-proptest = "=1.6.0"
+criterion.workspace = true
+ferrolex-code.workspace = true
+ferrolex-text.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "hunspell"

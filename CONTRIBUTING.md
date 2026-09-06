@@ -44,7 +44,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 These commands mirror the Rust gate in the [CI workflow](.github/workflows/ci.yml):
 
 - Workspace lints enable `clippy::pedantic` as a warning in the
-  [workspace lint configuration](Cargo.toml#L68-L70), while `-D warnings`
+  [workspace lint configuration](Cargo.toml#L103-L105), while `-D warnings`
   promotes every Clippy warning to a failure.
 - `RUSTDOCFLAGS="-D warnings"` applies the same fail-on-warning policy to
   rustdoc, including missing or malformed documentation.
@@ -67,6 +67,11 @@ approved suggestion-quality regression, cargo-deny, release-contract checks,
 and package validation. It intentionally does not download licensed fixtures,
 install tools, access registries, or require publishing credentials; those
 network- and credential-dependent workflows remain explicit.
+
+External and internal dependency versions are declared once in the root
+`[workspace.dependencies]` table. Member manifests inherit those entries so a
+dependency upgrade updates one policy location and keeps the workspace graph
+aligned.
 
 The real-world Hunspell fixture suite is opt-in because it needs separately
 obtained, licensed dictionary sources; see
@@ -103,17 +108,8 @@ do not support a `reason` field); remove it once no longer needed.
 
 ### Reviewed cargo-deny license exceptions
 
-The following crate-and-version exceptions were reviewed in [#84][issue-84].
-They are not distribution-wide license allowances and must be revisited with
-every dependency upgrade; remove an exception when the dependency is removed
-or its license expression no longer needs it.
-
-| Crate | SPDX term | Why it is needed | Removal plan |
-| --- | --- | --- | --- |
-| `cbindgen` 0.29.4 | `MPL-2.0` | Build-time generator for Ferrolex's FFI C header; its sources are not shipped in the Ferrolex distribution. | Reassess at every `cbindgen` upgrade; remove if FFI header generation no longer uses it. |
-| `unicode-ident` 1.0.24 | `Unicode-3.0` | Transitive Unicode identifier tables used by Rust procedural-macro tooling; the crate otherwise declares `MIT OR Apache-2.0`. | Reassess at every `unicode-ident` upgrade; remove if its license expression no longer includes this term. |
-
-[issue-84]: https://github.com/sebastian-software/ferrolex/issues/84
+There are currently no license exceptions; keep this section as the review
+point if a future dependency requires one.
 
 See [ADR-0001](docs/adr/0001-code-provenance-policy.md) for the rationale and
 the [GitHub delivery epics](https://github.com/sebastian-software/ferrolex/issues?q=is%3Aissue%20label%3Aepic)

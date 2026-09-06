@@ -5,8 +5,8 @@
 //! a useful derivation without changing lookup's allocation contract.
 
 use super::{
-    compound_boundaries, AffixKind, AffixRule, Flag, FormState, HunspellDictionary, Lexeme,
-    MAX_AFFIX_CHAIN, MAX_DERIVATIONS_PER_LEXEME,
+    AffixKind, AffixRule, Flag, FormState, HunspellDictionary, Lexeme, MAX_AFFIX_CHAIN,
+    MAX_DERIVATIONS_PER_LEXEME, compound_boundaries,
 };
 
 const MAX_COMPOUND_TRACE_STEPS: usize = MAX_DERIVATIONS_PER_LEXEME;

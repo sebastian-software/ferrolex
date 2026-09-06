@@ -1,11 +1,11 @@
 //! Lowering helpers for the source-neutral dictionary IR.
 
 use super::{
-    decode_text_flag, AffixKind, AffixKindIr, AffixRule, AffixRuleIr, BTreeSet, BreakPattern,
-    BreakPatternIr, CaseLanguage, CaseLanguageIr, CompoundConfig, CompoundConfigIr,
-    CompoundPattern, CompoundPatternIr, CompoundSyllableLimitIr, Condition, ConditionAtom,
-    ConditionAtomIr, ConditionIr, Flag, FlagIr, FlagMode, InputConversion, Lexeme, LexemeIr,
-    Morphology, ReplacementRule, ReplacementRuleIr, SpecialFlags, SpecialFlagsIr,
+    AffixKind, AffixKindIr, AffixRule, AffixRuleIr, BTreeSet, BreakPattern, BreakPatternIr,
+    CaseLanguage, CaseLanguageIr, CompoundConfig, CompoundConfigIr, CompoundPattern,
+    CompoundPatternIr, CompoundSyllableLimitIr, Condition, ConditionAtom, ConditionAtomIr,
+    ConditionIr, Flag, FlagIr, FlagMode, InputConversion, Lexeme, LexemeIr, Morphology,
+    ReplacementRule, ReplacementRuleIr, SpecialFlags, SpecialFlagsIr, decode_text_flag,
 };
 use ferrolex_compiler::{FlagModeIr, InputConversionIr};
 

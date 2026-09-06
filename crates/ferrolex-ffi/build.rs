@@ -16,18 +16,23 @@ fn main() {
         PathBuf::from(env::var("OUT_DIR").expect("Cargo sets OUT_DIR for build scripts"))
             .join("ferrolex.h");
 
-    cbindgen::generate(&crate_dir)
-        .unwrap_or_else(|error| panic!("could not generate the ferrolex C header: {error}"))
-        .write_to_file(&generated_header);
+    let generated = cbindgen::generate(&crate_dir)
+        .unwrap_or_else(|error| panic!("could not generate the ferrolex C header: {error}"));
 
     let checked_header = PathBuf::from(crate_dir).join("include/ferrolex.h");
+    if env::var_os("FERROLEX_REGENERATE_HEADER").is_some() {
+        generated.write_to_file(&checked_header);
+        return;
+    }
+
+    generated.write_to_file(&generated_header);
     if checked_header.exists() {
         let generated = fs::read(&generated_header).expect("generated C header is readable");
         let checked = fs::read(&checked_header).expect("checked-in C header is readable");
 
         assert_eq!(
             generated, checked,
-            "the checked-in C header is stale; regenerate it with `cargo run -p ferrolex-ffi --features c-abi --bin generate-header`"
+            "the checked-in C header is stale; regenerate it with `FERROLEX_REGENERATE_HEADER=1 cargo build -p ferrolex-ffi --features c-abi`"
         );
     }
 }

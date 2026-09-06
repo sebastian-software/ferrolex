@@ -1,15 +1,15 @@
 //! Hunspell AFF/DIC parsing and byte decoding.
 
 use super::{
-    encode_text_flag, AffixKind, AffixRule, BTreeSet, ByteEncoding, CaseLanguage, CompoundConfig,
-    CompoundPattern, CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Cow,
-    Diagnostic, Flag, FlagMode, FlagSet, InputConversion, Lexeme, Morphology, MorphologyId,
-    MorphologyTable, ReplacementRule, Severity, SpecialFlags, MAX_AFFIX_ALIASES, MAX_AFFIX_RULES,
-    MAX_AFF_BYTES, MAX_BREAK_PATTERNS, MAX_CHARACTER_MAPS, MAX_COMPOUND_PATTERNS,
-    MAX_COMPOUND_RULES, MAX_COMPOUND_RULE_COMPONENTS, MAX_COMPOUND_RULE_EXPANSIONS,
-    MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_SCALARS, MAX_CONDITION_ATOMS,
-    MAX_DICTIONARY_ENTRIES, MAX_DIC_BYTES, MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS,
-    MAX_LINE_BYTES, MAX_MORPHOLOGY_FIELDS_PER_RECORD, MAX_REPLACEMENT_RULES,
+    AffixKind, AffixRule, BTreeSet, ByteEncoding, CaseLanguage, CompoundConfig, CompoundPattern,
+    CompoundRule, CompoundSyllableLimit, Condition, ConditionAtom, Cow, Diagnostic, Flag, FlagMode,
+    FlagSet, InputConversion, Lexeme, MAX_AFF_BYTES, MAX_AFFIX_ALIASES, MAX_AFFIX_RULES,
+    MAX_BREAK_PATTERNS, MAX_CHARACTER_MAPS, MAX_COMPOUND_PATTERNS, MAX_COMPOUND_RULE_COMPONENTS,
+    MAX_COMPOUND_RULE_EXPANSIONS, MAX_COMPOUND_RULE_EXPANSIONS_PER_RULE, MAX_COMPOUND_RULES,
+    MAX_COMPOUND_SCALARS, MAX_CONDITION_ATOMS, MAX_DIC_BYTES, MAX_DICTIONARY_ENTRIES,
+    MAX_FLAGS_PER_ENTRY, MAX_INPUT_CONVERSIONS, MAX_LINE_BYTES, MAX_MORPHOLOGY_FIELDS_PER_RECORD,
+    MAX_REPLACEMENT_RULES, Morphology, MorphologyId, MorphologyTable, ReplacementRule, Severity,
+    SpecialFlags, encode_text_flag,
 };
 
 #[derive(Default)]
@@ -1877,7 +1877,7 @@ pub(crate) fn parse_affix_rule(
                     .flag_count(flags)
                     .is_none_or(|count| count > MAX_FLAGS_PER_ENTRY) =>
         {
-            return Err("affix continuation flags exceed the 4096-flag importer limit".to_owned())
+            return Err("affix continuation flags exceed the 4096-flag importer limit".to_owned());
         }
         Some((add, flags)) => decode_entry_flags(flags, flag_mode, flag_aliases)
             .map(|flags| (add, flags))
@@ -1995,7 +1995,7 @@ pub(crate) fn parse_condition_atoms(field: &str) -> Result<Vec<ConditionAtom>, S
                 index = end + 1;
             }
             ']' | '(' | ')' | '|' | '*' | '?' | '\\' => {
-                return Err("condition uses syntax outside the supported subset".to_owned())
+                return Err("condition uses syntax outside the supported subset".to_owned());
             }
             literal => {
                 atoms.push(ConditionAtom::Literal(literal));
