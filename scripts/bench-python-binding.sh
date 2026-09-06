@@ -4,7 +4,8 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 
-cargo +1.88 build --manifest-path "$root/crates/ferrolex-python/Cargo.toml" --release
+rust_version=$(python3 "$root/scripts/workspace-rust-version.py")
+cargo +"$rust_version" build --manifest-path "$root/crates/ferrolex-python/Cargo.toml" --release
 
 case "$(uname -s)" in
   Darwin) library_extension=dylib ;;

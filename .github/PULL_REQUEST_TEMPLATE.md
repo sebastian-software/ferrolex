@@ -5,10 +5,10 @@
 ## Validation
 
 - [ ] I ran the focused tests for the changed area.
-- [ ] I ran `cargo +1.88 fmt --all -- --check`.
-- [ ] I ran `cargo +1.88 clippy --workspace --all-targets -- -D warnings` when Rust code changed.
-- [ ] I ran `cargo +1.88 test --workspace` when Rust code or behavior changed.
-- [ ] I ran `RUSTDOCFLAGS="-D warnings" cargo +1.88 doc --workspace --no-deps` when public Rust docs changed.
+- [ ] I ran `cargo fmt --all -- --check`.
+- [ ] I ran `cargo clippy --workspace --all-targets -- -D warnings` when Rust code changed.
+- [ ] I ran `cargo test --workspace` when Rust code or behavior changed.
+- [ ] I ran `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` when public Rust docs changed.
 
 ## Documentation and release impact
 

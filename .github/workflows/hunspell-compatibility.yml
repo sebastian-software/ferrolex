@@ -31,7 +31,14 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.88
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        run: |
+          rust_version="$(python3 scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: sudo apt-get update && sudo apt-get install --yes hunspell
       - run: scripts/fetch-compat-fixtures.sh --set scorecard "$RUNNER_TEMP/ferrolex-compat-fixtures"

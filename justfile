@@ -1,6 +1,7 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-toolchain := "1.88"
+toolchain := `python3 scripts/workspace-rust-version.py`
+fuzz_toolchain := `python3 scripts/fuzz-toolchain.py`
 
 # Fast feedback for the product crates most commonly changed together.
 quick:
@@ -26,5 +27,4 @@ gate: quick
 
 # Optional local smoke coverage; install cargo-fuzz for the pinned nightly first.
 fuzz-smoke:
-    for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation analyze_source project_config word_list; do cargo +nightly-2026-08-31 fuzz run "$$target" -- -runs=256; done
-
+    for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation analyze_source project_config word_list; do RUSTUP_TOOLCHAIN={{fuzz_toolchain}} cargo fuzz run "$$target" -- -runs=256; done
