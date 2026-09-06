@@ -21,6 +21,7 @@ name = "ferrolex"
 path = "src/main.rs"
 
 [dependencies]
+clap.workspace = true
 ferrolex-code.workspace = true
 ferrolex-compiler.workspace = true
 ferrolex-core.workspace = true

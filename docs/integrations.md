@@ -28,5 +28,11 @@ Format-aware integration happens in the owning tool:
 Those tools call ferrolex after parsing. ferrolex deliberately does not embed
 their parsers, own their configuration, or define editor-protocol behavior.
 
+For the shared plain-text boundary, use [`ferrolex-text`](family-tooling.md).
+It is the family tokenizer for extracted prose and catalog strings; the
+consuming tool still owns field selection, source locations, and ignore rules.
+The initial catalog and documentation evaluations are tracked for Palamedes /
+Ferrocat and Ferramenta in the [family tooling contract](family-tooling.md).
+
 All integrations use caller-controlled dictionaries. Verified acquisition and
 local caching remain governed by [ADR-0007](adr/0007-dictionary-distribution.md).
