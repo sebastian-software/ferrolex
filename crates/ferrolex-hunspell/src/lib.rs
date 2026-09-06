@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+// ==== Internal model, lowering, and parser modules ====
 mod cache;
 mod compound;
 mod explanation;
@@ -36,6 +37,7 @@ use ferrolex_compiler::{
 };
 use ferrolex_core::{CandidateIndex, Dictionary};
 
+// ==== Internal re-exports used by the importer ====
 pub(crate) use ir::{
     affix_rule_to_ir, break_pattern_to_ir, case_language_to_ir, compound_to_ir, flag_mode_to_ir,
     input_conversion_to_ir, lexeme_to_ir, replacement_rule_to_ir, special_flags_to_ir,
@@ -53,6 +55,7 @@ pub(crate) use parse::{
     BreakPattern, ParsedAff,
 };
 
+// ==== Public import surface ====
 pub use ferrolex_compiler::DictionaryIr;
 pub use ferrolex_suggest::{
     CandidateSource, RankingSignals, ReplacementRule, SuggestConfig, Suggester,
@@ -69,6 +72,7 @@ pub use explanation::{
     CompoundComponentRole, LookupExplanation, Rejection, RejectionReason,
 };
 
+// ==== Import limits ====
 const MAX_AFF_BYTES: usize = 32 * 1024 * 1024;
 const MAX_DIC_BYTES: usize = 64 * 1024 * 1024;
 // The digest-pinned tr_TR fixture needs at most 22,835 bytes on one entry line.
@@ -106,6 +110,7 @@ const MAX_INPUT_CONVERSIONS: usize = 4_096;
 const MAX_MORPHOLOGY_STRINGS: usize = 1_000_000;
 const MAX_MORPHOLOGY_FIELDS_PER_RECORD: usize = 256;
 
+// ==== Import configuration and diagnostics ====
 /// Selects whether importer diagnostics prevent a dictionary from loading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ImportMode {
@@ -327,6 +332,7 @@ impl ImportResult {
     }
 }
 
+// ==== Dictionary engine ====
 /// An immutable dictionary imported from an `.aff`/`.dic` pair.
 ///
 /// Stems stay in a sorted, read-only set. Affixes are evaluated lazily on
@@ -1160,6 +1166,7 @@ fn rule_indices_by_flag(rules: &[AffixRule]) -> BTreeMap<Flag, Vec<usize>> {
     indices
 }
 
+// ==== Parser and import pipeline ====
 /// Imports UTF-8 `.aff` and `.dic` text into ferrolex's neutral runtime model.
 ///
 /// The supported feature set is documented in `docs/hunspell-format.md` and
@@ -1587,5 +1594,6 @@ fn compound_boundaries(word: &str) -> Option<Vec<usize>> {
     Some(boundaries)
 }
 
+// ==== Tests ====
 #[cfg(test)]
 mod tests;
