@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/ferrolex)](https://docs.rs/ferrolex)
 [![CI](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
-[![MSRV: 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)](CONTRIBUTING.md#rust-toolchain-and-msrv)
+[![MSRV: 1.94](https://img.shields.io/badge/MSRV-1.94-blue.svg)](CONTRIBUTING.md#rust-toolchain-and-msrv)
 [![codecov](https://codecov.io/gh/sebastian-software/ferrolex/branch/main/graph/badge.svg)](https://codecov.io/gh/sebastian-software/ferrolex)
 [![Powered by Sebastian Software](https://img.shields.io/badge/Powered%20by-Sebastian%20Software-00718d?style=flat-square)](https://oss.sebastian-software.com)
 

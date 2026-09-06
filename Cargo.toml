@@ -88,9 +88,9 @@ ureq = { version = "3.2.1", default-features = false, features = ["rustls"] }
 unicode-normalization = "0.1.25"
 
 [workspace.package]
-authors = ["Sebastian Werner"]
+authors = ["Sebastian Software GmbH"]
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.94"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sebastian-software/ferrolex"
 homepage = "https://github.com/sebastian-software/ferrolex"

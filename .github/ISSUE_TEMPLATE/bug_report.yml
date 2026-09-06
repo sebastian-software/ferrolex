@@ -25,7 +25,7 @@ body:
       description: Include the ferrolex version, Rust toolchain or Node version, operating system, and relevant crate or binary.
       placeholder: |
         ferrolex 0.4.0
-        Rust 1.88
+        Rust 1.94
         macOS 15
         ferrolex-cli
     validations:

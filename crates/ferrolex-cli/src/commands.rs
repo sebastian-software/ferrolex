@@ -172,10 +172,10 @@ pub(crate) fn suggest(command: &SuggestCommand) -> Result<RunOutcome, CliError> 
             "suggestion search incomplete: {}",
             completeness_label(result.completeness())
         );
-        if result.suggestions().is_empty() {
-            if let Some(hint) = incomplete_suggestion_hint(result.completeness(), config) {
-                eprintln!("hint: {hint}");
-            }
+        if result.suggestions().is_empty()
+            && let Some(hint) = incomplete_suggestion_hint(result.completeness(), config)
+        {
+            eprintln!("hint: {hint}");
         }
     }
     Ok(RunOutcome::Success)

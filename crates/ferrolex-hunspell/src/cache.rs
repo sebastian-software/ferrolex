@@ -791,10 +791,10 @@ fn validate_dictionary(
             return Err(error.error("compound pattern text exceeds importer line limit"));
         }
     }
-    if let Some(limit) = &dictionary.compound.syllable_limit {
-        if limit.vowels.is_empty() || limit.vowels.len() > MAX_LINE_BYTES {
-            return Err(error.error("compound syllable vowel set is invalid"));
-        }
+    if let Some(limit) = &dictionary.compound.syllable_limit
+        && (limit.vowels.is_empty() || limit.vowels.len() > MAX_LINE_BYTES)
+    {
+        return Err(error.error("compound syllable vowel set is invalid"));
     }
     let mut compound_expansion_count = 0;
     for rule in &dictionary.compound.rules {
@@ -911,10 +911,10 @@ fn validate_condition_atom(
     atom: &ConditionAtom,
     error: DictionaryError,
 ) -> Result<(), RuntimeCacheError> {
-    if let ConditionAtom::Class { members, .. } = atom {
-        if members.is_empty() || members.len() > MAX_LINE_BYTES {
-            return Err(error.error("affix condition class has an invalid member count"));
-        }
+    if let ConditionAtom::Class { members, .. } = atom
+        && (members.is_empty() || members.len() > MAX_LINE_BYTES)
+    {
+        return Err(error.error("affix condition class has an invalid member count"));
     }
     Ok(())
 }

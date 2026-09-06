@@ -142,10 +142,10 @@ fn global_user_dictionary_path() -> Result<PathBuf, CliError> {
 
 fn load_user_dictionaries() -> Result<Vec<WordList>, CliError> {
     let mut paths = vec![PathBuf::from(".ferrolex/words.txt")];
-    if let Ok(global_path) = global_user_dictionary_path() {
-        if global_path != paths[0] {
-            paths.push(global_path);
-        }
+    if let Ok(global_path) = global_user_dictionary_path()
+        && global_path != paths[0]
+    {
+        paths.push(global_path);
     }
 
     let mut dictionaries = Vec::new();

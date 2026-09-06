@@ -35,9 +35,17 @@ unpublished.
 
 ### Rust toolchain and MSRV
 
-ferrolex supports the MSRV declared in the workspace `Cargo.toml`. The pinned
-`rust-toolchain.toml` selects that toolchain locally; run the same core checks
-as CI:
+`workspace.package.rust-version` in the root `Cargo.toml` is the single source
+of truth for the MSRV. The version is raised only when a change needs a newer
+compiler, and it is never more than four stable releases behind the current
+stable Rust. Two surfaces cannot read the manifest at use time: the pinned
+`rust-toolchain.toml` that rustup consumes and the README badge. Raise the MSRV
+in `Cargo.toml`, then run
+`python3 scripts/workspace-rust-version.py --sync`; the matching `--check` runs
+in `just gate` and in CI and fails on drift.
+
+The pinned `rust-toolchain.toml` selects the supported toolchain locally; run
+the same core checks as CI:
 
 ```sh
 cargo fmt --all -- --check
