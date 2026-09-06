@@ -28,7 +28,8 @@ contents.
 
 ## Security
 
-Do not disclose an exploitable vulnerability in a public issue. Contact the
-repository maintainers privately through GitHub with the affected version,
-impact, and a minimal reproduction that does not include secrets or licensed
-data.
+Do not report a vulnerability in a public issue or discussion. Follow
+[SECURITY.md](SECURITY.md): private reporting through this repository's
+**Security** tab, or by email to security@sebastian-software.de. Include the
+affected version, impact, and a minimal reproduction that does not include
+secrets or licensed data.
