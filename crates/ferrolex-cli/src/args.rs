@@ -2,6 +2,8 @@
 
 use super::*;
 
+use clap::{ArgAction, Args, Parser, Subcommand};
+
 pub(crate) struct LineIndex {
     pub(crate) starts: Vec<usize>,
 }
@@ -151,6 +153,579 @@ pub(crate) enum DictionaryCommand {
     Fetch { locale: String, cache_path: PathBuf },
     Install { locale: String, cache_path: PathBuf },
     AddWord { word: String, path: PathBuf },
+}
+
+// The public command model above deliberately stays independent from clap so
+// the command implementations and library users of the test-only parser do
+// not depend on clap's generated types. These raw types provide the single
+// declarative boundary between argv and that model.
+#[derive(Debug, Parser)]
+#[command(
+    name = "ferrolex",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+struct RawCli {
+    #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+    help: bool,
+    #[arg(short = 'V', long = "version", action = ArgAction::SetTrue)]
+    version: bool,
+    #[command(subcommand)]
+    command: Option<RawCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum RawCommand {
+    Check(RawCheck),
+    Suggest(RawSuggest),
+    Explain(RawExplain),
+    Analyze(RawAnalyze),
+    Compile(RawCompile),
+    Inspect(RawInspect),
+    Validate(RawValidate),
+    #[command(subcommand)]
+    Dictionary(RawDictionary),
+}
+
+#[derive(Debug, Args)]
+struct RawSources {
+    #[arg(long = "dictionary", value_name = "PATH", action = ArgAction::Append)]
+    dictionary: Vec<String>,
+    #[arg(long = "compiled", value_name = "PATH", action = ArgAction::Append)]
+    compiled: Vec<String>,
+    #[arg(long = "hunspell", value_name = "AFF_PATH", action = ArgAction::Append)]
+    hunspell: Vec<String>,
+    #[arg(long = "format", value_name = "text|json", action = ArgAction::Append)]
+    format: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct RawCheck {
+    #[command(flatten)]
+    sources: RawSources,
+    #[arg(long = "file", value_name = "PATH|-", action = ArgAction::Append)]
+    files: Vec<String>,
+    #[arg(value_name = "WORD_OR_PATH", num_args = 0.., allow_hyphen_values = true)]
+    positionals: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct RawSuggest {
+    #[command(flatten)]
+    sources: RawSources,
+    #[arg(long = "max-results", value_name = "COUNT", action = ArgAction::Append)]
+    max_results: Vec<usize>,
+    #[arg(long = "max-edit-distance", value_name = "DISTANCE", action = ArgAction::Append)]
+    max_edit_distance: Vec<usize>,
+    #[arg(long = "max-candidates", value_name = "COUNT", action = ArgAction::Append)]
+    max_candidates: Vec<usize>,
+    #[arg(long = "max-edit-cells", value_name = "COUNT", action = ArgAction::Append)]
+    max_edit_cells: Vec<usize>,
+    #[arg(value_name = "WORD")]
+    word: String,
+}
+
+#[derive(Debug, Args)]
+struct RawExplain {
+    #[arg(long = "hunspell", value_name = "AFF_PATH", action = ArgAction::Append)]
+    hunspell: Vec<String>,
+    #[arg(value_name = "WORD")]
+    word: String,
+}
+
+#[derive(Debug, Args)]
+struct RawAnalyze {
+    #[command(flatten)]
+    sources: RawSources,
+    #[arg(long = "config", value_name = "PATH", action = ArgAction::Append)]
+    config: Vec<String>,
+    #[arg(long = "include", value_name = "GLOB", action = ArgAction::Append)]
+    include: Vec<String>,
+    #[arg(long = "exclude", value_name = "GLOB", action = ArgAction::Append)]
+    exclude: Vec<String>,
+    #[arg(long = "suggest", action = ArgAction::SetTrue)]
+    suggest: bool,
+    #[arg(
+        long = "comment-prefix",
+        value_name = "PREFIX",
+        action = ArgAction::Append,
+        allow_hyphen_values = true
+    )]
+    comment_prefix: Vec<String>,
+    #[arg(long = "comment-syntax", value_name = "SYNTAX", action = ArgAction::Append)]
+    comment_syntax: Vec<String>,
+    #[arg(value_name = "PATH", num_args = 0..)]
+    paths: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct RawCompile {
+    #[arg(long = "dictionary", value_name = "PATH", action = ArgAction::Append)]
+    dictionary: Vec<String>,
+    #[arg(short = 'o', value_name = "ARTIFACT", action = ArgAction::Append)]
+    output: Vec<String>,
+    #[arg(value_name = "PATH", num_args = 0..)]
+    paths: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct RawInspect {
+    #[arg(value_name = "ARTIFACT")]
+    path: String,
+}
+
+#[derive(Debug, Args)]
+struct RawValidate {
+    #[arg(long = "format", value_name = "text|json", action = ArgAction::Append)]
+    format: Vec<String>,
+    #[arg(long = "strict", action = ArgAction::SetTrue)]
+    strict: bool,
+    #[arg(long = "compiled", value_name = "ARTIFACT", action = ArgAction::Append)]
+    compiled: Vec<String>,
+    #[arg(value_name = "PATH", num_args = 0..)]
+    paths: Vec<String>,
+}
+
+#[derive(Debug, Subcommand)]
+enum RawDictionary {
+    List,
+    Fetch {
+        locale: String,
+        #[arg(long = "cache", value_name = "PATH", action = ArgAction::Append)]
+        cache: Vec<String>,
+    },
+    Install {
+        locale: String,
+        #[arg(long = "cache", value_name = "PATH", action = ArgAction::Append)]
+        cache: Vec<String>,
+    },
+    AddWord {
+        #[arg(long = "workspace", value_name = "PATH", action = ArgAction::Append)]
+        workspace: Vec<String>,
+        #[arg(long = "global", action = ArgAction::SetTrue)]
+        global: bool,
+        #[arg(value_name = "WORD")]
+        word: String,
+    },
+}
+
+pub(crate) fn parse_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<Command, CliError> {
+    let arguments = arguments.into_iter().collect::<Vec<_>>();
+    let Some(_) = arguments.first() else {
+        return Err(CliError::Usage("missing command".to_owned()));
+    };
+
+    match arguments.get(1).map(String::as_str) {
+        Some("--help" | "-h") => return Ok(Command::Help(USAGE)),
+        Some("--version" | "-V") if arguments.len() == 2 => return Ok(Command::Version),
+        Some("--version" | "-V") => {
+            return Err(CliError::Usage(
+                "`--version` does not accept arguments".to_owned(),
+            ));
+        }
+        None => return Err(CliError::Usage("missing command".to_owned())),
+        _ => {}
+    }
+
+    if requests_help(&arguments) {
+        return Ok(command_help(arguments.get(1).map(String::as_str)));
+    }
+
+    let parsed = RawCli::try_parse_from(&arguments)
+        .map_err(|error| CliError::Usage(error.to_string().trim().to_owned()))?;
+    if parsed.help {
+        return Ok(Command::Help(USAGE));
+    }
+    if parsed.version {
+        return Ok(Command::Version);
+    }
+
+    parsed
+        .command
+        .ok_or_else(|| CliError::Usage("missing command".to_owned()))
+        .and_then(|command| convert_command(command, &arguments))
+}
+
+fn command_help(command: Option<&str>) -> Command {
+    Command::Help(match command {
+        Some("check") => HELP_CHECK,
+        Some("suggest") => HELP_SUGGEST,
+        Some("explain") => HELP_EXPLAIN,
+        Some("analyze") => HELP_ANALYZE,
+        Some("compile") => HELP_COMPILE,
+        Some("inspect") => HELP_INSPECT,
+        Some("validate") => HELP_VALIDATE,
+        Some("dictionary") => HELP_DICTIONARY,
+        _ => USAGE,
+    })
+}
+
+fn requests_help(arguments: &[String]) -> bool {
+    let mut arguments = arguments.iter().skip(2);
+    while let Some(argument) = arguments.next() {
+        if argument == "--" {
+            break;
+        }
+        if takes_value(argument) {
+            if !argument.contains('=') {
+                let _ = arguments.next();
+            }
+            continue;
+        }
+        if matches!(argument.as_str(), "--help" | "-h") {
+            return true;
+        }
+    }
+    false
+}
+
+fn takes_value(argument: &str) -> bool {
+    let option = argument
+        .split_once('=')
+        .map_or(argument, |(option, _)| option);
+    matches!(
+        option,
+        "--dictionary"
+            | "--compiled"
+            | "--hunspell"
+            | "--file"
+            | "--format"
+            | "--max-results"
+            | "--max-edit-distance"
+            | "--max-candidates"
+            | "--max-edit-cells"
+            | "--config"
+            | "--include"
+            | "--exclude"
+            | "--comment-prefix"
+            | "--comment-syntax"
+            | "--workspace"
+            | "--cache"
+            | "-o"
+    )
+}
+
+fn convert_command(command: RawCommand, arguments: &[String]) -> Result<Command, CliError> {
+    match command {
+        RawCommand::Check(command) => convert_check(&command, arguments),
+        RawCommand::Suggest(command) => Ok(Command::Suggest(SuggestCommand {
+            dictionary_paths: paths(&command.sources.dictionary, "--dictionary")?,
+            compiled_paths: paths(&command.sources.compiled, "--compiled")?,
+            hunspell_affix_paths: paths(&command.sources.hunspell, "--hunspell")?,
+            max_results: one_usize(&command.max_results, "--max-results", true)?,
+            max_edit_distance: one_usize(&command.max_edit_distance, "--max-edit-distance", false)?,
+            max_candidates: one_usize(&command.max_candidates, "--max-candidates", true)?,
+            max_edit_cells: one_usize(&command.max_edit_cells, "--max-edit-cells", true)?,
+            output_format: output_format(&command.sources.format)?,
+            word: command.word,
+        })),
+        RawCommand::Explain(command) => Ok(Command::Explain(ExplainCommand {
+            hunspell_affix_path: one_path(&command.hunspell, "--hunspell")?.ok_or_else(|| {
+                CliError::Usage("explain requires exactly one `--hunspell` path".to_owned())
+            })?,
+            word: command.word,
+        })),
+        RawCommand::Analyze(command) => convert_analyze(command),
+        RawCommand::Compile(command) => convert_compile(&command),
+        RawCommand::Inspect(command) => Ok(Command::Inspect(PathBuf::from(command.path))),
+        RawCommand::Validate(command) => convert_validate(&command),
+        RawCommand::Dictionary(command) => convert_dictionary(command),
+    }
+}
+
+fn convert_check(command: &RawCheck, arguments: &[String]) -> Result<Command, CliError> {
+    let target = check_target(arguments)?;
+    Ok(Command::Check(CheckCommand {
+        dictionary_paths: paths(&command.sources.dictionary, "--dictionary")?,
+        compiled_paths: paths(&command.sources.compiled, "--compiled")?,
+        hunspell_affix_paths: paths(&command.sources.hunspell, "--hunspell")?,
+        output_format: output_format(&command.sources.format)?,
+        target,
+    }))
+}
+
+fn check_target(arguments: &[String]) -> Result<CheckTarget, CliError> {
+    let mut target = None;
+    let mut options_ended = false;
+    let mut arguments = arguments.iter().skip(2);
+    while let Some(argument) = arguments.next() {
+        if options_ended {
+            push_check_positional(&mut target, argument.to_owned())?;
+            continue;
+        }
+        if argument == "--" {
+            options_ended = true;
+            continue;
+        }
+        if takes_value(argument) {
+            let option = argument
+                .split_once('=')
+                .map_or(argument.as_str(), |(option, _)| option);
+            if option == "--file" {
+                let value = argument.split_once('=').map_or_else(
+                    || arguments.next().map(ToOwned::to_owned),
+                    |(_, value)| Some(value.to_owned()),
+                );
+                let value = value
+                    .ok_or_else(|| CliError::Usage("`--file` requires a path or `-`".to_owned()))?;
+                push_check_input(&mut target, check_input(value)?)?;
+            } else if !argument.contains('=') {
+                let _ = arguments.next();
+            }
+            continue;
+        }
+        if argument.starts_with('-') {
+            continue;
+        }
+        push_check_positional(&mut target, argument.to_owned())?;
+    }
+    target.ok_or_else(|| CliError::Usage("check requires a word or `--file`".to_owned()))
+}
+
+fn check_input(path: String) -> Result<CheckInput, CliError> {
+    if path == "-" {
+        return Ok(CheckInput::Stdin);
+    }
+    if path.is_empty() || path.starts_with('-') {
+        return Err(CliError::Usage(
+            "`--file` requires a path or `-`".to_owned(),
+        ));
+    }
+    Ok(CheckInput::File(PathBuf::from(path)))
+}
+
+fn push_check_input(target: &mut Option<CheckTarget>, input: CheckInput) -> Result<(), CliError> {
+    match target {
+        None => *target = Some(CheckTarget::Inputs(vec![input])),
+        Some(CheckTarget::Inputs(inputs)) => {
+            if input == CheckInput::Stdin && inputs.contains(&CheckInput::Stdin) {
+                return Err(CliError::Usage(
+                    "stdin (`--file -`) may only be supplied once".to_owned(),
+                ));
+            }
+            inputs.push(input);
+        }
+        Some(CheckTarget::Word(_)) => {
+            return Err(CliError::Usage(
+                "check cannot mix a word with file inputs".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn push_check_positional(target: &mut Option<CheckTarget>, value: String) -> Result<(), CliError> {
+    match target {
+        None => *target = Some(CheckTarget::Word(value)),
+        Some(CheckTarget::Inputs(inputs)) => inputs.push(CheckInput::File(PathBuf::from(value))),
+        Some(CheckTarget::Word(_)) => {
+            return Err(CliError::Usage(
+                "check accepts one word, or one or more file inputs".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn convert_analyze(command: RawAnalyze) -> Result<Command, CliError> {
+    let path = match command.paths.as_slice() {
+        [path] => PathBuf::from(path),
+        [] => return Err(CliError::Usage("analyze requires a path".to_owned())),
+        _ => {
+            return Err(CliError::Usage(
+                "analyze accepts exactly one path".to_owned(),
+            ));
+        }
+    };
+    let comment_syntax = match (
+        command.comment_prefix.as_slice(),
+        command.comment_syntax.as_slice(),
+    ) {
+        ([], []) => None,
+        ([prefix], []) if !prefix.is_empty() => Some(CommentSyntax::line(prefix.clone())),
+        ([], [syntax]) if syntax == "html" => Some(CommentSyntax::Html),
+        ([], [_]) => {
+            return Err(CliError::Usage(
+                "`--comment-syntax` supports only `html`".to_owned(),
+            ));
+        }
+        _ => {
+            return Err(CliError::Usage(
+                "only one comment syntax may be supplied".to_owned(),
+            ));
+        }
+    };
+    if command.comment_prefix.iter().any(String::is_empty) {
+        return Err(CliError::Usage(
+            "`--comment-prefix` requires a non-empty prefix".to_owned(),
+        ));
+    }
+    Ok(Command::Analyze(AnalyzeCommand {
+        dictionary_paths: paths(&command.sources.dictionary, "--dictionary")?,
+        compiled_paths: paths(&command.sources.compiled, "--compiled")?,
+        hunspell_affix_paths: paths(&command.sources.hunspell, "--hunspell")?,
+        config_path: one_path(&command.config, "--config")?,
+        comment_syntax,
+        include_patterns: non_empty_strings(command.include, "--include")?,
+        exclude_patterns: non_empty_strings(command.exclude, "--exclude")?,
+        suggest: command.suggest,
+        output_format: output_format(&command.sources.format)?,
+        path,
+    }))
+}
+
+fn convert_compile(command: &RawCompile) -> Result<Command, CliError> {
+    let output_path = one_path(&command.output, "-o")?
+        .ok_or_else(|| CliError::Usage("compile requires an `-o` artifact path".to_owned()))?;
+    let dictionary = one_path(&command.dictionary, "--dictionary")?;
+    let input = match (dictionary, command.paths.as_slice()) {
+        (Some(path), []) => CompileInput::WordList(path),
+        (None, [aff_path, dic_path]) => CompileInput::Hunspell {
+            aff_path: PathBuf::from(aff_path),
+            dic_path: PathBuf::from(dic_path),
+        },
+        (Some(_), _) => {
+            return Err(CliError::Usage(
+                "compile accepts either `--dictionary` or exactly an AFF and DIC path".to_owned(),
+            ));
+        }
+        (None, _) => {
+            return Err(CliError::Usage(
+                "compile requires a `--dictionary` path or exactly an AFF and DIC path".to_owned(),
+            ));
+        }
+    };
+    Ok(Command::Compile(CompileCommand { input, output_path }))
+}
+
+fn convert_validate(command: &RawValidate) -> Result<Command, CliError> {
+    let output_format = output_format(&command.format)?;
+    let compiled = one_path(&command.compiled, "--compiled")?;
+    if let Some(path) = compiled {
+        if command.strict || !command.paths.is_empty() {
+            return Err(CliError::Usage(
+                "`validate --compiled` accepts only one compiled artifact path".to_owned(),
+            ));
+        }
+        return Ok(Command::Validate(ValidateCommand::Compiled {
+            path,
+            output_format,
+        }));
+    }
+    if command.paths.len() != 2 {
+        return Err(CliError::Usage(
+            "validate requires exactly an AFF path and a DIC path".to_owned(),
+        ));
+    }
+    Ok(Command::Validate(ValidateCommand::Hunspell {
+        strict: command.strict,
+        aff_path: PathBuf::from(&command.paths[0]),
+        dic_path: PathBuf::from(&command.paths[1]),
+        output_format,
+    }))
+}
+
+fn convert_dictionary(command: RawDictionary) -> Result<Command, CliError> {
+    let command = match command {
+        RawDictionary::List => DictionaryCommand::List,
+        RawDictionary::Fetch { locale, cache } => DictionaryCommand::Fetch {
+            locale,
+            cache_path: one_path(&cache, "--cache")?
+                .ok_or_else(|| CliError::Usage("dictionary fetch requires `--cache`".to_owned()))?,
+        },
+        RawDictionary::Install { locale, cache } => DictionaryCommand::Install {
+            locale,
+            cache_path: one_path(&cache, "--cache")?.ok_or_else(|| {
+                CliError::Usage("dictionary install requires `--cache`".to_owned())
+            })?,
+        },
+        RawDictionary::AddWord {
+            workspace,
+            global,
+            word,
+        } => {
+            if global && !workspace.is_empty() {
+                return Err(CliError::Usage(
+                    "choose either `--workspace` or `--global`".to_owned(),
+                ));
+            }
+            let path = if global {
+                super::global_user_dictionary_path()?
+            } else {
+                one_path(&workspace, "--workspace")?
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".ferrolex/words.txt")
+            };
+            DictionaryCommand::AddWord { word, path }
+        }
+    };
+    Ok(Command::Dictionary(command))
+}
+
+fn paths(values: &[String], option: &str) -> Result<Vec<PathBuf>, CliError> {
+    values
+        .iter()
+        .map(|value| path_value(value, option))
+        .collect()
+}
+
+fn one_path(values: &[String], option: &str) -> Result<Option<PathBuf>, CliError> {
+    match values {
+        [] => Ok(None),
+        [value] => path_value(value, option).map(Some),
+        _ => Err(CliError::Usage(format!(
+            "`{option}` may only be supplied once"
+        ))),
+    }
+}
+
+fn path_value(value: &str, option: &str) -> Result<PathBuf, CliError> {
+    if value.is_empty() || value.starts_with('-') {
+        return Err(CliError::Usage(format!("`{option}` requires a path")));
+    }
+    Ok(PathBuf::from(value))
+}
+
+fn non_empty_strings(values: Vec<String>, option: &str) -> Result<Vec<String>, CliError> {
+    if values.iter().any(String::is_empty) {
+        return Err(CliError::Usage(format!("`{option}` requires a value")));
+    }
+    Ok(values)
+}
+
+fn output_format(values: &[String]) -> Result<OutputFormat, CliError> {
+    match values {
+        [] => Ok(OutputFormat::Text),
+        [value] => match value.as_str() {
+            "text" => Ok(OutputFormat::Text),
+            "json" => Ok(OutputFormat::Json),
+            _ => Err(CliError::Usage(
+                "`--format` supports only `text` or `json`".to_owned(),
+            )),
+        },
+        _ => Err(CliError::Usage(
+            "`--format` may only be supplied once".to_owned(),
+        )),
+    }
+}
+
+fn one_usize(
+    values: &[usize],
+    option: &str,
+    must_be_positive: bool,
+) -> Result<Option<usize>, CliError> {
+    match values {
+        [] => Ok(None),
+        [value] if must_be_positive && *value == 0 => Err(CliError::Usage(format!(
+            "`{option}` requires a positive integer"
+        ))),
+        [value] => Ok(Some(*value)),
+        _ => Err(CliError::Usage(format!(
+            "`{option}` may only be supplied once"
+        ))),
+    }
 }
 
 #[derive(Debug)]
