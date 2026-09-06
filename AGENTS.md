@@ -1,5 +1,13 @@
 # Repository guidance
 
+## Language and commits
+
+- All durable repository artifacts use US English
+  ([ADR-0003](docs/adr/0003-project-language-us-english.md)).
+- Commit messages follow Conventional Commits and Release Please derives
+  versions and changelogs from them; CI validates the pull-request title as
+  well ([ADR-0004](docs/adr/0004-conventional-commits-and-release-please.md)).
+
 ## Contribution boundaries
 
 - Keep ferrolex independently implemented. Do not use Spellbook as porting
@@ -30,3 +38,18 @@
 The authoritative ADR index is [docs/adr/README.md](docs/adr/README.md).
 Update the relevant living ADR when a change alters a documented architectural
 or product-boundary decision.
+
+---
+
+<!-- sebastian-software-consumer-agents:start -->
+
+# Standards-managed repo guardrails
+
+- Do not hand-edit managed files or standards-owned marker sections.
+- If `standards check` reports drift, run `standards apply` or update standards.
+- `pnpm agent:check` may omit `standards check`; CI can still fail on drift.
+- Fix or format every file reported by `oxfmt` whenever practical.
+- For generated files, prefer formatting in the generator step.
+- If formatting is not viable, use repo-local `.prettierignore`.
+- Never add repo-specific ignores to managed `.oxfmtrc.json`.
+<!-- sebastian-software-consumer-agents:end -->
