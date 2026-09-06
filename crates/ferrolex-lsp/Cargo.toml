@@ -2,26 +2,32 @@
 name = "ferrolex-lsp"
 version = "0.4.0"
 description = "Generic stdio language server for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
+documentation = "https://docs.rs/ferrolex-lsp"
+keywords = ["spell-checking", "language-server", "ferramenta"]
 categories.workspace = true
+readme = "README.md"
 publish = false
+
+[package.metadata.docs.rs]
+all-features = true
 
 [[bin]]
 name = "ferrolex-lsp"
 path = "src/main.rs"
 
 [dependencies]
-ferrolex-code = { path = "../ferrolex-code", version = "0.4.0" }
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
-lsp-server = "=0.8.0"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+ferrolex-code.workspace = true
+ferrolex-core.workspace = true
+ferrolex-suggest.workspace = true
+lsp-server.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

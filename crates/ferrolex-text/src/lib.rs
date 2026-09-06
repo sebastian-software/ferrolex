@@ -21,7 +21,7 @@
 
 use std::ops::Range;
 
-use ferrolex_core::{contains_normalized, Dictionary};
+use ferrolex_core::{Dictionary, contains_normalized};
 use unicode_normalization::char::canonical_combining_class;
 
 /// A misspelled natural-language token and its byte range in the input text.
@@ -238,11 +238,13 @@ mod tests {
     fn ignores_alphabetic_fragments_adjacent_to_numbers() {
         let dictionary = WordList::new(["place"]).expect("test entries are valid");
 
-        assert!(check_text(
-            &dictionary,
-            "1st MP3 1990s model2 2nd-place Ⅻ Ⅻth fooⅫ Ⅻfoo"
-        )
-        .next()
-        .is_none());
+        assert!(
+            check_text(
+                &dictionary,
+                "1st MP3 1990s model2 2nd-place Ⅻ Ⅻth fooⅫ Ⅻfoo"
+            )
+            .next()
+            .is_none()
+        );
     }
 }

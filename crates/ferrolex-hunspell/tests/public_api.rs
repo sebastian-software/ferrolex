@@ -1,7 +1,7 @@
 use ferrolex_core::Dictionary;
 use ferrolex_hunspell::{
-    import, CandidateSource, DictionaryIr, ImportMode, RankingSignals, ReplacementRule,
-    SuggestConfig,
+    CandidateSource, DictionaryIr, ImportMode, RankingSignals, ReplacementRule, SuggestConfig,
+    import,
 };
 
 #[test]

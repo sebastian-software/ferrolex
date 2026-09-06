@@ -2,14 +2,20 @@
 name = "ferrolex-python"
 version = "0.4.0"
 description = "Experimental Python binding spike for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
+documentation = "https://docs.rs/ferrolex-python"
+keywords = ["spell-checking", "python", "ferramenta"]
 categories.workspace = true
+readme = "README.md"
 publish = false
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lib]
 name = "ferrolex_python"
@@ -17,9 +23,9 @@ crate-type = ["cdylib", "rlib"]
 test = false
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
-ferrolex-suggest = { path = "../ferrolex-suggest", version = "0.4.0" }
-pyo3 = "=0.29.2"
+ferrolex-core.workspace = true
+ferrolex-suggest.workspace = true
+pyo3.workspace = true
 
 [lints]
 workspace = true

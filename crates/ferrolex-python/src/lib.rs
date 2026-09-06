@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use ferrolex_core::{contains_normalized, Normalization, WordList};
+use ferrolex_core::{Normalization, WordList, contains_normalized};
 use ferrolex_suggest::{SuggestConfig, Suggester};
 use pyo3::prelude::*;
 

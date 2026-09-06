@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use ferrolex_compiler::{compile_words, CompiledDictionary};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use ferrolex_compiler::{CompiledDictionary, compile_words};
 use ferrolex_core::{Dictionary, Normalization, WordList};
 use fst::{Set, SetBuilder};
 
@@ -125,9 +125,11 @@ fn loading(c: &mut Criterion) {
         let plain = WordList::from_text(Normalization::Exact, &text);
         let compiled = CompiledDictionary::load(bytes.clone()).expect("artifact loads");
         assert_eq!(plain.len(), compiled.len());
-        assert!(entries
-            .iter()
-            .all(|word| plain.contains(word) == compiled.contains(word)));
+        assert!(
+            entries
+                .iter()
+                .all(|word| plain.contains(word) == compiled.contains(word))
+        );
 
         group.throughput(Throughput::Elements(size as u64));
         group.bench_with_input(

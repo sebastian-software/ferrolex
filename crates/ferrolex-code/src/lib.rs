@@ -358,7 +358,7 @@ impl ProjectConfig {
                                 line: line_number,
                                 message: "single-letter-prefix must be `join` or `separate`"
                                     .to_owned(),
-                            })
+                            });
                         }
                     };
                     config.single_letter_prefix = Some(value);
@@ -406,7 +406,7 @@ impl ProjectConfig {
                     return Err(ProjectConfigError::InvalidLine {
                         line: line_number,
                         message: format!("unknown key `{key}`"),
-                    })
+                    });
                 }
             }
         }
@@ -1385,9 +1385,9 @@ mod tests {
     use ferrolex_core::{Checker, Dictionary, Normalization, UserDictionary, WordList};
 
     use super::{
-        classify, recombine_identifier_suggestion, split_identifier, Analyzer, CommentSyntax,
-        DirectiveProblem, Document, IdentifierSplitConfig, ProjectConfig, ProjectConfigError,
-        SingleLetterPrefix, TokenClass,
+        Analyzer, CommentSyntax, DirectiveProblem, Document, IdentifierSplitConfig, ProjectConfig,
+        ProjectConfigError, SingleLetterPrefix, TokenClass, classify,
+        recombine_identifier_suggestion, split_identifier,
     };
 
     struct CountingDictionary {
@@ -1481,10 +1481,12 @@ mod tests {
 
         let normalized = CountingDictionary::new("café");
         let analyzer = Analyzer::builder(&normalized).build();
-        assert!(analyzer
-            .check(&Document::new("cafe\u{301}"))
-            .findings()
-            .is_empty());
+        assert!(
+            analyzer
+                .check(&Document::new("cafe\u{301}"))
+                .findings()
+                .is_empty()
+        );
         assert_eq!(normalized.lookups.load(Ordering::Relaxed), 2);
 
         let changing = ChangingDictionary {
@@ -1657,10 +1659,12 @@ mod tests {
             .expect("pattern is valid")
             .build();
 
-        assert!(analyzer
-            .check(&Document::new("foobar"))
-            .findings()
-            .is_empty());
+        assert!(
+            analyzer
+                .check(&Document::new("foobar"))
+                .findings()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1680,11 +1684,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["typo", "typo"]
         );
-        assert!(analyzer
-            .check(&Document::new(source))
-            .findings()
-            .iter()
-            .any(|finding| finding.word() == "local"));
+        assert!(
+            analyzer
+                .check(&Document::new(source))
+                .findings()
+                .iter()
+                .any(|finding| finding.word() == "local")
+        );
     }
 
     #[test]
@@ -1697,10 +1703,12 @@ mod tests {
             analyzer.check(&Document::new(source).with_comment_syntax(CommentSyntax::line("//")));
 
         assert!(analysis.directive_diagnostics().is_empty());
-        assert!(analysis
-            .findings()
-            .iter()
-            .any(|finding| finding.word() == "typo"));
+        assert!(
+            analysis
+                .findings()
+                .iter()
+                .any(|finding| finding.word() == "typo")
+        );
     }
 
     #[test]
@@ -1709,10 +1717,12 @@ mod tests {
         let analyzer = Analyzer::builder(&dictionary).build();
         let source = "<!-- ferrolex:ignore typo -->\ntypo";
 
-        assert!(analyzer
-            .check(&Document::new(source).with_comment_syntax(CommentSyntax::Html))
-            .findings()
-            .is_empty());
+        assert!(
+            analyzer
+                .check(&Document::new(source).with_comment_syntax(CommentSyntax::Html))
+                .findings()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1742,10 +1752,12 @@ mod tests {
             .build();
         let analyzer = Analyzer::builder(&checker).build();
 
-        assert!(analyzer
-            .check(&Document::new("FerrolexProject"))
-            .findings()
-            .is_empty());
+        assert!(
+            analyzer
+                .check(&Document::new("FerrolexProject"))
+                .findings()
+                .is_empty()
+        );
     }
 
     #[test]

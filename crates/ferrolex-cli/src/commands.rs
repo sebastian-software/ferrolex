@@ -275,7 +275,7 @@ pub(crate) fn add_user_dictionary_word(word: &str, path: &Path) -> Result<RunOut
             return Err(CliError::ReadDictionary {
                 path: path.to_path_buf(),
                 source,
-            })
+            });
         }
     };
     let dictionary = UserDictionary::from_text(Normalization::Nfc, &text);
@@ -1026,7 +1026,7 @@ pub(crate) fn load_installed_hunspell_dictionary(
             return Err(CliError::ReadHunspellCache {
                 path: cache_path.clone(),
                 source,
-            })
+            });
         }
     };
 
@@ -1772,7 +1772,9 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<RunOutcome, CliError> {
             println!("semantics-version: {}", metadata.semantics_version());
             println!("source-aff-sha256: {}", hex_digest(sources.aff()));
             println!("source-dic-sha256: {}", hex_digest(sources.dic()));
-            println!("format-capabilities: flag-modes, case-fallback, language-casing, morphology, lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, keyboard-layout, character-maps, compounds, breaks, word-characters, replacement-rules, ignored-characters, input-conversions, output-conversions, full-strip, complex-prefixes");
+            println!(
+                "format-capabilities: flag-modes, case-fallback, language-casing, morphology, lexemes, prefixes, suffixes, cross-product, continuation-flags, conditions, special-flags, keyboard-layout, character-maps, compounds, breaks, word-characters, replacement-rules, ignored-characters, input-conversions, output-conversions, full-strip, complex-prefixes"
+            );
         }
         Err(source) => {
             return Err(CliError::LoadArtifact {

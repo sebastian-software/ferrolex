@@ -3,8 +3,8 @@
 use std::error::Error;
 
 use ferrolex::{
-    import, Checker, Dictionary, ImportMode, Normalization, SuggestConfig, Suggester,
-    UserDictionary, WordList,
+    Checker, Dictionary, ImportMode, Normalization, SuggestConfig, Suggester, UserDictionary,
+    WordList, import,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {

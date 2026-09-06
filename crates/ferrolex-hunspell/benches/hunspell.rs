@@ -1,11 +1,11 @@
 use std::fmt::Write as _;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ferrolex_code::{Analyzer, Document};
 use ferrolex_core::Dictionary;
 use ferrolex_hunspell::{
-    compile_runtime_cache, import, load_runtime_cache, HunspellDictionary, ImportMode,
-    SourceDigests,
+    HunspellDictionary, ImportMode, SourceDigests, compile_runtime_cache, import,
+    load_runtime_cache,
 };
 use ferrolex_suggest::{Completeness, SuggestConfig, SuggestScratch, Suggester, Suggestion};
 use ferrolex_text::check_text;

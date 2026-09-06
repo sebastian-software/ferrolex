@@ -1,6 +1,6 @@
 use ferrolex::{
-    catalog_import_encodings, find_locale, import, ByteEncoding, Checker, Dictionary,
-    HunspellDictionary, ImportMode, SourceEncoding, SuggestConfig, Suggester, WordList,
+    ByteEncoding, Checker, Dictionary, HunspellDictionary, ImportMode, SourceEncoding,
+    SuggestConfig, Suggester, WordList, catalog_import_encodings, find_locale, import,
 };
 
 #[test]

@@ -2,7 +2,7 @@
   "name": "ferrolex",
   "displayName": "Ferrolex",
   "description": "Spell checking through the ferrolex language server.",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "publisher": "sebastian-software",
   "license": "MIT OR Apache-2.0",

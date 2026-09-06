@@ -206,9 +206,11 @@ mod tests {
     fn trims_line_oriented_input_before_persisting() {
         let dictionary = UserDictionary::new(Normalization::Exact);
 
-        assert!(dictionary
-            .insert("  padded  ")
-            .expect("trimmed word is valid"));
+        assert!(
+            dictionary
+                .insert("  padded  ")
+                .expect("trimmed word is valid")
+        );
         assert_eq!(dictionary.to_text(), "padded\n");
         assert!(
             UserDictionary::from_text(Normalization::Exact, &dictionary.to_text())

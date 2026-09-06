@@ -93,15 +93,19 @@ fn every_command_has_a_focused_help_screen() {
 fn version_and_error_contract_cross_the_process_boundary() {
     let version = run(&["--version"]);
     assert!(version.status.success());
-    assert!(String::from_utf8(version.stdout)
-        .expect("version is UTF-8")
-        .starts_with("ferrolex "));
+    assert!(
+        String::from_utf8(version.stdout)
+            .expect("version is UTF-8")
+            .starts_with("ferrolex ")
+    );
 
     let usage = run(&["check", "word"]);
     assert_eq!(usage.status.code(), Some(2));
-    assert!(String::from_utf8(usage.stderr)
-        .expect("usage diagnostic is UTF-8")
-        .contains("Usage: ferrolex"));
+    assert!(
+        String::from_utf8(usage.stderr)
+            .expect("usage diagnostic is UTF-8")
+            .contains("Usage: ferrolex")
+    );
 
     let runtime = run(&["check", "--dictionary", "does-not-exist.txt", "word"]);
     assert_eq!(runtime.status.code(), Some(3));
@@ -421,9 +425,11 @@ fn workspace_user_words_round_trip_across_cli_processes() {
 
     let suggested = run_in(&directory, &["suggest", "projecttrm"]);
     assert!(suggested.status.success());
-    assert!(String::from_utf8(suggested.stdout)
-        .expect("stdout is UTF-8")
-        .contains("suggestion: projectterm"));
+    assert!(
+        String::from_utf8(suggested.stdout)
+            .expect("stdout is UTF-8")
+            .contains("suggestion: projectterm")
+    );
 
     let analyzed = run_in(&directory, &["analyze", "source.txt"]);
     assert!(analyzed.status.success());
@@ -512,9 +518,11 @@ fn a_catalog_shaped_filename_does_not_override_local_source_encoding() {
         String::from_utf8(output.stdout).expect("stdout is UTF-8"),
         "accepted: café\n"
     );
-    assert!(String::from_utf8(output.stderr)
-        .expect("stderr is UTF-8")
-        .contains("directly (slower)"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("stderr is UTF-8")
+            .contains("directly (slower)")
+    );
 
     fs::remove_dir_all(directory).expect("temporary fixture is removed");
 }

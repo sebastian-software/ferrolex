@@ -1,8 +1,9 @@
 //! Bounded compound recognition and suggestion expansion.
 
 use super::{
-    compound_boundaries, has_flag, has_triple_at_compound_boundary, CompoundPosition, Flag,
-    FormState, HunspellDictionary, MAX_COMPOUND_PATTERN_REPLACEMENT_VARIANTS, MAX_COMPOUND_SCALARS,
+    CompoundPosition, Flag, FormState, HunspellDictionary,
+    MAX_COMPOUND_PATTERN_REPLACEMENT_VARIANTS, MAX_COMPOUND_SCALARS, compound_boundaries, has_flag,
+    has_triple_at_compound_boundary,
 };
 
 impl HunspellDictionary {

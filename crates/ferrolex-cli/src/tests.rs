@@ -8,23 +8,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use ferrolex_compiler::{CompiledDictionary, ValidationError, MAX_COMPILED_ARTIFACT_BYTES};
+use ferrolex_compiler::{CompiledDictionary, MAX_COMPILED_ARTIFACT_BYTES, ValidationError};
 use ferrolex_core::{Dictionary, WordListError};
 use ferrolex_dictionaries::SourceEncoding;
 use ferrolex_hunspell::{
-    import, load_runtime_cache, CacheSource, ImportMode, RuntimeCacheError, SourceDigests,
+    CacheSource, ImportMode, RuntimeCacheError, SourceDigests, import, load_runtime_cache,
 };
 
 use super::{
-    add_user_dictionary_word, analysis_paths, analyze, comment_syntax_for_path, glob_matches,
-    hidden_sibling, incomplete_suggestion_hint, install_hunspell_runtime_cache,
-    load_analysis_dictionary, parse_arguments, read_analysis_source, read_compiled_artifact,
-    render_explanation, run, runtime_cache_path, validate_hunspell, AnalysisDictionary,
-    AnalysisSource, AnalysisSuggestionEngine, AnalyzeCommand, Analyzer, CandidateSource,
-    CheckCommand, CheckInput, CheckTarget, CliError, Command, CommentSyntax, CompileCommand,
-    CompileInput, DictionaryCommand, Document, ExplainCommand, LineIndex, Normalization,
-    OutputFormat, RunOutcome, SuggestCommand, SuggestConfig, UserDictionaryLock, ValidateCommand,
-    WordList, HELP_CHECK, STALE_TEMPORARY_FILE_AGE,
+    AnalysisDictionary, AnalysisSource, AnalysisSuggestionEngine, AnalyzeCommand, Analyzer,
+    CandidateSource, CheckCommand, CheckInput, CheckTarget, CliError, Command, CommentSyntax,
+    CompileCommand, CompileInput, DictionaryCommand, Document, ExplainCommand, HELP_CHECK,
+    LineIndex, Normalization, OutputFormat, RunOutcome, STALE_TEMPORARY_FILE_AGE, SuggestCommand,
+    SuggestConfig, UserDictionaryLock, ValidateCommand, WordList, add_user_dictionary_word,
+    analysis_paths, analyze, comment_syntax_for_path, glob_matches, hidden_sibling,
+    incomplete_suggestion_hint, install_hunspell_runtime_cache, load_analysis_dictionary,
+    parse_arguments, read_analysis_source, read_compiled_artifact, render_explanation, run,
+    runtime_cache_path, validate_hunspell,
 };
 
 static NEXT_TEMPORARY_FILE: AtomicUsize = AtomicUsize::new(0);
@@ -333,11 +333,13 @@ fn rejects_unknown_or_repeated_output_formats() {
 #[test]
 fn distinguishes_usage_and_runtime_errors() {
     assert!(CliError::Usage("invalid invocation".to_owned()).is_usage());
-    assert!(!CliError::ReadInput {
-        path: PathBuf::from("missing.txt"),
-        source: io::Error::new(io::ErrorKind::NotFound, "missing"),
-    }
-    .is_usage());
+    assert!(
+        !CliError::ReadInput {
+            path: PathBuf::from("missing.txt"),
+            source: io::Error::new(io::ErrorKind::NotFound, "missing"),
+        }
+        .is_usage()
+    );
     assert_eq!(RunOutcome::Failure.exit_code(), ExitCode::from(3));
 }
 
@@ -906,10 +908,12 @@ fn layered_word_lists_contribute_suggestion_candidates() {
 
     let result = super::Suggester::new(&dictionary, SuggestConfig::default()).suggest("recieve");
 
-    assert!(result
-        .suggestions()
-        .iter()
-        .any(|suggestion| suggestion.word() == "receive"));
+    assert!(
+        result
+            .suggestions()
+            .iter()
+            .any(|suggestion| suggestion.word() == "receive")
+    );
 }
 
 #[test]

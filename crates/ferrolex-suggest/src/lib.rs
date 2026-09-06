@@ -754,11 +754,11 @@ fn osa_distance(
 
 #[cfg(test)]
 mod tests {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use super::{
-        replacement_distance, CandidateSource, Completeness, RankingSignals, ReplacementRule,
-        SuggestConfig, SuggestScratch, Suggester, Suggestion,
+        CandidateSource, Completeness, RankingSignals, ReplacementRule, SuggestConfig,
+        SuggestScratch, Suggester, Suggestion, replacement_distance,
     };
     use ferrolex_core::{Normalization, UserDictionary, WordList};
     use proptest::prelude::*;
@@ -974,10 +974,12 @@ mod tests {
     fn omits_a_suggestion_that_is_identical_to_the_query() {
         let words = WordList::new(["Hello"]).expect("valid words");
 
-        assert!(Suggester::new(&words, SuggestConfig::default())
-            .suggest("Hello")
-            .suggestions()
-            .is_empty());
+        assert!(
+            Suggester::new(&words, SuggestConfig::default())
+                .suggest("Hello")
+                .suggestions()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1259,9 +1261,9 @@ mod tests {
                 let outcome = catch_unwind(AssertUnwindSafe(|| {
                     let result = Suggester::new(&source, *configuration).suggest(query);
                     assert!(result.suggestions().len() <= configuration.max_results);
-                    assert!(result.suggestions().iter().all(|suggestion| suggestion
-                        .word()
-                        .is_char_boundary(suggestion.word().len())));
+                    assert!(result.suggestions().iter().all(|suggestion| {
+                        suggestion.word().is_char_boundary(suggestion.word().len())
+                    }));
                 }));
                 assert!(
                     outcome.is_ok(),

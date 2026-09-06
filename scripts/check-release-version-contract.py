@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify ferrolex's single-version Cargo and Node.js release contract."""
+"""Verify ferrolex's single-version Cargo, Python, and Node.js contract."""
 
 from __future__ import annotations
 
@@ -76,15 +76,21 @@ def main() -> int:
             "$['packages']['']['optionalDependencies']['@ferrolex/node-win32-x64-msvc']",
         ),
     }
-    node_release_paths = {
+    configured_release_paths = {
         (entry.get("path"), entry.get("jsonpath"))
         for entry in configured_packages.get(".", {}).get("extra-files", [])
-        if isinstance(entry, dict) and entry.get("type") == "json"
+        if isinstance(entry, dict)
     }
-    if node_release_paths != expected_node_release_paths:
+    expected_release_paths = expected_node_release_paths | {
+        ("crates/ferrolex-python/pyproject.toml", "$.project.version"),
+        ("editors/vscode/ferrolex/package.json", "$.version"),
+        ("editors/vscode/ferrolex/package-lock.json", "$.version"),
+        ("editors/vscode/ferrolex/package-lock.json", "$['packages']['']['version']"),
+    }
+    if configured_release_paths != expected_release_paths:
         errors.append(
-            "release-please extra-files must update every Node.js package and "
-            "lockfile version field"
+            "release-please extra-files must update every Node.js, Python, and "
+            "VS Code version field"
         )
 
     workspace_plugins = [
@@ -124,6 +130,28 @@ def main() -> int:
         errors.append("the Node.js lockfile root package name is out of sync")
     if locked_root.get("version") != root_version:
         errors.append("the Node.js lockfile root package version is out of sync")
+
+    with (ROOT / "crates/ferrolex-python/pyproject.toml").open("rb") as source:
+        python_project = tomllib.load(source)
+    python_version = python_project.get("project", {}).get("version")
+    if python_version != root_version:
+        errors.append(
+            "ferrolex-python is "
+            f"{python_version}, expected workspace version {root_version}"
+        )
+
+    vscode_package = load_json(ROOT / "editors/vscode/ferrolex/package.json")
+    vscode_lock = load_json(ROOT / "editors/vscode/ferrolex/package-lock.json")
+    if vscode_package.get("version") != root_version:
+        errors.append(
+            "the VS Code prototype is "
+            f"{vscode_package.get('version')}, expected workspace version {root_version}"
+        )
+    if vscode_lock.get("version") != root_version:
+        errors.append("the VS Code prototype lockfile version is out of sync")
+    vscode_locked_root = vscode_lock.get("packages", {}).get("", {})
+    if vscode_locked_root.get("version") != root_version:
+        errors.append("the VS Code prototype lockfile root version is out of sync")
 
     node_targets = {
         "@ferrolex/node-darwin-arm64",
@@ -181,7 +209,7 @@ def main() -> int:
     print(
         "release version contract ok: "
         f"{len(packages)} workspace packages and {internal_requirements} internal "
-        f"requirements plus @ferrolex/node use {root_version}"
+        f"requirements plus Node.js, Python, and VS Code manifests use {root_version}"
     )
     return 0
 

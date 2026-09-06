@@ -2,8 +2,8 @@
 
 use std::error::Error;
 
-use ferrolex::hunspell::{compile_runtime_cache, load_runtime_cache, SourceDigests};
-use ferrolex::{import_bytes, Dictionary, ImportMode};
+use ferrolex::hunspell::{SourceDigests, compile_runtime_cache, load_runtime_cache};
+use ferrolex::{Dictionary, ImportMode, import_bytes};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let aff = b"SET UTF-8\n";

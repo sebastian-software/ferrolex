@@ -40,13 +40,13 @@ pub use ferrolex_hunspell as hunspell;
 pub use ferrolex_suggest as suggest;
 
 pub use ferrolex_dictionaries::{
-    find_locale, DictionaryInstaller, FetchError, Fetcher, InstalledDictionary,
-    LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher, VerifiedDictionary,
-    VerifiedFile, LIBREOFFICE_CATALOG, LIBREOFFICE_REVISION,
+    DictionaryInstaller, FetchError, Fetcher, InstalledDictionary, LIBREOFFICE_CATALOG,
+    LIBREOFFICE_REVISION, LibreOfficeDictionary, ManifestError, SourceEncoding, UreqFetcher,
+    VerifiedDictionary, VerifiedFile, find_locale,
 };
 pub use ferrolex_hunspell::{
-    import, import_bytes, import_bytes_with_encodings, ByteEncoding, ByteImportEncodings,
-    Diagnostic, DictionaryIr, HunspellDictionary, ImportError, ImportMode, ImportResult, Severity,
+    ByteEncoding, ByteImportEncodings, Diagnostic, DictionaryIr, HunspellDictionary, ImportError,
+    ImportMode, ImportResult, Severity, import, import_bytes, import_bytes_with_encodings,
 };
 pub use ferrolex_suggest::{
     Completeness, RankingSignals, ReplacementRule, SuggestConfig, SuggestScratch, Suggester,

@@ -16,8 +16,8 @@ use std::process::{Command, Stdio};
 use encoding_rs::ISO_8859_2;
 use ferrolex_core::Dictionary;
 use ferrolex_hunspell::{
-    compile_runtime_cache, import_bytes, import_bytes_with_encodings, load_runtime_cache,
     ByteEncoding, ByteImportEncodings, HunspellDictionary, ImportMode, Severity, SourceDigests,
+    compile_runtime_cache, import_bytes, import_bytes_with_encodings, load_runtime_cache,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -192,7 +192,9 @@ impl FixtureSet {
             Ok(value) => Err(format!(
                 "unknown FERROLEX_COMPAT_FIXTURE_SET `{value}`; expected all, required, or scorecard"
             )),
-            Err(error) => Err(format!("could not read FERROLEX_COMPAT_FIXTURE_SET: {error}")),
+            Err(error) => Err(format!(
+                "could not read FERROLEX_COMPAT_FIXTURE_SET: {error}"
+            )),
         }
     }
 

@@ -1123,14 +1123,14 @@ fn checksum(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use super::{
-        checksum, compile_exact_ir, compile_frequency_word_list, compile_words,
+        CHECKSUM_END, CHECKSUM_OFFSET, CompileError, CompiledDictionary, DATA_OFFSET,
+        ExactDictionaryIr, FrequencyListError, INDEX_ENTRY_SIZE, INDEX_OFFSET, LoadError,
+        ValidationError, checksum, compile_exact_ir, compile_frequency_word_list, compile_words,
         inspect_compiled_artifact, is_frequency_word_list, parse_frequency_word_list, put_u64,
-        read_u32, CompileError, CompiledDictionary, ExactDictionaryIr, FrequencyListError,
-        LoadError, ValidationError, CHECKSUM_END, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_ENTRY_SIZE,
-        INDEX_OFFSET,
+        read_u32,
     };
     use ferrolex_core::Dictionary;
     use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
@@ -1394,9 +1394,11 @@ mod tests {
             read_u32(&bytes, index_offset + 2 * INDEX_ENTRY_SIZE),
             Some(9)
         );
-        assert!(bytes[index_offset + 3 * INDEX_ENTRY_SIZE..data_offset]
-            .iter()
-            .all(|byte| *byte == 0));
+        assert!(
+            bytes[index_offset + 3 * INDEX_ENTRY_SIZE..data_offset]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
     }
 
     #[test]

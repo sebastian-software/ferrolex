@@ -2,12 +2,14 @@
 name = "ferrolex-suggest"
 version = "0.4.0"
 description = "Deterministic spelling suggestions for ferrolex"
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords = ["spell-checking", "suggestions", "correction", "unicode"]
+documentation = "https://docs.rs/ferrolex-suggest"
+keywords = ["spell-checking", "suggestions", "correction", "unicode", "ferramenta"]
 categories.workspace = true
 readme = "README.md"
 
@@ -16,11 +18,11 @@ all-features = true
 exclude = ["/tests/**"]
 
 [dependencies]
-ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }
+ferrolex-core.workspace = true
 
 [dev-dependencies]
-criterion = "0.5.1"
-proptest = "=1.6.0"
+criterion.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "suggestions"

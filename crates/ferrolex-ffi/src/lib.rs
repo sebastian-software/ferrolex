@@ -8,11 +8,11 @@
 
 #[cfg(feature = "c-abi")]
 mod c_abi {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::slice;
     use std::str;
 
-    use ferrolex_core::{contains_normalized, Normalization, WordList};
+    use ferrolex_core::{Normalization, WordList, contains_normalized};
     use ferrolex_suggest::{SuggestConfig, Suggester};
 
     /// Opaque immutable checker handle owned by the C caller.
@@ -87,7 +87,7 @@ mod c_abi {
     ///
     /// Non-null input and output pointers must refer to readable or writable
     /// storage, respectively, for their advertised lengths.
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub unsafe extern "C" fn ferrolex_checker_create_from_utf8(
         words: *const u8,
         words_length: usize,
@@ -116,7 +116,7 @@ mod c_abi {
     /// # Safety
     ///
     /// A non-null pointer must be an unreleased handle returned by this ABI.
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub unsafe extern "C" fn ferrolex_checker_free(checker: *mut FerrolexChecker) {
         if checker.is_null() {
             return;
@@ -133,7 +133,7 @@ mod c_abi {
     ///
     /// checker must be a live handle from this ABI. Non-null word and output
     /// pointers must refer to readable or writable storage for their lengths.
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub unsafe extern "C" fn ferrolex_checker_check(
         checker: *const FerrolexChecker,
         word: *const u8,
@@ -167,7 +167,7 @@ mod c_abi {
     ///
     /// checker must be a live handle from this ABI. Non-null input and output
     /// pointers must refer to readable or writable storage for their lengths.
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub unsafe extern "C" fn ferrolex_checker_suggest(
         checker: *const FerrolexChecker,
         word: *const u8,
@@ -229,8 +229,8 @@ mod c_abi {
         use std::ptr;
 
         use super::{
-            ferrolex_checker_check, ferrolex_checker_create_from_utf8, ferrolex_checker_free,
-            ferrolex_checker_suggest, FerrolexChecker, FerrolexStatus,
+            FerrolexChecker, FerrolexStatus, ferrolex_checker_check,
+            ferrolex_checker_create_from_utf8, ferrolex_checker_free, ferrolex_checker_suggest,
         };
 
         fn checker(words: &str) -> *mut FerrolexChecker {

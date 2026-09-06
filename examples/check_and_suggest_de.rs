@@ -4,8 +4,8 @@ use std::error::Error;
 use std::fs;
 
 use ferrolex::{
-    catalog_import_encodings, find_locale, import_bytes, import_bytes_with_encodings, Dictionary,
-    DictionaryInstaller, ImportMode, SuggestConfig, UreqFetcher,
+    Dictionary, DictionaryInstaller, ImportMode, SuggestConfig, UreqFetcher,
+    catalog_import_encodings, find_locale, import_bytes, import_bytes_with_encodings,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
