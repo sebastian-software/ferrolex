@@ -215,6 +215,16 @@ pub fn split_identifier(
     config: IdentifierSplitConfig,
 ) -> Vec<IdentifierSegment<'_>> {
     let mut segments = Vec::new();
+    split_identifier_into(identifier, config, &mut segments);
+    segments
+}
+
+fn split_identifier_into<'source>(
+    identifier: &'source str,
+    config: IdentifierSplitConfig,
+    segments: &mut Vec<IdentifierSegment<'source>>,
+) {
+    segments.clear();
     let mut run_start = None;
 
     let mut characters = identifier.char_indices().peekable();
@@ -230,15 +240,13 @@ pub fn split_identifier(
         }
 
         if let Some(start) = run_start.take() {
-            split_run(identifier, start, offset, config, &mut segments);
+            split_run(identifier, start, offset, config, segments);
         }
     }
 
     if let Some(start) = run_start {
-        split_run(identifier, start, identifier.len(), config, &mut segments);
+        split_run(identifier, start, identifier.len(), config, segments);
     }
-
-    segments
 }
 
 /// Configuration for [`Analyzer`].
@@ -713,6 +721,8 @@ impl<'dictionary> Analyzer<'dictionary> {
         }
 
         let mut findings = Vec::new();
+        let mut raw_token_scratch = Vec::new();
+        let mut segments = Vec::new();
         for (line_index, line) in lines.iter().enumerate() {
             if let Some(directive) = parse_directive(line.text, &document.comment_syntax) {
                 directives.apply_switch(&directive);
@@ -722,11 +732,13 @@ impl<'dictionary> Analyzer<'dictionary> {
                 continue;
             }
 
-            for raw_token in raw_tokens(line.text, line.start) {
+            raw_tokens(line.text, line.start, &mut raw_token_scratch);
+            for raw_token in &raw_token_scratch {
                 self.check_token(
                     document.source,
-                    &raw_token,
+                    raw_token,
                     &directives.ignored_words,
+                    &mut segments,
                     &mut findings,
                 );
             }
@@ -743,6 +755,7 @@ impl<'dictionary> Analyzer<'dictionary> {
         source: &'source str,
         raw_token: &RawToken<'source>,
         directive_ignored_words: &BTreeSet<Box<str>>,
+        segments: &mut Vec<IdentifierSegment<'source>>,
         findings: &mut Vec<Finding<'source>>,
     ) {
         let mut class = classify(raw_token.text);
@@ -760,7 +773,7 @@ impl<'dictionary> Analyzer<'dictionary> {
             return;
         }
 
-        let segments = split_identifier(raw_token.text, self.config.identifier_split);
+        split_identifier_into(raw_token.text, self.config.identifier_split, segments);
         let is_identifier = class == TokenClass::Identifier;
 
         for (segment_index, segment) in segments.iter().enumerate() {
@@ -1065,24 +1078,22 @@ struct RawToken<'source> {
     range: Range<usize>,
 }
 
-fn raw_tokens(line: &str, line_start: usize) -> Vec<RawToken<'_>> {
-    let mut tokens = Vec::new();
+fn raw_tokens<'source>(line: &'source str, line_start: usize, tokens: &mut Vec<RawToken<'source>>) {
+    tokens.clear();
     let mut start = None;
 
     for (offset, character) in line.char_indices() {
         if character.is_whitespace() {
             if let Some(start) = start.take() {
-                push_raw_token(line, line_start, start, offset, &mut tokens);
+                push_raw_token(line, line_start, start, offset, tokens);
             }
         } else {
             start.get_or_insert(offset);
         }
     }
     if let Some(start) = start {
-        push_raw_token(line, line_start, start, line.len(), &mut tokens);
+        push_raw_token(line, line_start, start, line.len(), tokens);
     }
-
-    tokens
 }
 
 fn push_raw_token<'source>(
@@ -1134,7 +1145,7 @@ fn classify(token: &str) -> TokenClass {
         TokenClass::GeneratedToken
     } else if token.chars().all(char::is_numeric) {
         TokenClass::Number
-    } else if split_identifier(token, IdentifierSplitConfig::default()).len() > 1 {
+    } else if identifier_segment_count(token, IdentifierSplitConfig::default()) > 1 {
         TokenClass::Identifier
     } else if token.chars().all(char::is_alphabetic) && token.chars().all(char::is_uppercase) {
         TokenClass::Acronym
@@ -1146,13 +1157,9 @@ fn classify(token: &str) -> TokenClass {
 }
 
 fn is_path_token(token: &str) -> bool {
-    let normalized = token.replace('\\', "/");
-    let mut parts = normalized.split('/');
+    let mut parts = token.split(['/', '\\']);
     let first = parts.next().unwrap_or_default();
-    let has_separator = normalized.contains('/');
-    has_separator
-        && !first.is_empty()
-        && parts.any(|part| !part.is_empty() && part != "." && part != "..")
+    !first.is_empty() && parts.any(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 fn is_base64_token(token: &str) -> bool {
@@ -1222,6 +1229,88 @@ fn is_word_character(character: char) -> bool {
     character.is_alphabetic() || canonical_combining_class(character) != 0
 }
 
+fn identifier_segment_count(identifier: &str, config: IdentifierSplitConfig) -> usize {
+    let mut count = 0;
+    let mut run_start = None;
+    let mut characters = identifier.char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        let apostrophe_between_words = matches!(character, '\'' | '’')
+            && run_start.is_some()
+            && characters
+                .peek()
+                .is_some_and(|(_, next)| next.is_alphabetic());
+        if is_word_character(character) || character.is_numeric() || apostrophe_between_words {
+            run_start.get_or_insert(offset);
+            continue;
+        }
+
+        if let Some(start) = run_start.take() {
+            count += run_segment_count(identifier, start, offset, config);
+        }
+    }
+    if let Some(start) = run_start {
+        count += run_segment_count(identifier, start, identifier.len(), config);
+    }
+    count
+}
+
+fn run_segment_count(
+    identifier: &str,
+    start: usize,
+    end: usize,
+    config: IdentifierSplitConfig,
+) -> usize {
+    let mut characters = identifier[start..end].char_indices().peekable();
+    let Some((_, first)) = characters.next() else {
+        return 0;
+    };
+
+    let mut segment_count = 1;
+    let mut first_segment_length = 1;
+    let mut current_segment_length = 1;
+    let first_segment_is_uppercase = first.is_uppercase();
+    let mut second_segment_is_numeric = true;
+    let mut segment_index = 0;
+    let mut previous = first;
+
+    while let Some((_, current)) = characters.next() {
+        let next = characters.peek().map(|(_, character)| *character);
+        let changes_kind = previous.is_numeric() != current.is_numeric();
+        let starts_word = current.is_uppercase()
+            && (previous.is_lowercase()
+                || (previous.is_uppercase() && next.is_some_and(char::is_lowercase)));
+        if changes_kind || starts_word {
+            if segment_index == 0 {
+                first_segment_length = current_segment_length;
+                second_segment_is_numeric = current.is_numeric();
+            }
+            segment_index += 1;
+            segment_count += 1;
+            current_segment_length = 1;
+        } else {
+            current_segment_length += 1;
+            if segment_index == 1 {
+                second_segment_is_numeric &= current.is_numeric();
+            }
+        }
+        previous = current;
+    }
+    if segment_index == 0 {
+        first_segment_length = current_segment_length;
+    }
+
+    if config.single_letter_prefix == SingleLetterPrefix::Join
+        && segment_count >= 2
+        && first_segment_length == 1
+        && first_segment_is_uppercase
+        && !second_segment_is_numeric
+    {
+        segment_count - 1
+    } else {
+        segment_count
+    }
+}
+
 fn split_run<'source>(
     identifier: &'source str,
     start: usize,
@@ -1229,51 +1318,60 @@ fn split_run<'source>(
     config: IdentifierSplitConfig,
     segments: &mut Vec<IdentifierSegment<'source>>,
 ) {
-    let characters = identifier[start..end].char_indices().collect::<Vec<_>>();
-    let mut boundaries = vec![0];
-
-    for index in 1..characters.len() {
-        let previous = characters[index - 1].1;
-        let current = characters[index].1;
-        let next = characters.get(index + 1).map(|(_, character)| *character);
+    let run_segment_start = segments.len();
+    let mut characters = identifier[start..end].char_indices().peekable();
+    let Some((_, first)) = characters.next() else {
+        return;
+    };
+    let mut segment_start = start;
+    let mut previous = first;
+    while let Some((offset, current)) = characters.next() {
+        let next = characters.peek().map(|(_, character)| *character);
         let changes_kind = previous.is_numeric() != current.is_numeric();
         let starts_word = current.is_uppercase()
             && (previous.is_lowercase()
                 || (previous.is_uppercase() && next.is_some_and(char::is_lowercase)));
         if changes_kind || starts_word {
-            boundaries.push(characters[index].0);
+            push_identifier_segment(identifier, segment_start, start + offset, segments);
+            segment_start = start + offset;
         }
+        previous = current;
     }
-    boundaries.push(end - start);
+    push_identifier_segment(identifier, segment_start, end, segments);
 
-    let mut run_segments = boundaries
-        .windows(2)
-        .map(|boundary| {
-            let range = (start + boundary[0])..(start + boundary[1]);
-            IdentifierSegment {
-                text: &identifier[range.clone()],
-                is_number: identifier[range.clone()].chars().all(char::is_numeric),
-                range,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if config.single_letter_prefix == SingleLetterPrefix::Join && run_segments.len() >= 2 {
-        let first_range = run_segments[0].range.clone();
-        let joins_prefix = run_segments[0].text.chars().count() == 1
-            && run_segments[0].text.chars().all(char::is_uppercase)
-            && !run_segments[1].is_number;
+    if config.single_letter_prefix == SingleLetterPrefix::Join
+        && segments.len() - run_segment_start >= 2
+    {
+        let first = &segments[run_segment_start];
+        let second = &segments[run_segment_start + 1];
+        let joins_prefix = first.text.chars().count() == 1
+            && first.text.chars().all(char::is_uppercase)
+            && !second.is_number;
         if joins_prefix {
-            let second = run_segments.remove(1);
-            run_segments[0] = IdentifierSegment {
-                text: &identifier[first_range.start..second.range.end],
-                range: first_range.start..second.range.end,
+            let range = first.range.start..second.range.end;
+            segments[run_segment_start] = IdentifierSegment {
+                text: &identifier[range.clone()],
+                range,
                 is_number: false,
             };
+            segments.remove(run_segment_start + 1);
         }
     }
+}
 
-    segments.extend(run_segments);
+fn push_identifier_segment<'source>(
+    identifier: &'source str,
+    start: usize,
+    end: usize,
+    segments: &mut Vec<IdentifierSegment<'source>>,
+) {
+    let range = start..end;
+    let text = &identifier[range.clone()];
+    segments.push(IdentifierSegment {
+        text,
+        is_number: text.chars().all(char::is_numeric),
+        range,
+    });
 }
 
 fn shift_range(range: Range<usize>, offset: usize) -> Range<usize> {
@@ -1342,6 +1440,36 @@ mod tests {
         assert_eq!(segments("StraßeÜberblick"), ["Straße", "Überblick"]);
         assert_eq!(segments("version2Parser"), ["version", "2", "Parser"]);
         assert_eq!(segments("cafe\u{301}"), ["cafe\u{301}"]);
+    }
+
+    #[test]
+    fn allocation_free_identifier_count_matches_public_splitter() {
+        for identifier in [
+            "userAuthenticator",
+            "OAuthAuthenticationProvider",
+            "HTTPResponseCode",
+            "user_profile_image",
+            "version2Parser",
+            "A1Parser",
+            "StraßeÜberblick",
+            "cafe\u{301}",
+            "one-two",
+            "AAuth",
+        ] {
+            let config = IdentifierSplitConfig::default();
+            assert_eq!(
+                super::identifier_segment_count(identifier, config),
+                split_identifier(identifier, config).len(),
+                "segment count differs for {identifier}"
+            );
+        }
+        assert_eq!(
+            super::identifier_segment_count(
+                "OAuth",
+                IdentifierSplitConfig::with_single_letter_prefix(SingleLetterPrefix::Separate)
+            ),
+            2
+        );
     }
 
     #[test]
@@ -1432,6 +1560,10 @@ mod tests {
         assert_eq!(classify("2026"), TokenClass::Number);
         assert_eq!(
             classify("crates/ferrolex-code/src/lib.rs"),
+            TokenClass::Path
+        );
+        assert_eq!(
+            classify(r"crates\ferrolex-code\src\lib.rs"),
             TokenClass::Path
         );
         assert_eq!(
