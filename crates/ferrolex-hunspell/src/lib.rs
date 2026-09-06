@@ -336,12 +336,6 @@ pub struct HunspellDictionary {
     prefix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
     /// Forward suffix rules grouped by the flag that enables them.
     suffix_rules_by_flag: BTreeMap<Flag, Vec<usize>>,
-    /// Stored lexemes grouped by their enabling flag.
-    lexeme_indices_by_flag: BTreeMap<Flag, Vec<usize>>,
-    /// Transitive prefix continuation flags used to find derived candidates.
-    prefix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
-    /// Transitive suffix continuation flags used to find derived candidates.
-    suffix_parent_flags: BTreeMap<Flag, BTreeSet<Flag>>,
     /// Special Hunspell markers such as KEEPCASE and ONLYINCOMPOUND.
     special_flags: SpecialFlags,
     /// Compound flags, limits, patterns, and boundary safeguards.
@@ -513,9 +507,6 @@ impl HunspellDictionary {
         let suffix_rules_by_flag = rule_indices_by_flag(&suffixes);
         let prefix_rules_by_add_edge = AffixRuleIndex::new(&prefixes, AffixKind::Prefix);
         let suffix_rules_by_add_edge = AffixRuleIndex::new(&suffixes, AffixKind::Suffix);
-        let lexeme_indices_by_flag = lexeme_indices_by_flag(&lexemes);
-        let prefix_parent_flags = parent_flags_by_continuation(&prefixes);
-        let suffix_parent_flags = parent_flags_by_continuation(&suffixes);
         let sharp_uppercase_forms = sharp_uppercase_forms(&lexemes, &special_flags);
         Self {
             flag_mode,
@@ -530,9 +521,6 @@ impl HunspellDictionary {
             suffix_rules_by_add_edge,
             prefix_rules_by_flag,
             suffix_rules_by_flag,
-            lexeme_indices_by_flag,
-            prefix_parent_flags,
-            suffix_parent_flags,
             special_flags,
             compound,
             break_patterns,
@@ -825,26 +813,7 @@ impl HunspellDictionary {
 
     fn derived_candidate_indices(&self, word: &str) -> Option<BTreeSet<usize>> {
         let mut candidates = BTreeSet::new();
-        let include_empty_add = !self.extend_reverse_derived_candidates(word, &mut candidates);
-        if include_empty_add {
-            candidates.clear();
-        }
-        self.extend_derived_candidates(
-            (word, AffixKind::Prefix),
-            &self.prefixes,
-            &self.prefix_rules_by_add_edge,
-            &self.prefix_parent_flags,
-            include_empty_add,
-            &mut candidates,
-        )?;
-        self.extend_derived_candidates(
-            (word, AffixKind::Suffix),
-            &self.suffixes,
-            &self.suffix_rules_by_add_edge,
-            &self.suffix_parent_flags,
-            include_empty_add,
-            &mut candidates,
-        )?;
+        self.extend_reverse_derived_candidates(word, &mut candidates)?;
         Some(candidates)
     }
 
@@ -852,16 +821,14 @@ impl HunspellDictionary {
         &self,
         word: &str,
         candidates: &mut BTreeSet<usize>,
-    ) -> bool {
-        if self.prefix_rules_by_add_edge.empty_add.is_empty()
-            && self.suffix_rules_by_add_edge.empty_add.is_empty()
-        {
-            return true;
+    ) -> Option<()> {
+        if self.prefixes.is_empty() && self.suffixes.is_empty() {
+            return Some(());
         }
 
-        let mut forms = BTreeSet::from([(word.to_owned(), false)]);
-        let mut pending = vec![(word.to_owned(), 0_usize, false)];
-        while let Some((form, depth, used_empty_add)) = pending.pop() {
+        let mut forms = BTreeSet::from([(word.to_owned(), 0_usize)]);
+        let mut pending = vec![(word.to_owned(), 0_usize)];
+        while let Some((form, depth)) = pending.pop() {
             if depth == MAX_AFFIX_CHAIN {
                 continue;
             }
@@ -869,51 +836,19 @@ impl HunspellDictionary {
                 let Some(stem) = rule.reverse_apply(&form, self.full_strip) else {
                     continue;
                 };
-                let used_empty_add = used_empty_add || rule.add.is_empty();
-                if used_empty_add {
-                    for index in self.lexeme_index_range(&stem) {
-                        candidates.insert(index);
-                        if candidates.len() > MAX_DERIVED_CANDIDATES_PER_LOOKUP {
-                            return false;
-                        }
+                for index in self.lexeme_index_range(&stem) {
+                    candidates.insert(index);
+                    if candidates.len() > MAX_DERIVED_CANDIDATES_PER_LOOKUP {
+                        return None;
                     }
                 }
                 let stem = stem.into_owned();
-                let state_changed = stem != form || used_empty_add;
-                if state_changed && forms.insert((stem.clone(), used_empty_add)) {
+                let next_depth = depth + 1;
+                if forms.insert((stem.clone(), next_depth)) {
                     if forms.len() > MAX_REVERSE_FORMS_PER_LOOKUP {
-                        return false;
+                        return None;
                     }
-                    pending.push((stem, depth + 1, used_empty_add));
-                }
-            }
-        }
-        true
-    }
-
-    fn extend_derived_candidates(
-        &self,
-        query: (&str, AffixKind),
-        rules: &[AffixRule],
-        rules_by_add_edge: &AffixRuleIndex,
-        parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
-        include_empty_add: bool,
-        candidates: &mut BTreeSet<usize>,
-    ) -> Option<()> {
-        let (word, kind) = query;
-        for rule in rules_by_add_edge
-            .matching_rules(rules, word, kind)
-            .filter(|rule| include_empty_add || !rule.add.is_empty())
-            .filter(|rule| rule.could_generate(word))
-        {
-            for flag in origin_flags_for(rule.flag, parent_flags) {
-                if let Some(indices) = self.lexeme_indices_by_flag.get(&flag) {
-                    for index in indices {
-                        candidates.insert(*index);
-                        if candidates.len() > MAX_DERIVED_CANDIDATES_PER_LOOKUP {
-                            return None;
-                        }
-                    }
+                    pending.push((stem, next_depth));
                 }
             }
         }
@@ -1794,44 +1729,6 @@ fn rule_indices_by_flag(rules: &[AffixRule]) -> BTreeMap<Flag, Vec<usize>> {
         indices.entry(rule.flag).or_default().push(index);
     }
     indices
-}
-
-fn lexeme_indices_by_flag(lexemes: &[Lexeme]) -> BTreeMap<Flag, Vec<usize>> {
-    let mut indices = BTreeMap::<Flag, Vec<usize>>::new();
-    for (index, lexeme) in lexemes.iter().enumerate() {
-        for flag in &lexeme.flags {
-            indices.entry(*flag).or_default().push(index);
-        }
-    }
-    indices
-}
-
-fn parent_flags_by_continuation(rules: &[AffixRule]) -> BTreeMap<Flag, BTreeSet<Flag>> {
-    let mut parents = BTreeMap::<Flag, BTreeSet<Flag>>::new();
-    for rule in rules {
-        for continuation in &rule.continuation_flags {
-            parents.entry(*continuation).or_default().insert(rule.flag);
-        }
-    }
-    parents
-}
-
-fn origin_flags_for(
-    terminal_flag: Flag,
-    parent_flags: &BTreeMap<Flag, BTreeSet<Flag>>,
-) -> BTreeSet<Flag> {
-    let mut origins = BTreeSet::from([terminal_flag]);
-    let mut pending = vec![terminal_flag];
-    while let Some(flag) = pending.pop() {
-        if let Some(parents) = parent_flags.get(&flag) {
-            for parent in parents {
-                if origins.insert(*parent) {
-                    pending.push(*parent);
-                }
-            }
-        }
-    }
-    origins
 }
 
 #[derive(Clone, Debug)]
@@ -5609,6 +5506,7 @@ fn diagnostic(
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::collections::BTreeSet;
     use std::fmt::Write as _;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::Arc;
@@ -7308,6 +7206,42 @@ mod tests {
         .expect("empty-add continuation fixture imports");
 
         assert!(imported.dictionary().contains("root"));
+    }
+
+    #[test]
+    fn reverse_candidates_use_stems_for_non_empty_add_rules() {
+        let mut dictionary = String::new();
+        for index in 0..=MAX_DERIVED_CANDIDATES_PER_LOOKUP {
+            writeln!(dictionary, "word{index}/A").expect("writing to String does not fail");
+        }
+        let dictionary = format!("{}\n{dictionary}", MAX_DERIVED_CANDIDATES_PER_LOOKUP + 1);
+        let imported = import(
+            "test.aff",
+            "SFX A Y 1\nSFX A 0 s/B .\nSFX B Y 1\nSFX B 0 x .\n",
+            "test.dic",
+            &dictionary,
+            ImportMode::Strict,
+        )
+        .expect("large non-empty affix class imports");
+
+        let dictionary = imported.dictionary();
+        let expected = dictionary
+            .lexeme_index_range("word0")
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            dictionary
+                .derived_candidate_indices("word0sx")
+                .expect("reverse candidate lookup stays within its budget"),
+            expected,
+            "reverse lookup should find only the actual stem range"
+        );
+        assert_eq!(
+            dictionary
+                .derived_candidate_indices("not-a-generated-form-sx")
+                .expect("a miss with no matching stem stays within its budget"),
+            BTreeSet::new(),
+            "a non-empty add must not scan its complete flag class"
+        );
     }
 
     #[test]
