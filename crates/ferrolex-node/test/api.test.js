@@ -1,76 +1,70 @@
-'use strict';
+"use strict";
 
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const test = require('node:test');
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
 
-const { SpellChecker, dictionaryCatalog } = require('../index.js');
+const { SpellChecker, dictionaryCatalog } = require("../index.js");
 
-test('word lists expose deterministic checking and suggestions', () => {
-  const checker = new SpellChecker('ferrolex\nFerris');
+test("word lists expose deterministic checking and suggestions", () => {
+  const checker = new SpellChecker("ferrolex\nFerris");
 
-  assert.equal(checker.check('ferrolex'), true);
-  assert.equal(checker.check('ferolex'), false);
-  assert.deepEqual(checker.suggest('ferolex'), {
-    suggestions: [{ word: 'ferrolex', distance: 1 }],
-    completeness: 'complete',
+  assert.equal(checker.check("ferrolex"), true);
+  assert.equal(checker.check("ferolex"), false);
+  assert.deepEqual(checker.suggest("ferolex"), {
+    suggestions: [{ word: "ferrolex", distance: 1 }],
+    completeness: "complete",
   });
 });
 
-test('normalization, suggestion bounds, and user words are explicit', () => {
-  const checker = new SpellChecker('café\n', { normalization: 'nfc' });
+test("normalization, suggestion bounds, and user words are explicit", () => {
+  const checker = new SpellChecker("café\n", { normalization: "nfc" });
 
-  assert.equal(checker.check('cafe\u0301'), true);
-  assert.equal(checker.addUserWord('projectword'), true);
-  assert.equal(checker.check('projectword'), true);
-  assert.deepEqual(checker.userWords(), ['projectword']);
-  assert.deepEqual(checker.suggest('projectwrod', { maxResults: 1 }), {
-    suggestions: [{ word: 'projectword', distance: 1 }],
-    completeness: 'complete',
+  assert.equal(checker.check("cafe\u0301"), true);
+  assert.equal(checker.addUserWord("projectword"), true);
+  assert.equal(checker.check("projectword"), true);
+  assert.deepEqual(checker.userWords(), ["projectword"]);
+  assert.deepEqual(checker.suggest("projectwrod", { maxResults: 1 }), {
+    suggestions: [{ word: "projectword", distance: 1 }],
+    completeness: "complete",
   });
-  assert.equal(checker.removeUserWord('projectword'), true);
+  assert.equal(checker.removeUserWord("projectword"), true);
 });
 
-test('caller-owned Hunspell files retain recognition and ranking signals', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ferrolex-node-'));
-  const affPath = path.join(directory, 'test.aff');
-  const dicPath = path.join(directory, 'test.dic');
-  fs.writeFileSync(
-    affPath,
-    'SET UTF-8\nREP 1\nREP recieve receive\nSFX S Y 1\nSFX S 0 s .\n',
-  );
-  fs.writeFileSync(dicPath, '2\nreceive/S\nferrolex\n');
+test("caller-owned Hunspell files retain recognition and ranking signals", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ferrolex-node-"));
+  const affPath = path.join(directory, "test.aff");
+  const dicPath = path.join(directory, "test.dic");
+  fs.writeFileSync(affPath, "SET UTF-8\nREP 1\nREP recieve receive\nSFX S Y 1\nSFX S 0 s .\n");
+  fs.writeFileSync(dicPath, "2\nreceive/S\nferrolex\n");
 
   try {
     const checker = SpellChecker.fromHunspell(affPath, dicPath);
-    assert.equal(checker.check('receives'), true);
-    assert.equal(checker.suggest('recieve').suggestions[0].word, 'receive');
+    assert.equal(checker.check("receives"), true);
+    assert.equal(checker.suggest("recieve").suggestions[0].word, "receive");
   } finally {
     fs.rmSync(directory, { recursive: true });
   }
 });
 
-test('the managed catalog exposes pinned source and license metadata', () => {
-  const english = dictionaryCatalog().find(({ locale }) => locale === 'en_US');
+test("the managed catalog exposes pinned source and license metadata", () => {
+  const english = dictionaryCatalog().find(({ locale }) => locale === "en_US");
 
   assert.ok(english);
   assert.match(english.revision, /^[0-9a-f]{40}$/);
-  assert.notEqual(english.license, '');
+  assert.notEqual(english.license, "");
   assert.match(english.licenseNoticeUrl, /^https:\/\//);
 });
 
 test(
-  'a pre-populated managed cache is verified and imported off the event loop',
+  "a pre-populated managed cache is verified and imported off the event loop",
   { skip: !process.env.FERROLEX_NODE_MANAGED_CACHE },
   async () => {
-    const checker = await SpellChecker.install(
-      'en_US',
-      process.env.FERROLEX_NODE_MANAGED_CACHE,
-    );
+    const checker = await SpellChecker.install("en_US", process.env.FERROLEX_NODE_MANAGED_CACHE);
 
-    assert.equal(checker.check('colors'), true);
-    assert.equal(checker.check('ferrolexcompatnotaword'), false);
+    assert.equal(checker.check("colors"), true);
+    assert.equal(checker.check("ferrolexcompatnotaword"), false);
   },
 );
