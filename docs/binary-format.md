@@ -1,10 +1,9 @@
-# Compiled dictionary format (version 1)
+# Compiled dictionary format (version 2)
 
-`ferrolex-compiler` writes the native exact-word format used by the initial
-compiled-dictionary runtime. The format is deliberately small: metadata and
-morphology are not silently encoded as implementation details. Future versions
-will add those capabilities behind a new explicit format version and feature
-bits.
+`ferrolex-compiler` writes the native exact-word format used by the compiled-
+dictionary runtime. The format is deliberately small: metadata and morphology
+are not silently encoded as implementation details. Future versions will add
+those capabilities behind a new explicit format version and feature bits.
 
 All integer fields are unsigned little-endian. Sections are addressed by file
 offsets, never pointers, and every section offset is a multiple of eight. The
@@ -18,7 +17,7 @@ The header is exactly 64 bytes.
 | Offset | Width | Field |
 | --- | ---: | --- |
 | 0 | 8 | Magic: `FLEXDIC\\0` |
-| 8 | 2 | Format version (`1`) |
+| 8 | 2 | Format version (`2`) |
 | 10 | 2 | Header size (`64`) |
 | 12 | 4 | Feature bits (`0` for an exact-word artifact; bit `0` for a frequency table) |
 | 16 | 8 | FNV-1a 64 checksum |
@@ -34,18 +33,16 @@ signature and does not authenticate dictionary provenance.
 
 ## Sections
 
-The index contains one 16-byte record per word, in lexical order:
+The index contains one 4-byte record per word, in lexical order:
 
 | Relative offset | Width | Field |
 | --- | ---: | --- |
-| 0 | 8 | Start byte offset in the data section |
-| 8 | 8 | Exclusive end byte offset in the data section |
+| 0 | 4 | Start byte offset in the data section |
 
-The data section concatenates the UTF-8 words without terminators. The index
-is exactly `word_count * 16` bytes and is followed by zero to seven padding
-bytes before the aligned data section. Version 1's compiler produces no index
-padding because the header and records are already eight-byte aligned; full
-validation rejects any non-canonical padding.
+The data section concatenates the UTF-8 words without terminators. An entry's
+exclusive end is the next entry's start; the final entry ends at the declared
+data-section length. The index is exactly `word_count * 4` bytes and is
+followed by zero to seven zero padding bytes before the aligned data section.
 
 ## Loading and validation
 
@@ -54,7 +51,7 @@ checksum checks. It intentionally does not decode every word, preserving the
 fast startup path required for a future mmap backing store. Lookup does a
 bounds-checked binary search directly over word bytes and allocates nothing.
 
-Version 1 accepts artifacts up to 128 MiB. The CLI checks a file's metadata
+Version 2 accepts artifacts up to 128 MiB. The CLI checks a file's metadata
 before allocating its backing buffer, and the in-memory loader repeats the
 same limit. This is a resource boundary for untrusted artifacts, not a claim
 that the format has a permanently fixed maximum size.
@@ -67,7 +64,7 @@ contents, following [ADR-0006](adr/0006-compiled-format-safety-and-layout.md).
 
 ## Compatibility
 
-Version 1 reserves feature bit `0` for a frequency table. When set, an aligned
+Version 2 reserves feature bit `0` for a frequency table. When set, an aligned
 `u64` frequency record follows the word-data section for every indexed word;
 zero means no supplied frequency. The table affects suggestion ranking only.
 Older readers reject the nonzero feature bit, so they fail closed rather than
@@ -89,7 +86,7 @@ format remains a plain word list.
 
 Use `ferrolex inspect <artifact>` to report the format version, feature bits,
 exact-word entry count, and source-metadata availability without decoding every
-word. `FLEXDIC` version 1 requires only `exact-word-lookup` and deliberately
+word. `FLEXDIC` version 2 requires only `exact-word-lookup` and deliberately
 does not record source provenance. The command reports a `FLXHSP` artifact's
 format and semantics versions, embedded source SHA-256 digests, and the full
 Hunspell capability set supported by that format. These capabilities describe

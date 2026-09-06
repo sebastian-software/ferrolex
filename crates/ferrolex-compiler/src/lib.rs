@@ -5,7 +5,7 @@
 //!
 //! The format is designed to be suitable for a memory-mapped backing store:
 //! all fields are little-endian integers, sections are offset-addressed and
-//! eight-byte aligned, and lookup performs no allocation.  This initial
+//! eight-byte aligned, and lookup performs no allocation. The current
 //! version only represents exact words. Metadata and morphology are separate
 //! future format features rather than implicit, unstable payloads.
 //!
@@ -37,10 +37,10 @@ pub use ir::{
 };
 
 const MAGIC: [u8; 8] = *b"FLEXDIC\0";
-const FORMAT_VERSION: u16 = 1;
+const FORMAT_VERSION: u16 = 2;
 const HEADER_SIZE: usize = 64;
 const HEADER_SIZE_U16: u16 = 64;
-const INDEX_ENTRY_SIZE: usize = 16;
+const INDEX_ENTRY_SIZE: usize = 4;
 const CHECKSUM_OFFSET: usize = 16;
 const CHECKSUM_END: usize = CHECKSUM_OFFSET + 8;
 
@@ -82,7 +82,7 @@ impl CompiledArtifactMetadata {
     }
 }
 
-/// Largest compiled artifact accepted by the version-1 runtime.
+/// Largest compiled artifact accepted by the version-2 runtime.
 ///
 /// Command-line callers should check a file's metadata before reading it; the
 /// in-memory loader repeats the limit for embedded callers.
@@ -120,7 +120,7 @@ pub enum CompileError {
         /// One-based position in the supplied input.
         position: usize,
     },
-    /// The input cannot be represented by version 1 of the format.
+    /// The input cannot be represented by version 2 of the format.
     DictionaryTooLarge,
 }
 
@@ -217,7 +217,7 @@ impl std::error::Error for FrequencyListError {
 
 /// A format-neutral exact-word dictionary input for the native compiler.
 ///
-/// This deliberately represents only semantics supported by the version-1
+/// This deliberately represents only semantics supported by the version-2
 /// `FLEXDIC` runtime: non-empty UTF-8 words with exact recognition. Importers
 /// with morphology must either preserve that richer runtime separately or
 /// explicitly project a reviewed exact-word subset; the compiler never drops
@@ -523,7 +523,7 @@ impl fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-/// Compiles exact non-empty UTF-8 words into format version 1.
+/// Compiles exact non-empty UTF-8 words into format version 2.
 ///
 /// Entries are sorted by UTF-8 byte order and deduplicated, so input order and
 /// duplicate entries never affect the resulting bytes.
@@ -557,12 +557,12 @@ pub fn compile_frequency_word_list(text: &str) -> Result<Vec<u8>, FrequencyListE
     compile_exact_ir(&ir).map_err(FrequencyListError::Compile)
 }
 
-/// Compiles a format-neutral exact-word IR into `FLEXDIC` version 1.
+/// Compiles a format-neutral exact-word IR into `FLEXDIC` version 2.
 ///
 /// # Errors
 ///
 /// Returns [`CompileError::DictionaryTooLarge`] if the output cannot be
-/// represented by the version-1 layout.
+/// represented by the version-2 layout.
 #[allow(
     clippy::too_many_lines,
     reason = "the compact artifact writer keeps every checked layout calculation auditable"
@@ -581,6 +581,7 @@ pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError>
             .checked_add(word.len())
             .ok_or(CompileError::DictionaryTooLarge)
     })?;
+    u32::try_from(data_len).map_err(|_| CompileError::DictionaryTooLarge)?;
     let index_offset = HEADER_SIZE;
     let data_offset = align_to_eight(
         index_offset
@@ -653,15 +654,10 @@ pub fn compile_exact_ir(ir: &ExactDictionaryIr) -> Result<Vec<u8>, CompileError>
                     .ok_or(CompileError::DictionaryTooLarge)?,
             )
             .ok_or(CompileError::DictionaryTooLarge)?;
-        put_u64(
+        put_u32(
             &mut bytes,
             index_entry,
-            u64::try_from(start).map_err(|_| CompileError::DictionaryTooLarge)?,
-        );
-        put_u64(
-            &mut bytes,
-            index_entry + 8,
-            u64::try_from(data_cursor).map_err(|_| CompileError::DictionaryTooLarge)?,
+            u32::try_from(start).map_err(|_| CompileError::DictionaryTooLarge)?,
         );
         bytes[data_offset + start..data_offset + data_cursor].copy_from_slice(word.as_bytes());
     }
@@ -705,7 +701,7 @@ impl PartialEq for CompiledDictionary {
 impl Eq for CompiledDictionary {}
 
 impl CompiledDictionary {
-    /// Loads a format-version-1 dictionary after a fixed-header and checksum check.
+    /// Loads a format-version-2 dictionary after a fixed-header and checksum check.
     ///
     /// This does not scan every index entry. Call [`Self::validate`] when a
     /// complete structural validation is required.
@@ -763,6 +759,9 @@ impl CompiledDictionary {
             || index_offset
                 .checked_add(index_len)
                 .is_none_or(|end| end > bytes.len())
+            || index_offset
+                .checked_add(index_len)
+                .is_none_or(|end| end > data_offset)
         {
             return Err(LoadError::InvalidLayout {
                 reason: LayoutError::IndexOutsideFile,
@@ -825,7 +824,14 @@ impl CompiledDictionary {
         let expected_index_end = self
             .index_offset
             .checked_add(self.word_count.saturating_mul(INDEX_ENTRY_SIZE));
-        if expected_index_end != Some(self.data_offset) {
+        let Some(expected_index_end) = expected_index_end else {
+            return Err(ValidationError::UnexpectedIndexPadding);
+        };
+        if expected_index_end > self.data_offset
+            || self.bytes[expected_index_end..self.data_offset]
+                .iter()
+                .any(|byte| *byte != 0)
+        {
             return Err(ValidationError::UnexpectedIndexPadding);
         }
 
@@ -923,8 +929,15 @@ impl CompiledDictionary {
         let index_entry = self
             .index_offset
             .checked_add(entry.checked_mul(INDEX_ENTRY_SIZE)?)?;
-        let start = usize::try_from(read_u64(&self.bytes, index_entry)?).ok()?;
-        let end = usize::try_from(read_u64(&self.bytes, index_entry.checked_add(8)?)?).ok()?;
+        let start = usize::try_from(read_u32(&self.bytes, index_entry)?).ok()?;
+        let end = if entry.checked_add(1)? < self.word_count {
+            let next_entry = self
+                .index_offset
+                .checked_add(entry.checked_add(1)?.checked_mul(INDEX_ENTRY_SIZE)?)?;
+            usize::try_from(read_u32(&self.bytes, next_entry)?).ok()?
+        } else {
+            self.data_len
+        };
         Some((start, end))
     }
 
@@ -1115,8 +1128,9 @@ mod tests {
     use super::{
         checksum, compile_exact_ir, compile_frequency_word_list, compile_words,
         inspect_compiled_artifact, is_frequency_word_list, parse_frequency_word_list, put_u64,
-        CompileError, CompiledDictionary, ExactDictionaryIr, FrequencyListError, LoadError,
-        ValidationError, CHECKSUM_END, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_OFFSET,
+        read_u32, CompileError, CompiledDictionary, ExactDictionaryIr, FrequencyListError,
+        LoadError, ValidationError, CHECKSUM_END, CHECKSUM_OFFSET, DATA_OFFSET, INDEX_ENTRY_SIZE,
+        INDEX_OFFSET,
     };
     use ferrolex_core::Dictionary;
     use ferrolex_suggest::{CandidateSource, SuggestConfig, Suggester};
@@ -1312,13 +1326,13 @@ mod tests {
 
     #[test]
     fn validation_reports_unsorted_index_entries() {
-        let mut bytes = compile_words(["alpha", "beta"]).expect("valid words compile");
-        let index_offset =
-            usize::try_from(read_header_u64(&bytes, INDEX_OFFSET)).expect("test platform");
-        let first = bytes[index_offset..index_offset + 16].to_vec();
-        let second = bytes[index_offset + 16..index_offset + 32].to_vec();
-        bytes[index_offset..index_offset + 16].copy_from_slice(&second);
-        bytes[index_offset + 16..index_offset + 32].copy_from_slice(&first);
+        let mut bytes = compile_words(["alpha", "bravo"]).expect("valid words compile");
+        let data_offset =
+            usize::try_from(read_header_u64(&bytes, DATA_OFFSET)).expect("test platform");
+        let first = bytes[data_offset..data_offset + 5].to_vec();
+        let second = bytes[data_offset + 5..data_offset + 10].to_vec();
+        bytes[data_offset..data_offset + 5].copy_from_slice(&second);
+        bytes[data_offset + 5..data_offset + 10].copy_from_slice(&first);
         refresh_checksum(&mut bytes);
         let dictionary =
             CompiledDictionary::load(bytes).expect("fast loading permits deferred validation");
@@ -1362,7 +1376,27 @@ mod tests {
 
         assert_eq!(index_offset % 8, 0);
         assert_eq!(data_offset % 8, 0);
-        assert_eq!(&bytes[8..10], &[1, 0]);
+        assert_eq!(&bytes[8..10], &[2, 0]);
+    }
+
+    #[test]
+    fn compact_index_uses_one_u32_start_offset_per_word() {
+        let bytes = compile_words(["alpha", "beta", "gamma"]).expect("valid words compile");
+        let index_offset =
+            usize::try_from(read_header_u64(&bytes, INDEX_OFFSET)).expect("test platform");
+        let data_offset =
+            usize::try_from(read_header_u64(&bytes, DATA_OFFSET)).expect("test platform");
+
+        assert_eq!(data_offset - index_offset, 16);
+        assert_eq!(read_u32(&bytes, index_offset), Some(0));
+        assert_eq!(read_u32(&bytes, index_offset + INDEX_ENTRY_SIZE), Some(5));
+        assert_eq!(
+            read_u32(&bytes, index_offset + 2 * INDEX_ENTRY_SIZE),
+            Some(9)
+        );
+        assert!(bytes[index_offset + 3 * INDEX_ENTRY_SIZE..data_offset]
+            .iter()
+            .all(|byte| *byte == 0));
     }
 
     #[test]
