@@ -3,7 +3,7 @@
   "version": "0.4.0",
   "description": "Native Node.js bindings for the ferrolex spell-checking engine",
   "license": "MIT OR Apache-2.0",
-  "author": "sebastian-software",
+  "author": "Sebastian Software GmbH",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sebastian-software/ferrolex.git",

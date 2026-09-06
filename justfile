@@ -22,6 +22,7 @@ gate: quick
     test -s LICENSE-APACHE
     test -s LICENSE-MIT
     cargo deny check
+    python3 scripts/workspace-rust-version.py --check
     python3 scripts/check-release-version-contract.py
     python3 scripts/publish-crates.py --check
 
