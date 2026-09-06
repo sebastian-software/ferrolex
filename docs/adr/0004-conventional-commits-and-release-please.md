@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-10
-- Last updated: 2026-08-10
+- Last updated: 2026-09-06
 - Deciders: Sebastian Werner
 
 ## Context
@@ -29,6 +29,11 @@ low-ceremony releases from day one.
 - CI should enforce commit-message format once CI exists.
 - The exact Release Please configuration lives in this repository's config
   files, synchronized from the standards repository — not in this ADR.
+- Repository-specific contributor and automation guidance lives in
+  [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md);
+  the organization-wide baseline remains the
+  [`sebastian-software/standards`](https://github.com/sebastian-software/standards)
+  repository.
 - Squash-merge discipline matters: the merged message must be a valid
   conventional commit.
 

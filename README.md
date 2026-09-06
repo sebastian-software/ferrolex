@@ -260,7 +260,8 @@ untrusted throughout the supported import and loading paths.
 
 ## MSRV
 
-ferrolex supports Rust 1.88 and later.
+ferrolex supports the Rust version declared in the workspace
+[`Cargo.toml`](Cargo.toml).
 
 ## License
 

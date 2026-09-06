@@ -30,15 +30,15 @@ unpublished.
 
 ## Developing
 
-ferrolex supports Rust 1.88 and later. Install the pinned MSRV when you need
-to verify it locally, then run the same core checks as CI:
+ferrolex supports the MSRV declared in the workspace `Cargo.toml`. The pinned
+`rust-toolchain.toml` selects that toolchain locally; run the same core checks
+as CI:
 
 ```sh
-rustup toolchain install 1.88
-cargo +1.88 fmt --all -- --check
-cargo +1.88 clippy --workspace --all-targets -- -D warnings
-cargo +1.88 test --workspace
-RUSTDOCFLAGS="-D warnings" cargo +1.88 doc --workspace --no-deps
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
 These commands mirror the Rust gate in the [CI workflow](.github/workflows/ci.yml):

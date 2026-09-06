@@ -19,32 +19,52 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.88
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        run: |
+          rust_version="$(python3 scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: python3 scripts/check-release-version-contract.py
       - run: python3 scripts/publish-crates.py --check
 
   test:
-    name: Test (${{ matrix.os }}, Rust ${{ matrix.toolchain }})
+    name: Test (${{ matrix.os }}, Rust ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            toolchain: "1.88"
+            label: MSRV
+            msrv: true
           - os: ubuntu-latest
-            toolchain: stable
+            label: stable
+            msrv: false
           - os: macos-latest
-            toolchain: stable
+            label: stable
+            msrv: false
           - os: windows-latest
-            toolchain: stable
+            label: stable
+            msrv: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: stable
           components: clippy, rustfmt
+      - name: Resolve workspace MSRV
+        if: matrix.msrv
+        run: |
+          rust_version="$(python3 scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        if: matrix.msrv
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal --component clippy,rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
@@ -78,7 +98,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.88
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        run: |
+          rust_version="$(python3 scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: >-
           FERROLEX_SUGGESTION_QUALITY_REQUIRE_APPROVED=1
@@ -91,7 +118,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: nightly-2026-08-31
+          toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fuzz
@@ -101,7 +128,10 @@ jobs:
       - uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: cargo-fuzz
+      - name: Install pinned fuzz toolchain
+        run: rustup toolchain install "$(python3 scripts/fuzz-toolchain.py)" --profile minimal
       - run: |
+          export RUSTUP_TOOLCHAIN="$(python3 scripts/fuzz-toolchain.py)"
           host_target="$(rustc --version --verbose | sed -n 's/^host: //p')"
           for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation analyze_source project_config word_list; do
             cargo fuzz run "$target" --target "$host_target" -- -runs=256
@@ -128,7 +158,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: nightly-2026-08-31
+          toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fuzz
@@ -139,7 +169,10 @@ jobs:
       - uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: cargo-fuzz
+      - name: Install pinned fuzz toolchain
+        run: rustup toolchain install "$(python3 scripts/fuzz-toolchain.py)" --profile minimal
       - run: |
+          export RUSTUP_TOOLCHAIN="$(python3 scripts/fuzz-toolchain.py)"
           host_target="$(rustc --version --verbose | sed -n 's/^host: //p')"
           cargo fuzz run "${{ matrix.target }}" --target "$host_target" -- -max_total_time=600
 
@@ -185,7 +218,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         if: steps.changes.outputs.relevant == 'true'
         with:
-          toolchain: 1.88
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          rust_version="$(python3 scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        if: steps.changes.outputs.relevant == 'true'
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: steps.changes.outputs.relevant == 'true'
       - name: Run required compatibility fixtures
@@ -211,7 +253,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.88
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        run: |
+          rust_version="$(python3 scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -249,7 +298,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.88
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        shell: bash
+        run: |
+          python_cmd=python3
+          command -v "$python_cmd" >/dev/null || python_cmd=python
+          rust_version="$($python_cmd scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        shell: bash
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

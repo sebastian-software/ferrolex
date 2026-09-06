@@ -2,8 +2,8 @@
 
 Dictionary files and suggestion input are treated as untrusted. The regular
 test suite therefore includes deterministic adversarial regression corpora;
-they require no separate fuzzer installation and run on the project's Rust
-1.88 MSRV in CI.
+they require no separate fuzzer installation and run on the workspace MSRV in
+CI.
 
 Property tests use `proptest` with its default persisted regression seeds. They
 exercise normalization idempotence, deterministic compiled-dictionary output,
@@ -41,14 +41,14 @@ fixture entries keep license evidence separately from engine code.
 Run the focused suite with:
 
 ```sh
-cargo +1.88 test -p ferrolex-hunspell -p ferrolex-compiler -p ferrolex-suggest
+cargo test -p ferrolex-hunspell -p ferrolex-compiler -p ferrolex-suggest
 ```
 
 ## Coverage-guided fuzzing
 
 The nightly-only `fuzz/` workspace deliberately sits outside the shipped
-workspace and its Rust 1.88 MSRV contract. Its targets cover raw Hunspell
-import in every supported byte encoding, the FLXHSP runtime-cache loader, the
+workspace and its MSRV contract. Its targets cover raw Hunspell import in every
+supported byte encoding, the FLXHSP runtime-cache loader, the
 FLEXDIC loader, suggestion queries, compound evaluation, source analysis,
 project configuration, and plain word-list parsing. Their initial corpus
 consists of the deterministic robustness cases above; minimize and add any
@@ -58,9 +58,11 @@ and file the finding as a GitHub issue.
 Run a short local smoke pass with:
 
 ```sh
-cargo +nightly-2026-08-31 install cargo-fuzz --locked
+fuzz_toolchain=$(python3 scripts/fuzz-toolchain.py)
+rustup toolchain install "$fuzz_toolchain" --profile minimal
+cargo +"$fuzz_toolchain" install cargo-fuzz --locked
 for target in hunspell_import runtime_cache_loader compiled_loader suggestion_input compound_evaluation analyze_source project_config word_list; do
-  cargo +nightly-2026-08-31 fuzz run "$target" -- -runs=256
+  cargo +"$fuzz_toolchain" fuzz run "$target" -- -runs=256
 done
 ```
 
@@ -77,9 +79,9 @@ and release/package contracts without silently downloading fixtures or tools.
 The equivalent core commands are:
 
 ```sh
-cargo +1.88 fmt --all -- --check
-cargo +1.88 clippy --workspace --all-targets -- -D warnings
-cargo +1.88 test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
 CI also has explicit network-, credential-, licensed-fixture-, and
