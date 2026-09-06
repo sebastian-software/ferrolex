@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-08-13
 - Last updated: 2026-08-14
-- Deciders: Ferrolex maintainers
+- Deciders: ferrolex maintainers
 
 ## Context
 
@@ -24,13 +24,17 @@ ferrolex will not own programming-language or document parsers. It will not add
 Tree-sitter grammars, semantic analysis, compiler integration, or named
 language-support tiers.
 
-Format-aware consumers select human-language content and call the ferrolex Rust
-or Node.js API:
+Format-aware consumers are designed to select human-language content and call
+the ferrolex Rust or Node.js API:
 
-- Ferromark owns Markdown parsing and passes prose to ferrolex.
-- Ferrocat owns PO parsing and passes translatable strings to ferrolex.
-- OXC owns TypeScript parsing and passes selected comments, strings, or
-  identifiers to ferrolex.
+- [ferromark](https://github.com/sebastian-software/ferromark) owns Markdown
+  parsing and can pass prose to ferrolex.
+- [ferrocat](https://github.com/sebastian-software/ferrocat) owns PO parsing and
+  can pass translatable strings to ferrolex.
+- [OXC](https://oxc.rs) owns TypeScript parsing and can pass selected comments,
+  strings, or identifiers to ferrolex.
+
+These are designed-for boundaries, not shipped sibling integrations.
 
 The existing `ferrolex-code` crate may remain as a generic, parser-independent
 helper while the workspace is simplified. Its presence is not a promise that

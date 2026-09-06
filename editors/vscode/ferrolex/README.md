@@ -1,4 +1,4 @@
-# Ferrolex for Visual Studio Code
+# ferrolex for Visual Studio Code
 
 > Prototype only. This extension is outside ferrolex's current product and
 > distribution scope and is not planned for Marketplace publication.
@@ -26,7 +26,7 @@ cargo build -p ferrolex-lsp
   dictionary.
 
 The settings are sent when the extension starts and updated through the LSP
-configuration notification when they change. Use **Ferrolex: Restart Language
+configuration notification when they change. Use **ferrolex: Restart Language
 Server** after changing the server command itself.
 
 ## Packaging status

@@ -19,20 +19,23 @@ their own manifests, source, lockfile, or workflow changes and can also be
 started manually. Changes to the shared core, code-analysis, or suggestion APIs
 also trigger it so retained prototypes cannot silently drift from dependencies.
 
-Format-aware integration happens in the owning tool:
+Format-aware integration is designed to happen in the owning tool:
 
-- Ferromark selects prose from Markdown.
-- Ferrocat selects translatable content from PO catalogs.
-- OXC selects relevant text from TypeScript source.
+- [ferromark](https://github.com/sebastian-software/ferromark) selects prose
+  from Markdown.
+- [ferrocat](https://github.com/sebastian-software/ferrocat) selects
+  translatable content from PO catalogs.
+- [OXC](https://oxc.rs) selects relevant text from TypeScript source.
 
-Those tools call ferrolex after parsing. ferrolex deliberately does not embed
-their parsers, own their configuration, or define editor-protocol behavior.
+Those tools are designed to call ferrolex after parsing; no sibling adapter is
+part of the current support tier. ferrolex deliberately does not embed their
+parsers, own their configuration, or define editor-protocol behavior.
 
 For the shared plain-text boundary, use [`ferrolex-text`](family-tooling.md).
 It is the family tokenizer for extracted prose and catalog strings; the
 consuming tool still owns field selection, source locations, and ignore rules.
 The initial catalog and documentation evaluations are tracked for Palamedes /
-Ferrocat and Ferramenta in the [family tooling contract](family-tooling.md).
+ferrocat and Ferramenta in the [family tooling contract](family-tooling.md).
 
 All integrations use caller-controlled dictionaries. Verified acquisition and
 local caching remain governed by [ADR-0007](adr/0007-dictionary-distribution.md).

@@ -1,6 +1,6 @@
 {
   "name": "ferrolex",
-  "displayName": "Ferrolex",
+  "displayName": "ferrolex",
   "description": "Spell checking through the ferrolex language server.",
   "version": "0.4.0",
   "private": true,
@@ -29,11 +29,11 @@
     "commands": [
       {
         "command": "ferrolex.restartLanguageServer",
-        "title": "Ferrolex: Restart Language Server"
+        "title": "ferrolex: Restart Language Server"
       }
     ],
     "configuration": {
-      "title": "Ferrolex",
+      "title": "ferrolex",
       "properties": {
         "ferrolex.lsp.command": {
           "type": "string",

@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-08-13
 - Last updated: 2026-09-06
-- Deciders: Ferrolex maintainers
+- Deciders: ferrolex maintainers
 
 ## Context
 

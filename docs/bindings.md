@@ -33,7 +33,7 @@ const sources = dictionaryCatalog()
 `Checker.fromHunspell` strictly imports caller-owned `.aff` and `.dic` files.
 `Checker.install` fetches, verifies, caches, and strictly imports a
 digest-pinned catalog dictionary off the JavaScript event loop. The caller
-always selects the cache root. Ferrolex neither bundles dictionary data nor
+always selects the cache root. ferrolex neither bundles dictionary data nor
 uses a global implicit download location.
 
 `dictionaryCatalog` exposes the reviewed locale, pinned revision, SPDX license

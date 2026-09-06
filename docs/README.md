@@ -21,6 +21,8 @@ point for installation, command-line use, and the public Rust API.
   options, output streams, and exit statuses.
 - [Shared family tooling](family-tooling.md) defines the plain-text tokenizer
   boundary and the integration evaluation queue.
+- [README and brand standard](readme-standard.md) records the generated family
+  block, badges, tagline, and casing contract.
 - [Compatibility reporting](compatibility.md) explains the format,
   recognition, morphology, and ecosystem evidence levels.
 - [Compatibility fixtures](compatibility-fixtures.md),

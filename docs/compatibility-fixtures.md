@@ -179,7 +179,7 @@ recorded decoding or import boundary prevented a measurement. The baseline at
 [`scorecard-baseline.tsv`](../crates/ferrolex-hunspell/tests/real_world/scorecard-baseline.tsv)
 is a durable, exact per-locale comparison of the seven measured rows. Each row
 also records the SHA-256 of length-prefixed UTF-8 corpus words plus the
-Ferrolex and Hunspell decisions for each ordered word. This binds both corpus
+ferrolex and Hunspell decisions for each ordered word. This binds both corpus
 and outcome identity, so a corpus substitution or a new disagreement replacing
 an old one cannot hide behind unchanged aggregate counts.
 

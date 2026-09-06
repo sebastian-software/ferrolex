@@ -31,6 +31,27 @@ jobs:
       - run: python3 scripts/check-release-version-contract.py
       - run: python3 scripts/publish-crates.py --check
 
+  readme-brand-contract:
+    name: README and brand contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check generated family blocks and footers
+        run: |
+          python3 scripts/generate-readme-family.py --current ferrolex --variant github --readme README.md --check
+          for readme in \
+            crates/ferrolex-core/README.md \
+            crates/ferrolex-dictionaries/README.md \
+            crates/ferrolex-code/README.md \
+            crates/ferrolex-suggest/README.md \
+            crates/ferrolex-text/README.md \
+            crates/ferrolex-compiler/README.md \
+            crates/ferrolex-hunspell/README.md \
+            crates/ferrolex-cli/README.md; do
+            python3 scripts/generate-readme-family.py \
+              --current ferrolex --variant registry --readme "$readme" --check
+          done
+
   coverage:
     name: Rust coverage
     runs-on: ubuntu-latest
