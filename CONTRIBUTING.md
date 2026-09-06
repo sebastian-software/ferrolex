@@ -41,6 +41,17 @@ cargo +1.88 test --workspace
 RUSTDOCFLAGS="-D warnings" cargo +1.88 doc --workspace --no-deps
 ```
 
+These commands mirror the Rust gate in the [CI workflow](.github/workflows/ci.yml):
+
+- Workspace lints enable `clippy::pedantic` as a warning in the
+  [workspace lint configuration](Cargo.toml#L68-L70), while `-D warnings`
+  promotes every Clippy warning to a failure.
+- `RUSTDOCFLAGS="-D warnings"` applies the same fail-on-warning policy to
+  rustdoc, including missing or malformed documentation.
+- Pull-request titles must use the Conventional Commits format; the
+  [title workflow](.github/workflows/conventional-commits.yml) checks the
+  title independently of the commit messages.
+
 The repository also provides a tiered local runner when
 [just](https://github.com/casey/just) is installed:
 
@@ -56,11 +67,6 @@ approved suggestion-quality regression, cargo-deny, release-contract checks,
 and package validation. It intentionally does not download licensed fixtures,
 install tools, access registries, or require publishing credentials; those
 network- and credential-dependent workflows remain explicit.
-
-CI enables `clippy::pedantic` as a workspace warning and passes `-D warnings`,
-so locally ignoring a pedantic warning still fails the CI gate. The
-Conventional Commits workflow validates the pull-request title, not only the
-commit history; use a Conventional Commit title before requesting review.
 
 The real-world Hunspell fixture suite is opt-in because it needs separately
 obtained, licensed dictionary sources; see
