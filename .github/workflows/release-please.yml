@@ -44,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -59,14 +60,156 @@ jobs:
       - name: Install workspace MSRV
         run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Require crates.io credentials
-        run: |
-          if [[ -z "$CARGO_REGISTRY_TOKEN" ]]; then
-            echo '::error::Configure the CARGO_REGISTRY_TOKEN repository secret before releasing.'
-            exit 1
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Authenticate with crates.io Trusted Publishing
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
       - run: python3 scripts/publish-crates.py
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+
+  build-node-native:
+    name: Build Node native package (${{ matrix.label }})
+    needs: [release-please, compatibility-scorecard]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            os: macos-15
+            rust-target: aarch64-apple-darwin
+            platform-id: darwin-arm64
+            cross-compile: false
+          - label: macOS x64
+            os: macos-15-intel
+            rust-target: x86_64-apple-darwin
+            platform-id: darwin-x64
+            cross-compile: false
+          - label: Linux arm64 glibc
+            os: ubuntu-24.04-arm
+            rust-target: aarch64-unknown-linux-gnu
+            platform-id: linux-arm64-gnu
+            cross-compile: false
+          - label: Linux x64 musl
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-musl
+            platform-id: linux-x64-musl
+            cross-compile: true
+          - label: Linux arm64 musl
+            os: ubuntu-latest
+            rust-target: aarch64-unknown-linux-musl
+            platform-id: linux-arm64-musl
+            cross-compile: true
+          - label: Linux x64 glibc
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            platform-id: linux-x64-gnu
+            cross-compile: false
+          - label: Windows arm64
+            os: windows-11-arm
+            rust-target: aarch64-pc-windows-msvc
+            platform-id: win32-arm64-msvc
+            cross-compile: false
+          - label: Windows x64
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            platform-id: win32-x64-msvc
+            cross-compile: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+      - name: Resolve workspace MSRV
+        shell: bash
+        run: |
+          python_cmd=python3
+          command -v "$python_cmd" >/dev/null || python_cmd=python
+          rust_version="$($python_cmd scripts/workspace-rust-version.py)"
+          echo "FERROLEX_RUST_VERSION=$rust_version" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
+      - name: Install workspace MSRV
+        shell: bash
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal --target "${{ matrix.rust-target }}"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        if: matrix.cross-compile
+        with:
+          version: 0.15.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        if: matrix.cross-compile
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: crates/ferrolex-node/package-lock.json
+      - run: npm ci --prefix crates/ferrolex-node --ignore-scripts --omit=optional
+      - run: npm run build --prefix crates/ferrolex-node
+        env:
+          FERROLEX_NODE_TARGET: ${{ matrix.rust-target }}
+          FERROLEX_NODE_CROSS_COMPILE: ${{ matrix.cross-compile && '1' || '0' }}
+      - run: npm run create-npm-dirs --prefix crates/ferrolex-node
+      - name: Upload native addon
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ferrolex-node-native-${{ matrix.platform-id }}
+          path: crates/ferrolex-node/ferrolex_node.${{ matrix.platform-id }}.node
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-node:
+    name: Publish Node packages
+    needs: [release-please, build-node-native]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci --prefix crates/ferrolex-node --ignore-scripts --omit=optional
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: ferrolex-node-native-*
+          merge-multiple: true
+          path: crates/ferrolex-node/artifacts
+      - run: npm run artifacts --prefix crates/ferrolex-node
+      - run: node crates/ferrolex-node/scripts/prepare-package.mjs
+      - name: Verify the complete Node package matrix
+        shell: bash
+        working-directory: crates/ferrolex-node
+        run: |
+          for platform_id in \
+            darwin-arm64 darwin-x64 \
+            linux-arm64-gnu linux-arm64-musl linux-x64-gnu linux-x64-musl \
+            win32-arm64-msvc win32-x64-msvc; do
+            test -s "npm/$platform_id/package.json"
+            test -s "npm/$platform_id/ferrolex_node.$platform_id.node"
+          done
+      - name: Publish platform packages with npm Trusted Publishing
+        shell: bash
+        working-directory: crates/ferrolex-node
+        run: |
+          for platform_id in \
+            darwin-arm64 darwin-x64 \
+            linux-arm64-gnu linux-arm64-musl linux-x64-gnu linux-x64-musl \
+            win32-arm64-msvc win32-x64-msvc; do
+            npm publish "./npm/$platform_id" --access public --provenance
+          done
+      - name: Publish the root package with npm Trusted Publishing
+        working-directory: crates/ferrolex-node
+        run: npm publish --access public --provenance

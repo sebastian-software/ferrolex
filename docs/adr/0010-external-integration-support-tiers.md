@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-13
-- Last updated: 2026-09-03
+- Last updated: 2026-09-06
 - Deciders: Ferrolex maintainers
 
 ## Context
@@ -23,9 +23,13 @@ not currently have a concrete consumer or distribution requirement.
 Node.js is the only selected direct non-Rust integration. Its API mirrors the
 Rust engine's dictionary, checking, suggestion, and managed-acquisition model.
 `@ferrolex/node` is the selected package, with `sebastian-software` as the
-repository and release owner. Its checked-in TypeScript declarations,
-supported prebuilt matrix, and clean-install verification are release gates.
-Publishing to npm remains a separate, credentialed release action.
+repository and release owner. The package names are fixed before publication:
+`@ferrolex/node` plus the eight platform packages for Linux glibc/musl,
+macOS, and Windows listed in [the binding contract](../bindings.md). Its
+checked-in TypeScript declarations, supported prebuilt matrix, and clean-install
+verification are release gates. The release workflow uses npm Trusted
+Publishing; publication remains blocked until all nine npm package publishers
+are configured for the exact workflow.
 
 The C ABI and Python packages are retained only as evaluation prototypes. The
 generic LSP and Visual Studio Code client are outside the current product and
@@ -48,6 +52,8 @@ Rust or Node.js API after parsing. They do not require a ferrolex-owned LSP.
 - Prototype source can be removed independently after checking whether it still
   provides useful implementation evidence.
 - Dictionaries remain caller-controlled and follow ADR-0007 in every runtime.
+- Python, LSP, and VS Code have no PyPI, language-server, or extension registry
+  publication path; they remain evaluation prototypes.
 
 ## Promotion criteria
 
@@ -55,8 +61,8 @@ The Node.js binding is promoted as the supported pre-1.0 integration because
 it has a named release owner, documented TypeScript API, prebuilt binary
 policy, managed dictionary workflow, and clean-install tests on its declared
 platforms. The first npm publication additionally requires verified registry
-access for the `@ferrolex` scope; source control and CI do not imply that
-credential.
+access for the `@ferrolex` scope and trusted publishers for the exact release
+workflow; source control and CI do not imply that registry configuration.
 
 Reconsider another direct binding only for a concrete consumer that cannot use
 Rust or Node.js and supplies a credible packaging and maintenance owner.
