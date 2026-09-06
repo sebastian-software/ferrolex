@@ -92,6 +92,33 @@ obtained, licensed dictionary sources; see
 directory contains the compatibility-fixture downloader and README-status
 generator used by CI, plus opt-in Node.js and Python binding benchmarks.
 
+### Node workspaces and org standards
+
+ferrolex is a Rust repository with no root `package.json`, and two Node
+projects it authors itself: `crates/ferrolex-node`, which publishes
+`@ferrolex/node`, and `editors/vscode/ferrolex`, the prototype editor
+extension. Both are declared in `.repometa.json#workspaces`, so
+[`@sebastian-software/standards`](https://github.com/sebastian-software/standards)
+writes the org's Node configuration into those two directories: the managed
+`.oxfmtrc.json` plus the seeded `eslint.config.ts`, `oxlint.config.ts`,
+`tsconfig.json` and `cspell.json`. Run the formatter from inside the workspace
+so its own config is the one that applies, not from the repository root. The
+generated `npm/` sidecar under `crates/ferrolex-node` is not a workspace and is
+not declared.
+
+`crates/ferrolex-node/.prettierignore` keeps the formatter away from artifacts
+this repository generates rather than writes: napi-rs regenerates `index.js`
+and `index.d.ts` on every build and CI asserts they are unchanged, and the
+package README carries the generated family block. oxfmt discovers that file on
+its own; never add repository-specific ignores to the managed `.oxfmtrc.json`.
+
+The `Standards drift` job in the [CI workflow](.github/workflows/ci.yml) runs
+`standards check` from a version pinned in the workflow, because a repository
+without a root lockfile has nowhere else to hold it. Renovate raises the pin
+through the custom manager in [`renovate.json`](renovate.json); raise it and run
+`standards apply` in the same pull request, or the stamp and the CLI that
+checks it disagree.
+
 ### README family block
 
 The Ferramenta family block in the root README, the eight public crate READMEs,

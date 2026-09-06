@@ -1,0 +1,14 @@
+# oxfmt auto-discovers .prettierignore. Repository-specific generated artifacts
+# belong here, never in the managed .oxfmtrc.json.
+
+# napi-rs writes the loader and its types on every `npm run build`, and CI
+# asserts `git diff --exit-code` on both. scripts/normalize-loader.mjs then
+# rewrites the loader by matching napi's exact output, so a reformat would make
+# the postbuild step fail outright.
+index.js
+index.d.ts
+
+# Carries the generated Ferramenta family block, rendered by
+# scripts/generate-readme-family.sh and checked in CI. The generator is the only
+# writer of the block, and it does not emit oxfmt-formatted Markdown.
+README.md

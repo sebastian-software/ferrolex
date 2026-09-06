@@ -1,3 +1,8 @@
 test/
 package-lock.json
 *.vsix
+.oxfmtrc.json
+cspell.json
+eslint.config.ts
+oxlint.config.ts
+tsconfig.json

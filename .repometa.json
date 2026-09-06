@@ -1,6 +1,10 @@
 {
-  "standards": 9,
+  "standards": 12,
   "visibility": "oss",
   "since": 2026,
-  "platform": "github"
+  "platform": "github",
+  "workspaces": [
+    "crates/ferrolex-node",
+    "editors/vscode/ferrolex"
+  ]
 }

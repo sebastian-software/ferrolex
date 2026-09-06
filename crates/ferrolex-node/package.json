@@ -2,6 +2,8 @@
   "name": "@ferrolex/node",
   "version": "0.4.0",
   "description": "Native Node.js bindings for the ferrolex spell-checking engine",
+  "homepage": "https://github.com/sebastian-software/ferrolex",
+  "bugs": "https://github.com/sebastian-software/ferrolex/issues",
   "license": "MIT OR Apache-2.0",
   "author": "Sebastian Software GmbH",
   "repository": {
@@ -9,10 +11,6 @@
     "url": "git+https://github.com/sebastian-software/ferrolex.git",
     "directory": "crates/ferrolex-node"
   },
-  "homepage": "https://github.com/sebastian-software/ferrolex",
-  "bugs": "https://github.com/sebastian-software/ferrolex/issues",
-  "main": "index.js",
-  "types": "index.d.ts",
   "files": [
     "index.js",
     "index.d.ts",
@@ -20,8 +18,11 @@
     "LICENSE-MIT",
     "README.md"
   ],
-  "engines": {
-    "node": ">=22.13.0"
+  "main": "index.js",
+  "types": "index.d.ts",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "artifacts": "napi artifacts --output-dir artifacts --npm-dir npm",
@@ -46,10 +47,6 @@
     "@ferrolex/node-win32-arm64-msvc": "0.4.0",
     "@ferrolex/node-win32-x64-msvc": "0.4.0"
   },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
   "napi": {
     "binaryName": "ferrolex_node",
     "packageName": "@ferrolex/node",
@@ -63,5 +60,8 @@
       "x86_64-unknown-linux-musl",
       "x86_64-unknown-linux-gnu"
     ]
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }
