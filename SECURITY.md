@@ -2,20 +2,38 @@
 
 ## Supported versions
 
-Security fixes are applied to the current `main` branch until ferrolex has its
-first stable release. Pre-release versions and unreleased commits should be
-updated to the latest `main` revision before reporting a duplicate issue.
+Security fixes are provided for the latest release on the default branch. Older
+releases are not patched separately — upgrade to the latest version to receive a
+fix.
 
 ## Reporting a vulnerability
 
-Please use GitHub's private vulnerability-reporting flow for this repository:
-[report a vulnerability](https://github.com/sebastian-software/ferrolex/security/advisories/new).
-Do not open a public issue for an unpatched vulnerability.
+Report suspected vulnerabilities privately. Do not open a public issue, pull
+request, or discussion for a vulnerability that has not been fixed yet.
+
+Two private channels are available:
+
+- **GitHub private vulnerability reporting** — open this repository's
+  **Security** tab and choose
+  [Report a vulnerability](https://github.com/sebastian-software/ferrolex/security/advisories/new).
+- **Email** — security@sebastian-software.de.
 
 Include a minimal reproducer, the ferrolex revision, affected platform, and an
-assessment of practical impact. The maintainers will acknowledge reports,
-validate the impact, and coordinate disclosure through a GitHub Security
-Advisory where appropriate.
+assessment of practical impact. Leave out credentials and data you are not
+allowed to share.
+
+## Response expectations
+
+Maintainers aim to:
+
+- Acknowledge a private report within 7 days.
+- Assess severity and affected versions within 14 days.
+- Coordinate a fix and a disclosure timeline with the reporter, through a GitHub
+  Security Advisory where appropriate.
+- Credit the reporter when desired and appropriate.
+
+Timing can vary for low-impact reports and for reports that depend on a fix in
+an upstream dependency.
 
 ## Scope
 
@@ -25,3 +43,7 @@ panics, unbounded resource consumption, and integrity failures in importers,
 artifact loaders, generic token handling, and bounded suggestion processing.
 Unsupported dictionary semantics that are diagnosed rather than silently
 accepted are not compatibility vulnerabilities by themselves.
+
+Usually out of scope: reports without a concrete impact path, vulnerabilities in
+third-party dependencies used as documented, and problems that require an
+already-compromised machine or a deliberately corrupted local state.
