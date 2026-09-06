@@ -15,26 +15,34 @@ JavaScript contract are reviewable.
 The API deliberately mirrors the focused Rust concepts:
 
 ```ts
-import { Checker, dictionaryCatalog } from '@ferrolex/node'
+import { SpellChecker, dictionaryCatalog } from '@ferrolex/node'
 
-const words = new Checker('ferrolex\nFerris')
+const words = new SpellChecker('ferrolex\nFerris')
 words.check('ferrolex')
 words.suggest('ferolex')
 
-const local = Checker.fromHunspell('dictionary.aff', 'dictionary.dic')
+const local = SpellChecker.fromHunspell('dictionary.aff', 'dictionary.dic')
 local.check('derived-form')
 
-const managed = await Checker.install('en_US', '.ferrolex-dictionaries')
+const managed = await SpellChecker.install('en_US', '.ferrolex-dictionaries')
 managed.suggest('recieve')
 
 const sources = dictionaryCatalog()
 ```
 
-`Checker.fromHunspell` strictly imports caller-owned `.aff` and `.dic` files.
-`Checker.install` fetches, verifies, caches, and strictly imports a
+`SpellChecker.fromHunspell` strictly imports caller-owned `.aff` and `.dic`
+files. `SpellChecker.fromRuntimeArtifact` loads a standalone, checksummed
+runtime artifact and surfaces stale or corrupt provenance as an error.
+`SpellChecker.install` fetches, verifies, caches, and strictly imports a
 digest-pinned catalog dictionary off the JavaScript event loop. The caller
 always selects the cache root. ferrolex neither bundles dictionary data nor
 uses a global implicit download location.
+
+The constructor and loader methods accept `{ normalization: 'exact' | 'nfc' |
+'nfkc' }`. `suggest(word, options)` exposes the bounded Rust `SuggestConfig`
+fields in camelCase and returns `{ suggestions: [{ word, distance }],
+completeness }`. `addUserWord`, `removeUserWord`, and `userWords` provide a
+live project-specific overlay without changing the immutable base dictionary.
 
 `dictionaryCatalog` exposes the reviewed locale, pinned revision, SPDX license
 expression, and immutable upstream license-notice URL. `suggest` uses the same

@@ -46,9 +46,9 @@ npm install --ignore-scripts --offline \
   "$work/packages/$platform_archive"
 
 node -e '
-  const { Checker, dictionaryCatalog } = require("@ferrolex/node")
-  const checker = new Checker("ferrolex\nFerris")
+  const { SpellChecker, dictionaryCatalog } = require("@ferrolex/node")
+  const checker = new SpellChecker("ferrolex\nFerris")
   if (!checker.check("ferrolex") || checker.check("ferolex")) process.exit(1)
-  if (checker.suggest("ferolex")[0] !== "ferrolex") process.exit(1)
+  if (checker.suggest("ferolex").suggestions[0].word !== "ferrolex") process.exit(1)
   if (!dictionaryCatalog().some(({ locale }) => locale === "en_US")) process.exit(1)
 '

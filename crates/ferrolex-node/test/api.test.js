@@ -6,14 +6,31 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { Checker, dictionaryCatalog } = require('../index.js');
+const { SpellChecker, dictionaryCatalog } = require('../index.js');
 
 test('word lists expose deterministic checking and suggestions', () => {
-  const checker = new Checker('ferrolex\nFerris');
+  const checker = new SpellChecker('ferrolex\nFerris');
 
   assert.equal(checker.check('ferrolex'), true);
   assert.equal(checker.check('ferolex'), false);
-  assert.deepEqual(checker.suggest('ferolex'), ['ferrolex']);
+  assert.deepEqual(checker.suggest('ferolex'), {
+    suggestions: [{ word: 'ferrolex', distance: 1 }],
+    completeness: 'complete',
+  });
+});
+
+test('normalization, suggestion bounds, and user words are explicit', () => {
+  const checker = new SpellChecker('café\n', { normalization: 'nfc' });
+
+  assert.equal(checker.check('cafe\u0301'), true);
+  assert.equal(checker.addUserWord('projectword'), true);
+  assert.equal(checker.check('projectword'), true);
+  assert.deepEqual(checker.userWords(), ['projectword']);
+  assert.deepEqual(checker.suggest('projectwrod', { maxResults: 1 }), {
+    suggestions: [{ word: 'projectword', distance: 1 }],
+    completeness: 'complete',
+  });
+  assert.equal(checker.removeUserWord('projectword'), true);
 });
 
 test('caller-owned Hunspell files retain recognition and ranking signals', () => {
@@ -27,9 +44,9 @@ test('caller-owned Hunspell files retain recognition and ranking signals', () =>
   fs.writeFileSync(dicPath, '2\nreceive/S\nferrolex\n');
 
   try {
-    const checker = Checker.fromHunspell(affPath, dicPath);
+    const checker = SpellChecker.fromHunspell(affPath, dicPath);
     assert.equal(checker.check('receives'), true);
-    assert.equal(checker.suggest('recieve')[0], 'receive');
+    assert.equal(checker.suggest('recieve').suggestions[0].word, 'receive');
   } finally {
     fs.rmSync(directory, { recursive: true });
   }
@@ -48,7 +65,7 @@ test(
   'a pre-populated managed cache is verified and imported off the event loop',
   { skip: !process.env.FERROLEX_NODE_MANAGED_CACHE },
   async () => {
-    const checker = await Checker.install(
+    const checker = await SpellChecker.install(
       'en_US',
       process.env.FERROLEX_NODE_MANAGED_CACHE,
     );
