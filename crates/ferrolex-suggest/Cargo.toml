@@ -7,8 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
+keywords = ["spell-checking", "suggestions", "correction", "unicode"]
 categories.workspace = true
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
 exclude = ["/tests/**"]
 
 [dependencies]

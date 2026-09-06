@@ -1,14 +1,18 @@
 [package]
 name = "ferrolex-compiler"
 version = "0.4.0"
-description = "Deterministic compiled dictionary format for ferrolex"
+description = "Supporting compiled dictionary format for ferrolex"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
+keywords = ["spell-checking", "dictionary", "compiled-format", "storage"]
 categories.workspace = true
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 ferrolex-core = { path = "../ferrolex-core", version = "0.4.0" }

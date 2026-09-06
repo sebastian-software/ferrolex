@@ -1,5 +1,8 @@
 //! A deterministic, bounds-checked compiled dictionary format.
 //!
+//! This is a supporting storage and deployment crate, not a separate product
+//! boundary.
+//!
 //! The format is designed to be suitable for a memory-mapped backing store:
 //! all fields are little-endian integers, sections are offset-addressed and
 //! eight-byte aligned, and lookup performs no allocation.  This initial
