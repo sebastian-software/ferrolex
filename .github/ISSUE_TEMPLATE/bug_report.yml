@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible defect in ferrolex.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Please do not attach or commit third-party dictionary files; use the reviewed fixture procedure for dictionary-content reports.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: A short description of the unexpected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the ferrolex version, Rust toolchain or Node version, operating system, and relevant crate or binary.
+      placeholder: |
+        ferrolex 0.4.0
+        Rust 1.88
+        macOS 15
+        ferrolex-cli
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest command, API call, or repository-owned fixture that reproduces the problem.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Triage checklist
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I have not included third-party dictionary data or files with unclear redistribution rights.
+          required: true
