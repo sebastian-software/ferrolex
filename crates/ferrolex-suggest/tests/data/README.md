@@ -32,7 +32,12 @@ The named `Suggestion quality regression` CI job sets
 it rejects pending corpus and baseline rows. The reviewer must be a non-empty
 maintainer identity and `reviewed_on` must be an ISO `YYYY-MM-DD` date. Until a
 maintainer records those facts, the quality job is expected to fail and the
-change must not merge.
+change must not merge. An external contributor should open the PR with the
+pending row or baseline change, call out the requested corpus review in the PR
+description, and leave the review-gated CI result visible. A maintainer reviews
+the provenance and expected outcome, updates the row to
+`approved-by-maintainer` with their identity and date, and reruns the same job
+before merging.
 
 The corpus is used only by the integration test. `ferrolex-suggest` explicitly
 excludes `tests/**` from its published package, keeping this data out of the
