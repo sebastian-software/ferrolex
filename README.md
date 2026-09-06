@@ -21,10 +21,11 @@ compatibility evidence, and retained prototype history.
 
 The project is pre-1.0. The Rust engine, Hunspell compatibility, suggestions,
 and managed dictionary acquisition are the current product focus. The Node.js
-binding is the first direct runtime integration. Its `@ferrolex/node` package
-contract and prebuilt matrix are release-gated in CI, but the package has not
-yet been published to npm. Public APIs may change in minor releases before
-1.0; breaking changes are recorded in the changelog.
+binding is the first direct runtime integration and requires Node.js 22.13 or
+newer. Its `@ferrolex/node` package contract and prebuilt matrix are
+release-gated in CI, but the package has not yet been published to npm. Public
+APIs may change in minor releases before 1.0; breaking changes are recorded in
+the changelog.
 
 ### Reviewed dictionary compatibility
 
@@ -179,12 +180,14 @@ common importer, dictionary, suggestion, and catalog types are also available
 at the crate root. Depending only on `ferrolex` keeps these APIs on the same
 version-locked release line.
 
-The [Node.js binding](docs/bindings.md) is the only current foreign-runtime
-integration direction. The checked-in C ABI, Python, LSP, and VS Code work is
-prototype history rather than an active distribution or compatibility promise;
-it is excluded from the default release compilation and test gates, then
-checked when prototype paths change or a maintainer starts the prototype
-workflow manually. See [Native integrations](docs/integrations.md).
+The [Node.js binding](docs/bindings.md) is the supported pre-1.0 foreign-runtime
+integration and remains in `default-members` because its Rust build is part of
+the npm release gate, although the Cargo crate itself is `publish = false`.
+The C ABI and Python binding are evaluation prototypes; the LSP and VS Code
+work are retained editor prototypes outside the current product scope. These
+prototype paths are excluded from the default release compilation and test
+gates, then checked when their paths change or a maintainer starts the
+prototype workflow manually. See [Native integrations](docs/integrations.md).
 
 The optional, digest-pinned LibreOffice installer is documented in
 [Dictionary fetching](docs/dictionary-fetching.md). It fetches reviewed
@@ -222,13 +225,14 @@ automation a stable, human-readable artifact report.
 ## Product boundaries
 
 ferrolex owns dictionary acquisition, import, recognition, and suggestions. It
-does not own document parsing, editor protocols, or language semantics. In
-particular, parser-backed source analysis, an LSP, and editor extensions are not
-part of the current product scope. Existing experimental code may remain while
-the workspace is simplified, but it must not drive the public API, release
-matrix, or future release gates. Some prototype checks still run in the general
-workspace CI during this transition and are tracked for removal from the
-focused release path.
+does not own document parsing, editor protocols, or language semantics. The
+Node.js binding is the supported direct runtime integration; the C ABI and
+Python binding are evaluation prototypes, while the LSP and VS Code work are
+retained editor prototypes outside the product scope. Existing experimental
+code may remain while the workspace is simplified, but it must not drive the
+public API, release matrix, or future release gates. See
+[ADR-0010](docs/adr/0010-external-integration-support-tiers.md) for the tier
+definitions.
 
 ## Benchmarks
 

@@ -2,7 +2,7 @@
 
 This page records what the reviewed LibreOffice source catalog establishes and
 what it does **not** establish. It is an evidence matrix, not a claim that an
-installed locale has the same recognition behaviour as LibreOffice or Hunspell.
+installed locale has the same recognition behavior as LibreOffice or Hunspell.
 
 Every row names exactly the `.aff`/`.dic` pair in the digest-pinned catalog at
 LibreOffice/dictionaries commit
