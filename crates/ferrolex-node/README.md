@@ -3,16 +3,19 @@
 Native Node.js bindings for the ferrolex spell-checking engine.
 
 ```js
-const { Checker } = require('@ferrolex/node')
+const { SpellChecker } = require('@ferrolex/node')
 
-const checker = new Checker('ferrolex\nFerris')
+const checker = new SpellChecker('ferrolex\nFerris')
 checker.check('ferrolex')
 checker.suggest('ferolex')
 ```
 
 The package also supports strict caller-owned Hunspell files with
-`Checker.fromHunspell(affPath, dicPath)` and digest-pinned managed dictionaries
-with `await Checker.install(locale, cacheRoot)`. Dictionary data is never
+`SpellChecker.fromHunspell(affPath, dicPath)` and digest-pinned managed
+dictionaries with `await SpellChecker.install(locale, cacheRoot)`. It can also
+load a validated standalone runtime artifact with
+`SpellChecker.fromRuntimeArtifact(path)` or
+`SpellChecker.fromRuntimeArtifactBytes(buffer)`. Dictionary data is never
 bundled; callers always select its source files or cache directory.
 
 Supported prebuilt targets cover Linux x64/arm64 glibc and musl, macOS arm64

@@ -7,7 +7,7 @@ const queries = Array.from({ length: 12000 }, (_, index) =>
   index % 3 === 0 ? 'word' + (index % 4096) : 'missing' + index,
 );
 
-const checker = new native.Checker(words.join('\n'));
+const checker = new native.SpellChecker(words.join('\n'));
 const baseline = new Set(words);
 
 function measure(check) {
@@ -26,7 +26,7 @@ const baselineResult = measure((query) => baseline.has(query));
 if (nativeResult.recognized !== baselineResult.recognized) {
   throw new Error('binding and Set baseline disagree on recognized queries');
 }
-if (!checker.suggest('ferolex').includes('ferrolex')) {
+if (!checker.suggest('ferolex').suggestions.some(({ word }) => word === 'ferrolex')) {
   throw new Error('binding did not expose the expected suggestion');
 }
 

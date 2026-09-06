@@ -701,5 +701,7 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
-module.exports.Checker = nativeBinding.Checker
+module.exports.SpellChecker = nativeBinding.SpellChecker
 module.exports.dictionaryCatalog = nativeBinding.dictionaryCatalog
+module.exports.NormalizationMode = nativeBinding.NormalizationMode
+module.exports.SuggestionCompleteness = nativeBinding.SuggestionCompleteness
