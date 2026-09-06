@@ -59,6 +59,18 @@ scorecard artifact contains the current differential evidence.
 | `pl_PL` | ✅ Ready for the tested core | The pinned dictionary imports strictly and its reviewed word forms work. |
 <!-- compat-status:end -->
 
+## Contributing
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the local validation gates,
+commit conventions, release workflow, and provenance policy. The
+[architecture overview](ARCHITECTURE.md) explains the product boundaries, and
+the [ADR index](docs/adr/README.md) records the decisions behind them.
+
+For a small first contribution, browse the
+[open good-first issues](https://github.com/sebastian-software/ferrolex/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22).
+Please read the linked context in each issue before changing a public contract
+or compatibility boundary.
+
 ## Install
 
 Install the command-line tool from crates.io, or build it from a checkout:
