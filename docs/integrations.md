@@ -11,10 +11,13 @@ current distribution or compatibility commitment. The generic LSP and Visual
 Studio Code client are also outside the current product scope; their presence
 in the workspace does not make them maintained release surfaces. Those crates
 are excluded from the workspace's default members and focused release
-compilation and tests. A path-filtered prototype workflow checks them when their
-own manifests, source, lockfile, or workflow changes and can also be started
-manually. Changes to the shared core, code-analysis, or suggestion APIs also
-trigger it so retained prototypes cannot silently drift from their dependencies.
+compilation and tests. The Node.js crate is the exception: it is `publish =
+false` for crates.io because its release artifact is npm, but it remains in
+`default-members` so its Rust build and Node package gate run with the product.
+A path-filtered prototype workflow checks the other retained prototypes when
+their own manifests, source, lockfile, or workflow changes and can also be
+started manually. Changes to the shared core, code-analysis, or suggestion APIs
+also trigger it so retained prototypes cannot silently drift from dependencies.
 
 Format-aware integration happens in the owning tool:
 
@@ -22,7 +25,7 @@ Format-aware integration happens in the owning tool:
 - Ferrocat selects translatable content from PO catalogs.
 - OXC selects relevant text from TypeScript source.
 
-Those tools call ferrolex after parsing. Ferrolex deliberately does not embed
+Those tools call ferrolex after parsing. ferrolex deliberately does not embed
 their parsers, own their configuration, or define editor-protocol behavior.
 
 All integrations use caller-controlled dictionaries. Verified acquisition and

@@ -19,9 +19,11 @@ and redistribution license are explicitly recorded.
 ## Feature status
 
 The importer reports every encountered unsupported directive. A caller can
-select strict mode for CI or lenient mode to inspect a partial import. Future
-compiled dictionaries will record the features required for their recognition
-semantics so that a runtime can reject an incompatible artifact before lookup.
+select strict mode for CI or lenient mode to inspect a partial import. Compiled
+dictionary artifacts record their format version and feature bits, and
+`ferrolex inspect` reports that metadata before lookup. Morphology and other
+richer semantics remain outside the exact-word format until a future explicit
+format version defines them.
 
 ## Recognition scorecard
 

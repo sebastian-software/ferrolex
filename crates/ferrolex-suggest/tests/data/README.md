@@ -6,7 +6,7 @@ expanded into one.
 
 Every corpus row must have all of the following before it is committed:
 
-- an original source or a source whose licence, terms, and attribution have
+- an original source or a source whose license, terms, and attribution have
   been recorded and approved for this exact use;
 - the misspelling, intended word, locale, and context needed to evaluate it;
 - a provenance statement, `review_status`, reviewer, and review date; and
@@ -15,7 +15,7 @@ Every corpus row must have all of the following before it is committed:
 
 Do not copy or scrape entries from spell-checkers, word lists, search logs,
 spell-check corpora, or user text unless a maintainer has documented a
-compatible licence and review decision in the row. Prefer original minimal
+compatible license and review decision in the row. Prefer original minimal
 pairs. Do not include personal data, long text, or an enumerable language
 lexicon.
 

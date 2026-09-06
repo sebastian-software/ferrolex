@@ -19,6 +19,8 @@ point for installation, command-line use, and the public Rust API.
   artifacts.
 - [Command-line workflow](command-line-workflow.md) records command-line
   options, output streams, and exit statuses.
+- [Compatibility reporting](compatibility.md) explains the format,
+  recognition, morphology, and ecosystem evidence levels.
 - [Compatibility fixtures](compatibility-fixtures.md),
   [robustness testing](robustness-testing.md), and
   [performance](performance.md) describe verification and measured limits.
@@ -32,5 +34,11 @@ prototype history, not current ferrolex product commitments:
 - [Native integrations](integrations.md), [C FFI](ffi.md), [LSP](lsp.md), and
   [VS Code](vscode.md)
 - [Bindings](bindings.md) and [neutral IR](neutral-ir.md)
+
+The supported direct runtime integration is the Node.js package, which requires
+Node.js 22.13 or newer. The C ABI and Python binding are evaluation prototypes;
+the LSP and VS Code client are retained editor prototypes outside the current
+product scope. See [ADR-0010](adr/0010-external-integration-support-tiers.md)
+for the support tiers.
 
 Architecture decisions live in the [ADR index](adr/README.md).

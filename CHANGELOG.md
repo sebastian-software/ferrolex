@@ -26,7 +26,6 @@
 * **release:** enforce workspace version contract ([#160](https://github.com/sebastian-software/ferrolex/issues/160)) ([df3f4a6](https://github.com/sebastian-software/ferrolex/commit/df3f4a61cd0dd65fbab378b685ee14514e03a7c0))
 * **release:** publish crates after compatibility checks ([#163](https://github.com/sebastian-software/ferrolex/issues/163)) ([e885b4f](https://github.com/sebastian-software/ferrolex/commit/e885b4fc25a0694d27f4fd418ecaa0e8c8548276))
 * **suggest:** bound related seed normalization ([1c3bb35](https://github.com/sebastian-software/ferrolex/commit/1c3bb35043e7d34c282763d3ca09d1c458175bd8))
-* **suggest:** bound related seed normalization ([fa8bb26](https://github.com/sebastian-software/ferrolex/commit/fa8bb26473bb95591161aeb6de782e6b48720978))
 * **suggest:** index query-related candidates ([#156](https://github.com/sebastian-software/ferrolex/issues/156)) ([d5cedc1](https://github.com/sebastian-software/ferrolex/commit/d5cedc1f73d7e2a1fcda837ab17356faf12ff1fa))
 * **suggest:** report skipped related seeds ([1cf52db](https://github.com/sebastian-software/ferrolex/commit/1cf52dbe690fe1a61a5c3a2ee4d5e49f41b2dcd1))
 
@@ -35,9 +34,7 @@
 
 * cache normalized token recognition ([8c55415](https://github.com/sebastian-software/ferrolex/commit/8c55415253c84cdcf9fef30d2fd20253e21a9359))
 * compact hunspell runtime state ([3245c6b](https://github.com/sebastian-software/ferrolex/commit/3245c6b74241197d1df01c24cdf00bbd599d058e))
-* compact Hunspell runtime state ([ffb8c80](https://github.com/sebastian-software/ferrolex/commit/ffb8c80f23ece31f268135ab5c9991ccbf0dc97e))
 * reuse analyze suggestion state ([0dec48d](https://github.com/sebastian-software/ferrolex/commit/0dec48dd8af6d7de140226d7842ac4c2a3414293))
-* reuse analyze suggestion state ([53945ec](https://github.com/sebastian-software/ferrolex/commit/53945ecc5a85926fd42e8ae10770a21270394c90))
 * skip duplicate normalized token lookups ([a01be21](https://github.com/sebastian-software/ferrolex/commit/a01be217c718a10491c55d23b32c0abbfbc765f9))
 
 
