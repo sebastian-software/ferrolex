@@ -15,6 +15,8 @@ use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+// ==== Argument model and parsing modules ====
 mod args;
 mod commands;
 
@@ -23,6 +25,8 @@ pub(crate) use args::{
     CompileInput, DictionaryCommand, ExplainCommand, LineIndex, OutputFormat, RunOutcome,
     SuggestCommand, ValidateCommand,
 };
+
+// ==== Command implementations, output, and diagnostics ====
 #[allow(unused_imports)]
 pub(crate) use commands::{
     add_user_dictionary_word, analysis_paths, analyze, check, comment_syntax_for_path, compile,
@@ -32,6 +36,8 @@ pub(crate) use commands::{
     runtime_cache_path, suggest, validate, validate_hunspell, AnalysisDictionary, AnalysisSource,
     AnalysisSuggestionEngine, UserDictionaryLock,
 };
+
+// ==== CLI dependencies ====
 use std::time::{Duration, SystemTime};
 
 use ferrolex::catalog_import_encodings;
@@ -68,6 +74,7 @@ use ferrolex_text::check_text;
 use fs2::FileExt as _;
 use serde_json::json;
 
+// ==== Command help and runtime constants ====
 const USAGE: &str = "Usage: ferrolex --help | --version\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--] <WORD>\n       ferrolex check [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] --file <PATH|-> [--file <PATH|-> ...] [<PATH> ...]\n       ferrolex suggest [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--max-results <COUNT>] [--max-edit-distance <DISTANCE>] [--max-candidates <COUNT>] [--max-edit-cells <COUNT>] <WORD>\n       ferrolex explain --hunspell <AFF_PATH> <WORD>\n       ferrolex analyze [--format <text|json>] [--dictionary <PATH> ...] [--compiled <ARTIFACT> ...] [--hunspell <AFF_PATH> ...] [--config <PATH>] [--include <GLOB> ...] [--exclude <GLOB> ...] [--suggest] [--comment-prefix <PREFIX> | --comment-syntax html] <PATH>\n       ferrolex compile (--dictionary <PLAIN_WORD_LIST> | <AFF_PATH> <DIC_PATH>) -o <ARTIFACT>\n       ferrolex inspect <ARTIFACT>\n       ferrolex validate [--format <text|json>] [--strict] <AFF_PATH> <DIC_PATH>\n       ferrolex validate [--format <text|json>] --compiled <ARTIFACT>\n       ferrolex dictionary list\n       ferrolex dictionary fetch <LOCALE> --cache <PATH>\n       ferrolex dictionary install <LOCALE> --cache <PATH>\n       ferrolex dictionary add-word [--workspace <PATH> | --global] <WORD>";
 const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 const EXIT_CODES: &str =
@@ -86,6 +93,7 @@ const MAX_ANALYSIS_SUGGESTION_CACHE_ENTRIES: usize = 4_096;
 const STALE_TEMPORARY_FILE_AGE: Duration = Duration::from_secs(60 * 60);
 static CACHE_WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+// ==== Entry point and command dispatch ====
 fn main() -> ExitCode {
     match run(env::args()) {
         Ok(outcome) => outcome.exit_code(),
@@ -122,6 +130,7 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<RunOutcome, CliErr
     }
 }
 
+// ==== Argument parsing ====
 fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Command, CliError> {
     let mut arguments = arguments.into_iter();
     let _program_name = arguments.next();
@@ -947,5 +956,6 @@ fn push_check_positional(target: &mut Option<CheckTarget>, value: String) -> Res
     Ok(())
 }
 
+// ==== Tests ====
 #[cfg(test)]
 mod tests;
