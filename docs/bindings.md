@@ -3,7 +3,8 @@
 `@ferrolex/node` is ferrolex's supported pre-1.0 direct non-Rust integration.
 The repository and release owner is `sebastian-software`. The package is
 publication-ready but has not yet been published to npm; the first publication
-requires verified registry access to the `@ferrolex` scope.
+requires verified registry access and an npm Trusted Publisher for the
+`release-please.yml` workflow.
 
 The package requires Node.js 22.13 or newer and uses Node-API 8. Its generated
 CommonJS loader and TypeScript declarations are checked in so changes to the
@@ -47,15 +48,21 @@ The package publishes one optional native package for every declared target:
 | Target | npm package | CI runtime |
 | --- | --- | --- |
 | `x86_64-unknown-linux-gnu` | `@ferrolex/node-linux-x64-gnu` | Node.js 22.13 and 24 |
+| `aarch64-unknown-linux-gnu` | `@ferrolex/node-linux-arm64-gnu` | Node.js 24 |
+| `x86_64-unknown-linux-musl` | `@ferrolex/node-linux-x64-musl` | Build-only |
+| `aarch64-unknown-linux-musl` | `@ferrolex/node-linux-arm64-musl` | Build-only |
 | `aarch64-apple-darwin` | `@ferrolex/node-darwin-arm64` | Node.js 24 |
+| `x86_64-apple-darwin` | `@ferrolex/node-darwin-x64` | Node.js 24 |
 | `x86_64-pc-windows-msvc` | `@ferrolex/node-win32-x64-msvc` | Node.js 24 |
+| `aarch64-pc-windows-msvc` | `@ferrolex/node-win32-arm64-msvc` | Node.js 24 |
 
 Other CPU, operating-system, and libc combinations are unsupported until they
 have a named maintainer and the same build, runtime, and clean-install gates.
 The root package pins every optional native package to the exact workspace
 version; no consumer compiler is required.
 
-CI builds and loads each declared native target, runs the JavaScript API tests,
+CI builds each declared native target, loads every runtime-testable target, runs
+the JavaScript API tests,
 checks that napi-rs regenerates the committed loader and declarations without a
 diff, then installs the packed root and platform tarballs in an empty consumer
 directory. Linux CI additionally exercises the managed `en_US` path against a

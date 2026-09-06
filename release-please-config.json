@@ -27,7 +27,32 @@
         {
           "type": "json",
           "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-darwin-x64']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-linux-arm64-gnu']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-linux-arm64-musl']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
           "jsonpath": "$['optionalDependencies']['@ferrolex/node-linux-x64-gnu']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-linux-x64-musl']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package.json",
+          "jsonpath": "$['optionalDependencies']['@ferrolex/node-win32-arm64-msvc']"
         },
         {
           "type": "json",
@@ -52,7 +77,32 @@
         {
           "type": "json",
           "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-darwin-x64']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-arm64-gnu']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-arm64-musl']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
           "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-x64-gnu']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-x64-musl']"
+        },
+        {
+          "type": "json",
+          "path": "crates/ferrolex-node/package-lock.json",
+          "jsonpath": "$['packages']['']['optionalDependencies']['@ferrolex/node-win32-arm64-msvc']"
         },
         {
           "type": "json",

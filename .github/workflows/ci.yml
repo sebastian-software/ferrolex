@@ -31,6 +31,35 @@ jobs:
       - run: python3 scripts/check-release-version-contract.py
       - run: python3 scripts/publish-crates.py --check
 
+  coverage:
+    name: Rust coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: coverage
+      - uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run tests with coverage instrumentation
+        run: cargo llvm-cov --workspace --all-features --no-report
+      - name: Enforce line coverage threshold
+        run: cargo llvm-cov report --fail-under-lines 60 --lcov --output-path lcov.info
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          use_oidc: true
+
   test:
     name: Test (${{ matrix.os }}, Rust ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
@@ -292,8 +321,52 @@ jobs:
         include:
           - label: macOS arm64
             os: macos-15
+            rust-target: aarch64-apple-darwin
+            platform-id: darwin-arm64
+            cross-compile: false
+            runtime-test: true
+          - label: macOS x64
+            os: macos-15-intel
+            rust-target: x86_64-apple-darwin
+            platform-id: darwin-x64
+            cross-compile: false
+            runtime-test: true
+          - label: Linux arm64 glibc
+            os: ubuntu-24.04-arm
+            rust-target: aarch64-unknown-linux-gnu
+            platform-id: linux-arm64-gnu
+            cross-compile: false
+            runtime-test: true
+          - label: Linux x64 musl
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-musl
+            platform-id: linux-x64-musl
+            cross-compile: true
+            runtime-test: false
+          - label: Linux arm64 musl
+            os: ubuntu-latest
+            rust-target: aarch64-unknown-linux-musl
+            platform-id: linux-arm64-musl
+            cross-compile: true
+            runtime-test: false
+          - label: Linux x64 glibc
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            platform-id: linux-x64-gnu
+            cross-compile: false
+            runtime-test: true
+          - label: Windows arm64
+            os: windows-11-arm
+            rust-target: aarch64-pc-windows-msvc
+            platform-id: win32-arm64-msvc
+            cross-compile: false
+            runtime-test: true
           - label: Windows x64
             os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            platform-id: win32-x64-msvc
+            cross-compile: false
+            runtime-test: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -309,8 +382,18 @@ jobs:
           echo "RUSTUP_TOOLCHAIN=$rust_version" >> "$GITHUB_ENV"
       - name: Install workspace MSRV
         shell: bash
-        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal
+        run: rustup toolchain install "$FERROLEX_RUST_VERSION" --profile minimal --target "${{ matrix.rust-target }}"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        if: matrix.cross-compile
+        with:
+          version: 0.15.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        if: matrix.cross-compile
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -318,6 +401,11 @@ jobs:
           cache-dependency-path: crates/ferrolex-node/package-lock.json
       - run: npm ci --prefix crates/ferrolex-node --ignore-scripts
       - run: npm run build --prefix crates/ferrolex-node
+        env:
+          FERROLEX_NODE_TARGET: ${{ matrix.rust-target }}
+          FERROLEX_NODE_CROSS_COMPILE: ${{ matrix.cross-compile && '1' || '0' }}
       - run: git diff --exit-code -- crates/ferrolex-node/index.js crates/ferrolex-node/index.d.ts
       - run: npm test --prefix crates/ferrolex-node
+        if: matrix.runtime-test
       - run: bash scripts/test-node-package.sh
+        if: matrix.runtime-test

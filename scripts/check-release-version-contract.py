@@ -44,38 +44,35 @@ def main() -> int:
     if release_config.get("release-type") != "rust":
         errors.append("release-please must use the rust release strategy")
 
+    node_platform_packages = {
+        "@ferrolex/node-darwin-arm64",
+        "@ferrolex/node-darwin-x64",
+        "@ferrolex/node-linux-arm64-gnu",
+        "@ferrolex/node-linux-arm64-musl",
+        "@ferrolex/node-linux-x64-gnu",
+        "@ferrolex/node-linux-x64-musl",
+        "@ferrolex/node-win32-arm64-msvc",
+        "@ferrolex/node-win32-x64-msvc",
+    }
     expected_node_release_paths = {
         ("crates/ferrolex-node/package.json", "$.version"),
-        (
-            "crates/ferrolex-node/package.json",
-            "$['optionalDependencies']['@ferrolex/node-darwin-arm64']",
-        ),
-        (
-            "crates/ferrolex-node/package.json",
-            "$['optionalDependencies']['@ferrolex/node-linux-x64-gnu']",
-        ),
-        (
-            "crates/ferrolex-node/package.json",
-            "$['optionalDependencies']['@ferrolex/node-win32-x64-msvc']",
-        ),
         ("crates/ferrolex-node/package-lock.json", "$.version"),
         (
             "crates/ferrolex-node/package-lock.json",
             "$['packages']['']['version']",
         ),
-        (
-            "crates/ferrolex-node/package-lock.json",
-            "$['packages']['']['optionalDependencies']['@ferrolex/node-darwin-arm64']",
-        ),
-        (
-            "crates/ferrolex-node/package-lock.json",
-            "$['packages']['']['optionalDependencies']['@ferrolex/node-linux-x64-gnu']",
-        ),
-        (
-            "crates/ferrolex-node/package-lock.json",
-            "$['packages']['']['optionalDependencies']['@ferrolex/node-win32-x64-msvc']",
-        ),
     }
+    expected_node_release_paths.update(
+        ("crates/ferrolex-node/package.json", f"$['optionalDependencies']['{name}']")
+        for name in node_platform_packages
+    )
+    expected_node_release_paths.update(
+        (
+            "crates/ferrolex-node/package-lock.json",
+            f"$['packages']['']['optionalDependencies']['{name}']",
+        )
+        for name in node_platform_packages
+    )
     configured_release_paths = {
         (entry.get("path"), entry.get("jsonpath"))
         for entry in configured_packages.get(".", {}).get("extra-files", [])
@@ -153,11 +150,7 @@ def main() -> int:
     if vscode_locked_root.get("version") != root_version:
         errors.append("the VS Code prototype lockfile root version is out of sync")
 
-    node_targets = {
-        "@ferrolex/node-darwin-arm64",
-        "@ferrolex/node-linux-x64-gnu",
-        "@ferrolex/node-win32-x64-msvc",
-    }
+    node_targets = node_platform_packages
     optional_dependencies = node_package.get("optionalDependencies", {})
     if set(optional_dependencies) != node_targets:
         errors.append(

@@ -16,16 +16,19 @@ plugin configuration on every change.
 Merging the Release Please PR creates the GitHub release and tag. The release
 workflow then runs the full Hunspell compatibility scorecard and, only after it
 passes, publishes the public workspace crates to crates.io in dependency order.
-The publish step uses the repository's `CARGO_REGISTRY_TOKEN` Actions secret.
-Configure that secret with a crates.io token scoped to the nine public ferrolex
-crates before merging the first release PR. After the initial versions exist,
-crates.io Trusted Publishing can replace the long-lived secret with a
-workflow-scoped short-lived token.
+The publish step exchanges the workflow's OIDC identity for a short-lived
+crates.io Trusted Publishing token. Configure the repository and exact release
+workflow as a trusted publisher for each of the nine public ferrolex crates;
+no long-lived `CARGO_REGISTRY_TOKEN` secret is required.
 
 Publishing is resumable: the script skips an exact crate version already on
 crates.io and waits for every upload to reach Cargo's index before continuing.
 After a failed publish job, rerun that job rather than changing the release tag.
-The experimental FFI, Node.js, Python, and LSP packages remain explicitly
+The release workflow builds the eight declared Node.js platform packages,
+publishes them with npm Trusted Publishing, and publishes `@ferrolex/node`
+last. Configure the exact `release-please.yml` workflow as a trusted publisher
+for the root package and every `@ferrolex/node-*` package before the first npm
+release. The experimental FFI, Python, and LSP packages remain explicitly
 unpublished.
 
 ## Developing

@@ -10,17 +10,17 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ferrolex-node-package.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
 case "$(node -p 'process.platform + ":" + process.arch')" in
-  darwin:arm64)
-    suffix=darwin-arm64
-    platform_directory=darwin-arm64
+  darwin:arm64|darwin:x64)
+    suffix="darwin-$(node -p 'process.arch')"
+    platform_directory="$suffix"
     ;;
-  linux:x64)
-    suffix=linux-x64-gnu
-    platform_directory=linux-x64-gnu
+  linux:x64|linux:arm64)
+    suffix="linux-$(node -p 'process.arch')-gnu"
+    platform_directory="$suffix"
     ;;
-  win32:x64)
-    suffix=win32-x64-msvc
-    platform_directory=win32-x64-msvc
+  win32:x64|win32:arm64)
+    suffix="win32-$(node -p 'process.arch')-msvc"
+    platform_directory="$suffix"
     ;;
   *)
     echo "unsupported Node package test platform" >&2
