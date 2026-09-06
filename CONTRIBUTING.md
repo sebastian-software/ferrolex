@@ -92,6 +92,37 @@ obtained, licensed dictionary sources; see
 directory contains the compatibility-fixture downloader and README-status
 generator used by CI, plus opt-in Node.js and Python binding benchmarks.
 
+### README family block
+
+The Ferramenta family block in the root README, the eight public crate READMEs,
+and the `@ferrolex/node` package README is generated from the family registry in
+[ferramenta](https://github.com/sebastian-software/ferramenta) — `src/family.ts`
+there is the single source of truth for membership, job wording, grouping, and
+links. Never edit the block between its `ferramenta-family` markers by hand;
+`scripts/generate-readme-family.sh --check` runs in CI and fails on drift.
+
+```sh
+just readme                              # both generators, or individually:
+scripts/generate-readme-family.sh        # re-render every family block
+python3 scripts/mirror-readme-footer.py  # mirror the company footer
+```
+
+The family script fetches the generator, so it needs network access, `pnpm`,
+and Node.js 22.13 or newer; that keeps it out of the offline `just gate`
+runner, which checks only the mirrored footer. The generator is pinned to a
+commit in one place, `generator_ref` in `scripts/generate-readme-family.sh`.
+When the registry changes upstream, bump that SHA, re-run the script, and
+commit the resulting README diff — it shows exactly what the registry moved.
+Do not point the pin at a branch: a check that resolves `main` blesses a
+different block every run.
+
+The company footer is a separate concern. It is the
+`sebastian-software-branding` section owned by
+[`@sebastian-software/standards`](https://github.com/sebastian-software/standards);
+`standards apply` writes it into the root README, and
+`scripts/mirror-readme-footer.py` copies it verbatim into the crate READMEs.
+See [README and brand standard](docs/readme-standard.md).
+
 ## Code provenance
 
 ferrolex is independently implemented and licensed `MIT OR Apache-2.0`.

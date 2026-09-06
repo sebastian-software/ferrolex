@@ -11,28 +11,42 @@ policy, and Codecov links. The canonical tagline is **Spell checking for text
 and code**. Product prose uses the lowercase `ferrolex` wordmark, including at
 the beginning of sentences.
 
-## Crate READMEs
+## Package READMEs
 
 The repository root uses the GitHub variant for the project page. The eight
-public package-specific READMEs use the compact registry variant. It contains
-the Ferramenta family link and sibling links without HTML, so crates.io and
-docs.rs render it consistently. Both variants show the same company footer:
-the root README carries the `sebastian-software-branding` section owned by
-[`@sebastian-software/standards`](https://github.com/sebastian-software/standards),
-and the generator mirrors that block verbatim into the crate READMEs. The
-footer is therefore never hand-edited or re-rendered locally; `standards apply`
-is its only writer.
+public crate READMEs and the `@ferrolex/node` package README use the compact
+registry variant: the Ferramenta family link and the sibling links without HTML
+or tables, so crates.io, docs.rs, and npm render it consistently. The
+unpublished FFI, LSP, and Python crates have no registry page and carry no
+block.
 
-The checked-in generator is intentionally dependency-free:
+The root README and the eight crate READMEs also show the same company footer.
+The root carries the `sebastian-software-branding` section owned by
+[`@sebastian-software/standards`](https://github.com/sebastian-software/standards),
+and `scripts/mirror-readme-footer.py` mirrors that block verbatim into the crate
+READMEs. The footer is therefore never hand-edited or re-rendered locally;
+`standards apply` is its only writer.
+
+## The generated family block
+
+Family membership, job wording, grouping, and links come from `src/family.ts`
+in [ferramenta](https://github.com/sebastian-software/ferramenta), the single
+source of truth for the family. This repository does not maintain a second copy
+of that data: `scripts/generate-readme-family.sh` runs the `ferramenta-readme`
+generator from a pinned commit and writes or verifies every README surface.
 
 ```sh
-python3 scripts/generate-readme-family.py \
-  --current ferrolex --variant github --readme README.md --check
-python3 scripts/generate-readme-family.py \
-  --current ferrolex --variant registry \
-  --readme crates/ferrolex-core/README.md --check
+scripts/generate-readme-family.sh          # re-render the block everywhere
+scripts/generate-readme-family.sh --check  # exits 1 on drift; runs in CI
+python3 scripts/mirror-readme-footer.py --check
 ```
 
-The family registry remains the source of truth for membership and job
-wording. Until the shared family generator is published for all repositories,
-this local check prevents the ferrolex README surfaces from drifting.
+The generator pin lives in one place, `generator_ref` in
+`scripts/generate-readme-family.sh`. A registry change in ferramenta reaches
+this repository by bumping that SHA and re-running the script, so the diff
+shows exactly what the registry moved. Pinning also keeps the check
+reproducible: a branch ref would re-verify against whatever landed upstream
+since.
+
+`--check` compares content, not whitespace, so a Markdown formatter that pads
+table cells does not report drift.

@@ -28,6 +28,12 @@ changing code or durable repository artifacts.
   nightly-only opt-in.
 - The supported MSRV is declared in the workspace `Cargo.toml`; the pinned
   `rust-toolchain.toml` and helper scripts read or verify that policy.
+- The Ferramenta family block in the README surfaces is generated from the
+  registry in [ferramenta](https://github.com/sebastian-software/ferramenta);
+  never edit it between its markers. Run `just readme` to re-render it (needs
+  pnpm and network access); CI checks it with
+  `scripts/generate-readme-family.sh --check`. See
+  [CONTRIBUTING.md](CONTRIBUTING.md#readme-family-block).
 - Real-world Hunspell fixtures are opt-in and must never be committed. Use
   `FERROLEX_COMPAT_FIXTURES` with the checked-in manifest; optionally select
   `FERROLEX_COMPAT_FIXTURE_SET=required|scorecard|all`.

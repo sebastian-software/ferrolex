@@ -287,18 +287,31 @@ Dictionary data is not bundled with the engine and has separate licensing.
 <!-- ferramenta-family:start -->
 ## The Ferramenta family
 
-This project is part of [Ferramenta](https://ferramenta.dev) — the family of Rust-native developer tools by [Sebastian Software](https://oss.sebastian-software.com) that keep the APIs the ecosystem already knows:
+This project is part of [Ferramenta](https://ferramenta.dev) — the family of Rust-native developer tools by [Sebastian Software](https://oss.sebastian-software.com) that keep the APIs the ecosystem already knows.
+
+**The content pipeline**
 
 | Tool | Job |
 | --- | --- |
-| [ferroni](https://github.com/sebastian-software/ferroni) | Oniguruma-compatible regex engine |
+| [ferroni](https://sebastian-software.github.io/ferroni/) | Oniguruma-compatible regex engine |
 | [ferriki](https://github.com/sebastian-software/ferriki) | Shiki-compatible syntax highlighting |
-| [ferromark](https://github.com/sebastian-software/ferromark) | CommonMark/GFM Markdown to HTML |
-| [ferralk](https://github.com/sebastian-software/ferralk) | Glob matching and parallel filesystem walking |
-| [ferrovia](https://github.com/sebastian-software/ferrovia) | SVGO-compatible SVG optimizer |
-| [ferrocat](https://github.com/sebastian-software/ferrocat) | Translation catalog engine |
+| [ferromark](https://sebastian-software.github.io/ferromark/) | Markdown to HTML — CommonMark & GFM |
+
+**The language workshop**
+
+| Tool | Job |
+| --- | --- |
 | **[ferrolex](https://github.com/sebastian-software/ferrolex)** | Spell checking for text and code |
-| [ferrugo](https://github.com/sebastian-software/ferrugo) | Rust-native PDF previews |
+| [ferrocat](https://ferrocat.dev) | Translation catalog engine |
+| [palamedes](https://palamedes.dev) | Internationalization for TypeScript applications |
+
+**On the workbench**
+
+| Tool | Job |
+| --- | --- |
+| [ferrovia](https://github.com/sebastian-software/ferrovia) | SVGO-compatible SVG optimizer |
+| [ferralk](https://github.com/sebastian-software/ferralk) | Glob matching and parallel filesystem walking |
+| [ferrugo](https://github.com/sebastian-software/ferrugo) | PDF previews for untrusted files |
 <!-- ferramenta-family:end -->
 
 <!-- sebastian-software-branding:start -->
