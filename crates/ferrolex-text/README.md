@@ -23,10 +23,11 @@ assert_eq!(check_text(&dictionary, "known typo").count(), 1);
 See the [API documentation](https://docs.rs/ferrolex-text) and the
 [workspace architecture](https://github.com/sebastian-software/ferrolex/blob/main/ARCHITECTURE.md).
 
-<!-- ferramenta-family:registry:start -->
-Part of the [Ferramenta](https://ferramenta.dev) family of Rust-native developer tools by [Sebastian Software](https://oss.sebastian-software.com).
-Siblings: [ferroni](https://github.com/sebastian-software/ferroni), [ferriki](https://github.com/sebastian-software/ferriki), [ferromark](https://github.com/sebastian-software/ferromark), [ferralk](https://github.com/sebastian-software/ferralk), [ferrovia](https://github.com/sebastian-software/ferrovia), [ferrocat](https://github.com/sebastian-software/ferrocat), and [ferrugo](https://github.com/sebastian-software/ferrugo).
-<!-- ferramenta-family:registry:end -->
+<!-- ferramenta-family:start -->
+**ferrolex** is part of the [Ferramenta](https://ferramenta.dev) family — Rust-native developer tools that keep the APIs the ecosystem already knows.
+
+Siblings: [ferroni](https://sebastian-software.github.io/ferroni/) · [ferriki](https://github.com/sebastian-software/ferriki) · [ferromark](https://sebastian-software.github.io/ferromark/) · [ferrocat](https://ferrocat.dev) · [palamedes](https://palamedes.dev) · [ferrovia](https://github.com/sebastian-software/ferrovia) · [ferralk](https://github.com/sebastian-software/ferralk) · [ferrugo](https://github.com/sebastian-software/ferrugo).
+<!-- ferramenta-family:end -->
 
 <!-- sebastian-software-branding:start -->
 

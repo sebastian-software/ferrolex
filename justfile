@@ -25,6 +25,14 @@ gate: quick
     python3 scripts/workspace-rust-version.py --check
     python3 scripts/check-release-version-contract.py
     python3 scripts/publish-crates.py --check
+    python3 scripts/mirror-readme-footer.py --check
+
+# Re-render the generated README surfaces. Needs pnpm and network access: the
+# family block comes from the pinned Ferramenta registry, so this stays out of
+# `gate`. See CONTRIBUTING.md#readme-family-block.
+readme:
+    scripts/generate-readme-family.sh
+    python3 scripts/mirror-readme-footer.py
 
 # Optional local smoke coverage; install cargo-fuzz for the pinned nightly first.
 fuzz-smoke:

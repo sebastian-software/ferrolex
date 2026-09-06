@@ -26,3 +26,9 @@ Node.js 22.13 or newer is required.
 See the [complete binding documentation][bindings] in the source repository.
 
 [bindings]: https://github.com/sebastian-software/ferrolex/blob/main/docs/bindings.md
+
+<!-- ferramenta-family:start -->
+**ferrolex** is part of the [Ferramenta](https://ferramenta.dev) family — Rust-native developer tools that keep the APIs the ecosystem already knows.
+
+Siblings: [ferroni](https://sebastian-software.github.io/ferroni/) · [ferriki](https://github.com/sebastian-software/ferriki) · [ferromark](https://sebastian-software.github.io/ferromark/) · [ferrocat](https://ferrocat.dev) · [palamedes](https://palamedes.dev) · [ferrovia](https://github.com/sebastian-software/ferrovia) · [ferralk](https://github.com/sebastian-software/ferralk) · [ferrugo](https://github.com/sebastian-software/ferrugo).
+<!-- ferramenta-family:end -->

@@ -36,23 +36,19 @@ jobs:
   readme-brand-contract:
     name: README and brand contract
     runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Check generated family blocks and footers
-        run: |
-          python3 scripts/generate-readme-family.py --current ferrolex --variant github --readme README.md --check
-          for readme in \
-            crates/ferrolex-core/README.md \
-            crates/ferrolex-dictionaries/README.md \
-            crates/ferrolex-code/README.md \
-            crates/ferrolex-suggest/README.md \
-            crates/ferrolex-text/README.md \
-            crates/ferrolex-compiler/README.md \
-            crates/ferrolex-hunspell/README.md \
-            crates/ferrolex-cli/README.md; do
-            python3 scripts/generate-readme-family.py \
-              --current ferrolex --variant registry --readme "$readme" --check
-          done
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      - name: Check the family blocks against the pinned Ferramenta registry
+        run: scripts/generate-readme-family.sh --check
+      - name: Check the mirrored company footers
+        run: python3 scripts/mirror-readme-footer.py --check
 
   coverage:
     name: Rust coverage
