@@ -52,7 +52,7 @@ runtime CLI surface.
 To investigate high-volume lookup, install Hunspell outside this repository,
 use a digest-verified fixture from the compatibility suite,
 and compare only the same preloaded word sequence on one quiet machine. Record
-the Ferrolex and Hunspell commands, dictionary digest, query mix, toolchain,
+the ferrolex and Hunspell commands, dictionary digest, query mix, toolchain,
 OS/CPU/power mode, and raw Criterion output. Treat the external executable as
 a development-only black-box oracle: do not add it as a production dependency,
 do not report cross-machine ratios as a product guarantee, and investigate any

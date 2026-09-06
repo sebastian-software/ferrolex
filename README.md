@@ -1,8 +1,14 @@
 # ferrolex
 
+[![crates.io](https://img.shields.io/crates/v/ferrolex.svg)](https://crates.io/crates/ferrolex)
+[![docs.rs](https://img.shields.io/docsrs/ferrolex)](https://docs.rs/ferrolex)
+[![CI](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
+[![MSRV: 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)](CONTRIBUTING.md#rust-toolchain-and-msrv)
 [![codecov](https://codecov.io/gh/sebastian-software/ferrolex/branch/main/graph/badge.svg)](https://codecov.io/gh/sebastian-software/ferrolex)
+[![Powered by Sebastian Software](https://img.shields.io/badge/Powered%20by-Sebastian%20Software-00718d?style=flat-square)](https://oss.sebastian-software.com)
 
-Native spell-checking for Rust and Node.js.
+Spell checking for text and code.
 
 ferrolex is an independent Rust engine that safely loads existing Hunspell
 dictionaries and provides fast, deterministic word checks and suggestions
@@ -13,8 +19,12 @@ caller-controlled cache.
 The engine intentionally does not parse Markdown, programming languages, or
 other document formats. Format-aware tools extract prose or identifiers and
 call ferrolex through its Rust or Node.js API. This keeps language ownership in
-projects such as Ferromark for Markdown, Ferrocat for PO catalogs, and OXC for
-TypeScript instead of turning ferrolex into a general analysis framework.
+projects designed for format-aware integrations, such as [ferromark for
+Markdown](https://github.com/sebastian-software/ferromark), [ferrocat for PO
+catalogs](https://github.com/sebastian-software/ferrocat), and [OXC for
+TypeScript](https://oxc.rs), instead of turning ferrolex into a general
+analysis framework. No sibling integration is part of the current support tier
+yet; see [ADR-0010](docs/adr/0010-external-integration-support-tiers.md).
 
 See the [documentation index](docs/README.md) for product contracts,
 compatibility evidence, and retained prototype history.
@@ -265,7 +275,7 @@ untrusted throughout the supported import and loading paths.
 ## MSRV
 
 ferrolex supports the Rust version declared in the workspace
-[`Cargo.toml`](Cargo.toml).
+[`Cargo.toml`](Cargo.toml); see the [MSRV policy](CONTRIBUTING.md#rust-toolchain-and-msrv).
 
 ## License
 
@@ -273,3 +283,33 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
 
 Dictionary data is not bundled with the engine and has separate licensing.
+
+<!-- ferramenta-family:start -->
+## The Ferramenta family
+
+This project is part of [Ferramenta](https://ferramenta.dev) — the family of Rust-native developer tools by [Sebastian Software](https://oss.sebastian-software.com) that keep the APIs the ecosystem already knows:
+
+| Tool | Job |
+| --- | --- |
+| [ferroni](https://github.com/sebastian-software/ferroni) | Oniguruma-compatible regex engine |
+| [ferriki](https://github.com/sebastian-software/ferriki) | Shiki-compatible syntax highlighting |
+| [ferromark](https://github.com/sebastian-software/ferromark) | CommonMark/GFM Markdown to HTML |
+| [ferralk](https://github.com/sebastian-software/ferralk) | Glob matching and parallel filesystem walking |
+| [ferrovia](https://github.com/sebastian-software/ferrovia) | SVGO-compatible SVG optimizer |
+| [ferrocat](https://github.com/sebastian-software/ferrocat) | Translation catalog engine |
+| **[ferrolex](https://github.com/sebastian-software/ferrolex)** | Spell checking for text and code |
+| [ferrugo](https://github.com/sebastian-software/ferrugo) | Rust-native PDF previews |
+<!-- ferramenta-family:end -->
+
+<!-- sebastian-software-branding:start -->
+<p align="center">
+  <a href="https://oss.sebastian-software.com">
+    <img src="https://raw.githubusercontent.com/sebastian-software/ferramenta/main/app/assets/logos/sebastian-software.svg" alt="Sebastian Software" width="240" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://oss.sebastian-software.com">Open Source at Sebastian Software</a><br />
+  Copyright &copy; 2026 Sebastian Software GmbH
+</p>
+<!-- sebastian-software-branding:end -->

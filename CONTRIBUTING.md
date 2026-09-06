@@ -33,6 +33,8 @@ unpublished.
 
 ## Developing
 
+### Rust toolchain and MSRV
+
 ferrolex supports the MSRV declared in the workspace `Cargo.toml`. The pinned
 `rust-toolchain.toml` selects that toolchain locally; run the same core checks
 as CI:

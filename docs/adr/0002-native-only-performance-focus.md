@@ -7,7 +7,7 @@
 
 ## Context
 
-Ferrolex targets native Rust applications, its CLI, and native Node.js
+ferrolex targets native Rust applications, its CLI, and native Node.js
 bindings. Supporting browser/WebAssembly as a first-class target would add a
 permanent maintenance and testing surface without serving the focused product
 contract.

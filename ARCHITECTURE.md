@@ -67,10 +67,13 @@ of that public package boundary.
 ## Consumer-owned format integration
 
 Document-aware projects own parsing and selection of human-language content.
-Ferromark can pass Markdown prose, Ferrocat can pass translatable PO strings,
-and OXC can pass selected TypeScript comments, strings, or identifiers to the
-same ferrolex dictionary and suggestion APIs. ferrolex does not embed their
-parsers or duplicate their syntax policies.
+Designed-for consumers such as [ferromark](https://github.com/sebastian-software/ferromark)
+can pass Markdown prose, [ferrocat](https://github.com/sebastian-software/ferrocat)
+can pass translatable PO strings, and [OXC](https://oxc.rs) can pass selected
+TypeScript comments, strings, or identifiers to the same ferrolex dictionary
+and suggestion APIs. These are intended integration boundaries, not shipped
+ferrolex-owned adapters. ferrolex does not embed their parsers or duplicate
+their syntax policies.
 
 ## Normalization boundary
 

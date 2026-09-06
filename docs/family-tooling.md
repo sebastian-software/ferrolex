@@ -32,7 +32,7 @@ assert_eq!(findings[0].word(), "typo");
 
 The first consumers to evaluate the shared tokenizer are:
 
-- Palamedes and Ferrocat: spell-check extracted PO/catalog strings while
+- Palamedes and ferrocat: spell-check extracted PO/catalog strings while
   retaining the catalog entry and source-field location.
 - Ferramenta: use the CLI's text-checking contract for the documentation check,
   with the repository's own file selection and ignore policy.
