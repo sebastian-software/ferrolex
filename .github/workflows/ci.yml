@@ -50,6 +50,29 @@ jobs:
       - name: Check the mirrored company footers
         run: python3 scripts/mirror-readme-footer.py --check
 
+  standards:
+    name: Standards drift
+    runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: 'Guard: agent step not yet completed for this pull request'
+        run: test ! -f .standards/pending.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      # ferrolex has no root package.json, so there is no lockfile to hold the
+      # standards CLI version. The pin lives here and Renovate's custom manager
+      # in renovate.json moves it; an unpinned `dlx` would run whatever was
+      # published minutes ago with this job's token. `minimum-release-age=0`
+      # stays because pnpm 11 holds back releases younger than 24 hours, and a
+      # pin raised on release day could otherwise not resolve at all.
+      - name: Check the repository against the org standards
+        run: pnpm --config.minimum-release-age=0 dlx @sebastian-software/standards@0.9.0 check
+
   coverage:
     name: Rust coverage
     runs-on: ubuntu-latest
