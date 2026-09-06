@@ -1,0 +1,24 @@
+name: Question
+description: Ask a focused usage or contributor question.
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read [SUPPORT.md](https://github.com/sebastian-software/ferrolex/blob/main/SUPPORT.md) and the relevant documentation before opening a question.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to do, and where are you blocked?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include the command, API usage, or documentation page involved. Remove secrets and third-party dictionary data.

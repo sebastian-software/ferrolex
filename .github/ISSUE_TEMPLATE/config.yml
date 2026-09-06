@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contributor guide
+    url: https://github.com/sebastian-software/ferrolex/blob/main/CONTRIBUTING.md
+    about: Read the local validation, release, and provenance requirements first.
+  - name: Support and usage questions
+    url: https://github.com/sebastian-software/ferrolex/blob/main/SUPPORT.md
+    about: Check the support guide before opening a question.

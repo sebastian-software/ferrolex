@@ -1,0 +1,64 @@
+name: Dictionary-content or compatibility report
+description: Report a reviewed dictionary compatibility or fixture-evidence problem.
+title: "[Dictionary]: "
+labels:
+  - bug
+  - area:dictionaries
+  - area:hunspell
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Follow the [compatibility-fixture procedure](https://github.com/sebastian-software/ferrolex/blob/main/docs/compatibility-fixtures.md). Do not upload or commit Hunspell source files, dictionary contents, or other third-party data.
+
+  - type: input
+    id: locale
+    attributes:
+      label: Locale and fixture name
+      description: For example, `de_DE` or another proposed locale.
+      placeholder: de_DE
+    validations:
+      required: true
+
+  - type: input
+    id: source_revision
+    attributes:
+      label: Source revision
+      description: Provide the exact upstream revision or release used for the local fixture.
+    validations:
+      required: true
+
+  - type: input
+    id: digest
+    attributes:
+      label: SHA-256 evidence
+      description: Provide the digest(s) and byte sizes; do not attach the source files.
+    validations:
+      required: true
+
+  - type: textarea
+    id: license
+    attributes:
+      label: License and notice evidence
+      description: Link or describe the exact source license/notice that permits the reviewed local test workflow.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and observed boundary
+      description: Include the fixture-set command, relevant probe, importer mode, diagnostics, and expected behavior.
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Data-handling checklist
+      options:
+        - label: I have not attached or committed third-party dictionary files or their contents.
+          required: true
+        - label: I have checked the existing manifest and issue tracker for this locale.
+          required: true
