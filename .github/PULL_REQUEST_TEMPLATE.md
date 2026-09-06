@@ -15,6 +15,10 @@
 - [ ] User-facing behavior, public API, or compatibility documentation is updated when needed.
 - [ ] This change does not require a release-note or version-contract update, or I have included it.
 
+## Issue
+
+<!-- Closes #123, Refs #123, or a short note on why no issue exists. -->
+
 ## Provenance
 
 - [ ] I confirm that this change is independently implemented and does not copy, mechanically translate, or side-by-side port an incompatible implementation.

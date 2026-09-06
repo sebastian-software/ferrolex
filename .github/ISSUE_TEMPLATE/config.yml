@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/sebastian-software/ferrolex/security/advisories/new
+    about: Do not open a public issue. Use "Report a vulnerability" on this repository's Security tab, or email security@sebastian-software.de.
   - name: Contributor guide
     url: https://github.com/sebastian-software/ferrolex/blob/main/CONTRIBUTING.md
     about: Read the local validation, release, and provenance requirements first.
