@@ -1,5 +1,8 @@
 //! Generic source-code analysis for ferrolex.
 //!
+//! This is a supporting helper crate, not a language-specific parser or a
+//! separate product boundary.
+//!
 //! The analyzer classifies generic tokens and splits identifiers without
 //! depending on a programming-language parser. Language-specific adapters can
 //! provide a [`Document`] with the appropriate [`CommentSyntax`].

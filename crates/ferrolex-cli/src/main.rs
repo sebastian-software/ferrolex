@@ -1,4 +1,7 @@
-//! Command-line interface for ferrolex.
+//! Reference and diagnostic command-line interface for ferrolex.
+//!
+//! The CLI is a supporting interface for the engine and managed dictionary
+//! workflow; library consumers should use the public Rust crates directly.
 
 #![forbid(unsafe_code)]
 

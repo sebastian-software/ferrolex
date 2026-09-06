@@ -1,5 +1,8 @@
 //! Plain-text tokenization and spell-checking for ferrolex.
 //!
+//! This is a supporting helper crate, not a parser for a document format or a
+//! separate product boundary.
+//!
 //! This crate is deliberately independent from source-code tokenization. It
 //! extracts natural-language words and delegates recognition to a core
 //! [`Dictionary`].
