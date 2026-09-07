@@ -7,9 +7,13 @@ product-specific evidence in its own sections.
 
 The root README uses the GitHub variant of the generated family block. Its
 badge row contains the crates.io package, docs.rs API, CI, dual license, MSRV
-policy, and Codecov links. The canonical tagline is **Spell checking for text
-and code**. Product prose uses the lowercase `ferrolex` wordmark, including at
-the beginning of sentences.
+policy, and coverage-gate links. The coverage badge is static: it states the
+line-coverage threshold that the `Rust coverage` job in
+[the CI workflow](../.github/workflows/ci.yml) enforces, and links to that
+workflow. Raising the threshold means editing `COVERAGE_MIN_LINES` in that
+job and the badge text in the README. The canonical tagline is **Spell
+checking for text and code**. Product prose uses the lowercase `ferrolex`
+wordmark, including at the beginning of sentences.
 
 ## Package READMEs
 

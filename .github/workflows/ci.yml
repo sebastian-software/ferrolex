@@ -78,7 +78,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+    env:
+      # Single source of truth for the line-coverage gate. CONTRIBUTING.md
+      # explains how to reproduce the same check locally, and the README badge
+      # states this number.
+      COVERAGE_MIN_LINES: '79'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -93,14 +97,24 @@ jobs:
           tool: cargo-llvm-cov
       - name: Run tests with coverage instrumentation
         run: cargo llvm-cov --workspace --all-features --no-report
-      - name: Enforce line coverage threshold
-        run: cargo llvm-cov report --fail-under-lines 60 --lcov --output-path lcov.info
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
-        with:
-          files: lcov.info
-          fail_ci_if_error: true
-          use_oidc: true
+      # `report` needs `--workspace` too: without it the report covers only the
+      # root umbrella crate, whose 12 instrumented lines are always fully
+      # covered, so the gate could never fail. The measured value reaches the
+      # run summary before the gate runs, so a failing run still reports how
+      # far below the threshold it landed.
+      - name: Report and enforce line coverage
+        run: |
+          cargo llvm-cov report --workspace --json --summary-only --output-path coverage-summary.json
+          percent="$(python3 - <<'PY'
+          import json
+
+          with open("coverage-summary.json", encoding="utf-8") as handle:
+              totals = json.load(handle)["data"][0]["totals"]
+          print(format(totals["lines"]["percent"], ".2f"))
+          PY
+          )"
+          echo "Line coverage: ${percent}% (gate: ≥ ${COVERAGE_MIN_LINES}%)" >> "$GITHUB_STEP_SUMMARY"
+          cargo llvm-cov report --workspace --fail-under-lines "$COVERAGE_MIN_LINES"
 
   test:
     name: Test (${{ matrix.os }}, Rust ${{ matrix.label }})

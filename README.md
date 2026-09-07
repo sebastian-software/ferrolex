@@ -5,7 +5,7 @@
 [![CI](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![MSRV: 1.94](https://img.shields.io/badge/MSRV-1.94-blue.svg)](CONTRIBUTING.md#rust-toolchain-and-msrv)
-[![codecov](https://codecov.io/gh/sebastian-software/ferrolex/branch/main/graph/badge.svg)](https://codecov.io/gh/sebastian-software/ferrolex)
+[![Coverage gate: ≥ 79%](https://img.shields.io/badge/coverage%20gate-%E2%89%A5%2079%25-blue.svg)](.github/workflows/ci.yml)
 [![Powered by Sebastian Software](https://img.shields.io/badge/Powered%20by-Sebastian%20Software-00718d?style=flat-square)](https://oss.sebastian-software.com)
 
 Spell checking for text and code.

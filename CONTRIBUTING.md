@@ -92,6 +92,29 @@ obtained, licensed dictionary sources; see
 directory contains the compatibility-fixture downloader and README-status
 generator used by CI, plus opt-in Node.js and Python binding benchmarks.
 
+### Coverage gate
+
+The `Rust coverage` job in the [CI workflow](.github/workflows/ci.yml) runs the
+workspace test suite under instrumentation and fails when line coverage falls
+below the threshold. That threshold is declared once, as the job's
+`COVERAGE_MIN_LINES` environment variable; the README badge and this document
+describe it but never set it. Coverage is enforced by this repository's own CI,
+with no external coverage service and no token secret. Every run, including a
+failing one, appends `Line coverage: X% (gate: ≥ N%)` to the workflow run
+summary.
+
+Run the same check locally with
+[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) installed and the
+`llvm-tools-preview` component added:
+
+```sh
+just coverage
+```
+
+The recipe reads the threshold from the workflow, so it enforces exactly what
+CI enforces. It stays out of `just gate` because it needs a tool the gate does
+not otherwise install.
+
 ### Node workspaces and org standards
 
 ferrolex is a Rust repository with no root `package.json`, and two Node
