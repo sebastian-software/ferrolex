@@ -24,8 +24,9 @@ changing code or durable repository artifacts.
 ## Validation
 
 - Use `just quick` for the fast local product-crate loop and `just gate` for
-  deterministic CI-parity validation. `just fuzz-smoke` is an explicit,
-  nightly-only opt-in.
+  deterministic CI-parity validation. `just coverage` reproduces the CI
+  line-coverage gate and needs cargo-llvm-cov; `just fuzz-smoke` is an
+  explicit, nightly-only opt-in.
 - The supported MSRV is declared in the workspace `Cargo.toml`; the pinned
   `rust-toolchain.toml` and helper scripts read or verify that policy.
 - The Ferramenta family block in the README surfaces is generated from the

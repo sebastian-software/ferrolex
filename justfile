@@ -2,6 +2,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 toolchain := `python3 scripts/workspace-rust-version.py`
 fuzz_toolchain := `python3 scripts/fuzz-toolchain.py`
+coverage_min_lines := `grep -m1 -oE "COVERAGE_MIN_LINES: '?[0-9]+" .github/workflows/ci.yml | tr -dc '0-9'`
 
 # Fast feedback for the product crates most commonly changed together.
 quick:
@@ -26,6 +27,12 @@ gate: quick
     python3 scripts/check-release-version-contract.py
     python3 scripts/publish-crates.py --check
     python3 scripts/mirror-readme-footer.py --check
+
+# The line-coverage gate exactly as CI enforces it. Stays out of `gate` because
+# it needs cargo-llvm-cov and the llvm-tools-preview component; the threshold is
+# read from the workflow, which is the single place that declares it.
+coverage:
+    cargo +{{toolchain}} llvm-cov --workspace --all-features --fail-under-lines {{coverage_min_lines}}
 
 # Re-render the generated README surfaces. Needs pnpm and network access: the
 # family block comes from the pinned Ferramenta registry, so this stays out of
