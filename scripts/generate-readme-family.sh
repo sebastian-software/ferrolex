@@ -16,8 +16,8 @@ set -euo pipefail
 # blessed yesterday would not be the block it blesses today. A registry change
 # reaches this repository by bumping this SHA and re-running the script; the
 # README diff then shows exactly what the registry moved.
-generator_ref='d63a0b163ef3e5e68cd1c77e5c8871ac72c36b60'
-generator="github:sebastian-software/ferramenta#${generator_ref}&path:/packages/ardo-config"
+generator_ref='05fadd21d86b69bb15179ef4461bef6b3b531f88'
+generator="github:sebastian-software/ferramenta#${generator_ref}&path:/packages/family"
 
 # The READMEs that crates.io and npm render for a published ferrolex package.
 # The unpublished FFI, LSP, and Python crates have no registry page and carry
@@ -53,7 +53,7 @@ status=0
 
 # The root README is the GitHub project page and takes the full block with the
 # grouped tables; every other surface takes the compact registry flavor.
-pnpm dlx "$generator" --current ferrolex --variant github "$mode" README.md || status=1
+# The root README is generated separately: mise run readme:write/check.
 for readme in "${registry_readmes[@]}"; do
   pnpm dlx "$generator" --current ferrolex --variant registry "$mode" "$readme" || status=1
 done
