@@ -2,7 +2,7 @@
 
 ## Status
 
-Active. Update this document when the contract changes.
+accepted. This is a living decision; update it when the contract changes.
 
 ## Decision
 
