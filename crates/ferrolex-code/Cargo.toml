@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-code"
-version = "0.4.0"
+version = "0.5.0"
 description = "Supporting source-code analysis helpers for ferrolex"
 authors.workspace = true
 edition.workspace = true
