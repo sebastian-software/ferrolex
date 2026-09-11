@@ -4,7 +4,7 @@
 set -euo pipefail
 
 manifest='crates/ferrolex-hunspell/tests/real_world/manifest.tsv'
-readme='README.md'
+readme='README.md.src'
 start='<!-- compat-status:start -->'
 end='<!-- compat-status:end -->'
 

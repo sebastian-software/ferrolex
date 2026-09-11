@@ -38,6 +38,7 @@ coverage:
 # family block comes from the pinned Ferramenta registry, so this stays out of
 # `gate`. See CONTRIBUTING.md#readme-family-block.
 readme:
+    mise run readme:write
     scripts/generate-readme-family.sh
     python3 scripts/mirror-readme-footer.py
 

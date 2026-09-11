@@ -1,10 +1,13 @@
 {
-  "standards": 12,
+  "standards": 13,
   "visibility": "oss",
   "since": 2026,
   "platform": "github",
   "workspaces": [
     "crates/ferrolex-node",
     "editors/vscode/ferrolex"
-  ]
+  ],
+  "readme": {
+    "owner": "mdtheme"
+  }
 }

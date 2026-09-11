@@ -35,3 +35,4 @@ configuration, CI, and the [GitHub delivery epics](https://github.com/sebastian-
 | [0008](0008-no-cspell-compatibility.md) | Own directive format, no cspell compatibility | accepted |
 | [0009](0009-language-aware-source-analysis.md) | Keep document parsing outside ferrolex | accepted |
 | [0010](0010-external-integration-support-tiers.md) | Node.js is the first direct runtime integration | accepted |
+| [0011](0011-readme-theme-composition.md) | README theme composition | accepted |

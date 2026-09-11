@@ -71,7 +71,7 @@ jobs:
       # stays because pnpm 11 holds back releases younger than 24 hours, and a
       # pin raised on release day could otherwise not resolve at all.
       - name: Check the repository against the org standards
-        run: pnpm --config.minimum-release-age=0 dlx @sebastian-software/standards@0.9.0 check
+        run: pnpm --config.minimum-release-age=0 dlx @sebastian-software/standards@0.11.0 check
 
   coverage:
     name: Rust coverage
