@@ -1,11 +1,13 @@
 # ferrolex
 
+<!-- mdtheme:badges:start -->
 [![crates.io](https://img.shields.io/crates/v/ferrolex.svg)](https://crates.io/crates/ferrolex)
 [![docs.rs](https://img.shields.io/docsrs/ferrolex)](https://docs.rs/ferrolex)
 [![CI](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebastian-software/ferrolex/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![MSRV: 1.94](https://img.shields.io/badge/MSRV-1.94-blue.svg)](CONTRIBUTING.md#rust-toolchain-and-msrv)
 [![Coverage gate: ≥ 79%](https://img.shields.io/badge/coverage%20gate-%E2%89%A5%2079%25-blue.svg)](.github/workflows/ci.yml)
+<!-- mdtheme:badges:end -->
 
 Spell checking for text and code.
 
