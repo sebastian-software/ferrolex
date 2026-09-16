@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "blocking": false,
   "reason": "Local automated checks did not complete cleanly in this environment.",
-  "detectedAt": "2026-09-16T16:34:53.017Z",
+  "detectedAt": "2026-09-16T16:34:53.046Z",
   "expectedStandardsVersion": 15,
   "observedStandardsVersion": 15,
   "expectedCliVersion": null,
