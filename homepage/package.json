@@ -1,0 +1,34 @@
+{
+  "name": "ferrolex-homepage",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/write-site-data.mjs && ardo dev",
+    "build": "node scripts/write-site-data.mjs && ardo build && node scripts/verify-build.mjs",
+    "preview": "ardo preview",
+    "lint": "node scripts/write-site-data.mjs && oxlint -c oxlint.config.ts && eslint . --max-warnings=0",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "typecheck": "node scripts/write-site-data.mjs && tsc --noEmit",
+    "browser:check": "node scripts/check-browser.mjs",
+    "verify": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm browser:check"
+  },
+  "dependencies": {
+    "ardo": "^6.0.0",
+    "ferramenta-family": "github:sebastian-software/ferramenta#8c29f5a030701ab2f8c925ed6f125e91012931ba&path:/packages/family"
+  },
+  "devDependencies": {
+    "@sebastian-software/standards": "0.11.1",
+    "axe-core": "4.13.0",
+    "eslint": "^10.11.0",
+    "eslint-config-setup": "^0.5.2",
+    "jiti": "^2.7.0",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
+    "playwright": "1.63.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.0"
+  },
+  "packageManager": "pnpm@12.15.0"
+}

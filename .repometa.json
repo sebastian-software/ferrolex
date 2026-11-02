@@ -5,7 +5,8 @@
   "platform": "github",
   "workspaces": [
     "crates/ferrolex-node",
-    "editors/vscode/ferrolex"
+    "editors/vscode/ferrolex",
+    "homepage"
   ],
   "readme": {
     "owner": "mdtheme"
