@@ -1,6 +1,6 @@
 [package]
 name = "ferrolex-text"
-version = "0.4.0"
+version = "0.5.0"
 description = "Plain-text analysis for ferrolex"
 authors.workspace = true
 edition.workspace = true
