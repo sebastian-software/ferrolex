@@ -170,8 +170,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3)
       ferramenta-family:
-        specifier: github:sebastian-software/ferramenta#91f29924fa86fb6ffa2d2b3633b1886076305741&path:/packages/family
-        version: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/91f29924fa86fb6ffa2d2b3633b1886076305741#path:/packages/family(react@19.3.1)
+        specifier: github:sebastian-software/ferramenta#8c29f5a030701ab2f8c925ed6f125e91012931ba&path:/packages/family
+        version: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/8c29f5a030701ab2f8c925ed6f125e91012931ba#path:/packages/family(react@19.3.1)
     devDependencies:
       '@sebastian-software/standards':
         specifier: 0.11.1
@@ -2713,8 +2713,8 @@ packages:
       picomatch:
         optional: true
 
-  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/91f29924fa86fb6ffa2d2b3633b1886076305741#path:/packages/family:
-    resolution: {gitHosted: true, integrity: sha512-fplgJIFAITvQH1s5YJm4W36Z7lXpRHfD6df/APaUC5BdVZkRradHkTw71b7T/3I9ljWMeEWYqe/q3Sjjo2y9Uw==, path: /packages/family, tarball: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/91f29924fa86fb6ffa2d2b3633b1886076305741}
+  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/8c29f5a030701ab2f8c925ed6f125e91012931ba#path:/packages/family:
+    resolution: {gitHosted: true, integrity: sha512-FvFXRc+pUZ5KEPSqx2kU9lgkjPLqyVgWcRPXz9unfjcaGs7ik8lMpTHpNsn02z1nsbJJUUSjYN9iQX9dNalBZw==, path: /packages/family, tarball: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/8c29f5a030701ab2f8c925ed6f125e91012931ba}
     version: 2.0.0
     engines: {node: '>=20.11.0'}
     peerDependencies:
@@ -6757,7 +6757,7 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.7
 
-  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/91f29924fa86fb6ffa2d2b3633b1886076305741#path:/packages/family(react@19.3.1):
+  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/8c29f5a030701ab2f8c925ed6f125e91012931ba#path:/packages/family(react@19.3.1):
     dependencies:
       react: 19.3.1
 
