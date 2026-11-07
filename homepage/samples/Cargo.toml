@@ -1,0 +1,19 @@
+# Renders the homepage samples with the released ferrolex crates at the Git tag
+# of the v0.4.0 release, not the workspace sources: Ferrolex is not on
+# crates.io yet, so the tag is its published form. The empty [workspace] table
+# keeps this package out of the repository's Cargo workspace. Run it through
+# `pnpm sample:write` in homepage/, which checks the tag against the release.
+[package]
+name = "ferrolex-homepage-samples"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ferrolex-core = { git = "https://github.com/sebastian-software/ferrolex", tag = "ferrolex-v0.4.0" }
+ferrolex-dictionaries = { git = "https://github.com/sebastian-software/ferrolex", tag = "ferrolex-v0.4.0" }
+ferrolex-hunspell = { git = "https://github.com/sebastian-software/ferrolex", tag = "ferrolex-v0.4.0" }
+ferrolex-suggest = { git = "https://github.com/sebastian-software/ferrolex", tag = "ferrolex-v0.4.0" }
+serde_json = "1"

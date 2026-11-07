@@ -1,164 +1,132 @@
 import type { ArdoMetaFunction } from "ardo/runtime";
 
+import { Fragment } from "ardo/react";
 import { ArdoLink as Link } from "ardo/runtime";
-import { Mark, RegistryFacts } from "ferramenta-family";
 import {
-  FerraArticle,
-  FerraChoices,
-  FerraCode,
-  FerraColumns,
-  FerraEditorialRow,
-  FerraFeatureGrid,
-  FerraInstrument,
-  FerraNotes,
-  FerraProductLead,
-  FerraProductPage,
-  FerraReleaseFacts,
-} from "ferramenta-family/ferra";
-import { family, WORKSHOP } from "ferramenta-family/registry";
+  MonoAction,
+  MonoClosing,
+  MonoColophon,
+  MonoEngraving,
+  MonoOpening,
+} from "ferramenta-family/monografie";
+import { WORKSHOP } from "ferramenta-family/registry";
 
-import { SiteAction } from "../components/site-action";
-import site from "../data/site.json";
+import { compatibility, ferrolex, lowerFirst, samples } from "../components/home-data";
+import { Compatibility, Dictionaries, Field, Fit } from "../components/home-engine";
+import { Checking, Explainer, Limits } from "../components/home-reading";
+import { rustVersion, version } from "../data/site.json";
 
 // oxlint-disable-next-line react/only-export-components -- Ardo reads route metadata.
 export const meta: ArdoMetaFunction = () => [
-  { title: "Ferrolex — Your dictionaries. A Rust spell-checking engine." },
+  { title: "Ferrolex — Your dictionaries. A Rust spell checker." },
   {
     name: "description",
     content:
-      "Check words and produce deterministic suggestions with existing Hunspell dictionaries. An independent Rust implementation, with explicit pre-1.0 compatibility boundaries.",
+      "An independent Rust spell checker for Hunspell dictionaries: checks words, explains its verdicts and gives the same bounded suggestions every time. Alpha, with compatibility measured locale by locale.",
   },
 ];
 // oxlint-disable-next-line react/only-export-components -- Ardo reads the route layout.
 export const handle = { layout: "bare" };
-const member = family.find((entry) => entry.name === "ferrolex");
-if (!member) throw new Error("Ferrolex is missing from the family registry.");
-const tool = { ...member, version: site.version };
+
+const releaseLine = version.split(".").slice(0, 2).join(".");
+const ready = compatibility.locales.filter((entry) => entry.state === "ready").length;
+
+function Actions() {
+  return (
+    <>
+      <MonoAction href="/guide/getting-started/" primary detail="The command line and Rust">
+        Get started
+      </MonoAction>
+      <MonoAction href="/evidence/compatibility/" detail="Locale by locale">
+        Check compatibility
+      </MonoAction>
+    </>
+  );
+}
 
 function Opening() {
   return (
-    <FerraProductLead
-      title="Your dictionaries. A Rust spell-checking engine."
-      introduction="Check words and produce deterministic suggestions with existing Hunspell dictionaries. Ferrolex implements the engine in Rust, without linking the native Hunspell library. Use it from your application or the command line."
-      art={<FerraInstrument product="ferrolex" />}
-      byline={
-        <>
-          An open-source project by <a href={WORKSHOP.openSource}>{WORKSHOP.company}</a>.
-        </>
-      }
-    >
-      <div className="ferra-actions">
-        <SiteAction to="/guide/getting-started/">Try Ferrolex</SiteAction>
-        <SiteAction variant="secondary" to="/evidence/compatibility/">
-          Check compatibility
-        </SiteAction>
+    <MonoOpening
+      product="ferrolex"
+      instrumentLabel="Ferrolex's instrument: a long steel gauge holding four engraved type blocks, A, F, N and E, under a stepped bridge. A rust-brown sliding stop rests on the bridge between two blocks, and a spare rust-brown insert stands upright at the end."
+      caption="A wordform gauge: type blocks are held against the dictionary’s profile, and a stop marks where a form fits."
+      kicker={`Ferrolex ${releaseLine}, ${lowerFirst(ferrolex.what)} for Rust`}
+      title="Your dictionaries. A Rust spell checker."
+      subtitle="Hunspell’s dictionaries, read by an independent engine."
+      standfirst="Editors, linters and CI checks all need to know whether a word is spelled right, and what was probably meant when it is not. Open dictionaries for many languages come in the Hunspell format: a word list plus a file of spelling rules. Ferrolex is a Rust library and command-line tool that reads those dictionaries, checks words and suggests corrections, without linking the Hunspell C++ library. It is alpha: the interfaces may still change, and its compatibility is measured locale by locale."
+      actions={<Actions />}
+      facts={[
+        {
+          value: <em>{samples.catalog.locales}</em>,
+          label: "LibreOffice dictionaries in the reviewed catalog",
+        },
+        {
+          value: (
+            <>
+              <em>{ready}</em> of {compatibility.locales.length}
+            </>
+          ),
+          label: "tested locales that pass their strict import and word checks",
+        },
+        { value: "Same", label: "suggestions in the same order on every machine" },
+        { value: `Rust ${rustVersion}+`, label: "MIT or Apache-2.0, alpha" },
+      ]}
+    />
+  );
+}
+
+// Keys are written out: minified builds do not keep function names.
+const chapters = [
+  { key: "explainer", Chapter: Explainer },
+  { key: "checking", Chapter: Checking },
+  { key: "limits", Chapter: Limits },
+  { key: "dictionaries", Chapter: Dictionaries },
+  { key: "compatibility", Chapter: Compatibility },
+  { key: "field", Chapter: Field },
+  { key: "fit", Chapter: Fit },
+];
+
+/** Where Ferrolex comes from, and who makes it. */
+function Origin() {
+  return (
+    <section aria-label="Origin">
+      <div className="mono-axis">
+        <MonoColophon>
+          {ferrolex.succeeds} set the dictionary standard. Ferrolex reads those dictionaries with
+          its own engine, written in Rust. It is one of the Ferramenta engines, made by{" "}
+          {WORKSHOP.name} in {WORKSHOP.place}.
+        </MonoColophon>
       </div>
-      <p>
-        Pre-1.0. Public APIs may change in minor releases. Compatibility is documented per
-        dictionary; a successful download is not a promise of full Hunspell recognition.
-      </p>
-    </FerraProductLead>
-  );
-}
-
-function Highlights() {
-  return (
-    <FerraColumns>
-      <FerraArticle
-        title="Keep the dictionary knowledge."
-        icon={<Mark name="document" size={28} />}
-        meta={<FerraReleaseFacts tool={tool} />}
-      >
-        <p>
-          Hunspell dictionaries carry years of spelling rules. Ferrolex reads supported affix and
-          compound rules, checks words and produces bounded, deterministic suggestions.
-        </p>
-        <Link to="/evidence/compatibility/">Read the reviewed locale evidence</Link>
-      </FerraArticle>
-      <FerraArticle
-        title="Choose the data you ship."
-        icon={<Mark name="package" size={28} />}
-        meta={<Link to="/guide/dictionaries/">How dictionary acquisition works</Link>}
-      >
-        <p>
-          A reviewed catalog pins upstream sources, digests and license notices. Downloads go into a
-          cache you select. Ordinary checks do not fetch or update dictionaries implicitly.
-        </p>
-        <Link to="/guide/getting-started/">Start with a word list or Hunspell pair</Link>
-      </FerraArticle>
-    </FerraColumns>
-  );
-}
-
-function Scope() {
-  return (
-    <FerraEditorialRow
-      notes={<FerraNotes label="Inside Ferrolex" notes={tool.editorial?.notes ?? []} />}
-    >
-      <FerraArticle
-        title="A focused engine for your application."
-        introduction="Your tool understands its document format. Ferrolex handles the dictionary work."
-        meta={<Link to="/evidence/product-boundary/">Why parsing stays outside</Link>}
-      >
-        <FerraFeatureGrid
-          items={[
-            {
-              heading: "Recognition and suggestions",
-              text: "Check words and get repeatable suggestions with explicit work limits and completeness reporting.",
-            },
-            {
-              heading: "Compiled dictionaries",
-              text: "Compile supported word lists or Hunspell pairs into standalone artifacts, then validate their format before use.",
-            },
-            {
-              heading: "Application-owned parsing",
-              text: "Extract prose and identifiers in the tools that understand your format. Pass the words to the Rust API.",
-            },
-            {
-              heading: "An explicit early-stage contract",
-              text: "Rust and the CLI are available. The Node.js binding is implemented but not yet published to npm; editor and other runtime integrations remain prototypes.",
-            },
-          ]}
-        />
-      </FerraArticle>
-    </FerraEditorialRow>
-  );
-}
-
-function GettingStarted() {
-  return (
-    <FerraChoices>
-      <FerraArticle
-        title="Add it to Rust."
-        introduction="Import dictionaries and request suggestions through the public library API."
-      >
-        <FerraCode caption="Install the library">cargo add ferrolex</FerraCode>
-        <SiteAction to="/reference/overview/#rust-library-quick-start">
-          Read the Rust quick start
-        </SiteAction>
-      </FerraArticle>
-      <FerraArticle
-        title="Try the command line."
-        introduction="Start with a plain word list, then choose the dictionary sources your workflow needs."
-      >
-        <FerraCode caption="Install the CLI">cargo install --locked ferrolex-cli</FerraCode>
-        <SiteAction variant="secondary" to="/guide/getting-started/">
-          Check your first word
-        </SiteAction>
-      </FerraArticle>
-    </FerraChoices>
+    </section>
   );
 }
 
 export default function HomePage() {
   return (
-    <RegistryFacts>
-      <FerraProductPage>
-        <Opening />
-        <Highlights />
-        <Scope />
-        <GettingStarted />
-      </FerraProductPage>
-    </RegistryFacts>
+    <>
+      <Opening />
+      {chapters.map(({ key, Chapter }, index) => (
+        <Fragment key={key}>
+          <MonoEngraving seed={index + 1} />
+          <Chapter />
+        </Fragment>
+      ))}
+      <MonoEngraving seed={chapters.length + 1} />
+      <Origin />
+      <MonoClosing
+        id="start"
+        title="Start with the words you have."
+        standfirst="Check a plain word list first, then install the Hunspell dictionary your users write in. Both work from the command line and from Rust."
+        actions={<Actions />}
+        links={
+          <>
+            <a href="https://github.com/sebastian-software/ferrolex">GitHub repository</a>
+            <Link to="/guide/getting-started/">Documentation</Link>
+            <Link to="/changelog/">Changelog</Link>
+            <a href={WORKSHOP.consulting}>Integration and support</a>
+          </>
+        }
+      />
+    </>
   );
 }
