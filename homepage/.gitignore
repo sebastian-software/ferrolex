@@ -4,6 +4,7 @@ build/
 app/routes.ts
 app/data/site.json
 app/data/navigation.json
+app/data/compatibility.json
 # Generated from canonical repository documentation.
 app/routes/guide/
 app/routes/reference/

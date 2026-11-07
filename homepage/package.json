@@ -11,12 +11,15 @@
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "typecheck": "node scripts/write-site-data.mjs && tsc --noEmit",
+    "sample:write": "node scripts/render-home-samples.mjs",
+    "sample:check": "node scripts/render-home-samples.mjs --check",
+    "sample:pins": "node scripts/render-home-samples.mjs --pins",
     "browser:check": "node scripts/check-browser.mjs",
-    "verify": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm browser:check"
+    "verify": "pnpm sample:pins && pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm browser:check"
   },
   "dependencies": {
     "ardo": "^6.0.0",
-    "ferramenta-family": "github:sebastian-software/ferramenta#8c29f5a030701ab2f8c925ed6f125e91012931ba&path:/packages/family"
+    "ferramenta-family": "github:sebastian-software/ferramenta#3f64d5268db97afc6c00e9103ee5438cf949456d&path:/packages/family"
   },
   "devDependencies": {
     "@sebastian-software/standards": "0.11.1",

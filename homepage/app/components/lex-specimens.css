@@ -1,0 +1,157 @@
+/* The homepage's specimens. Scoped with flx-, colors from the Monografie
+   --mono-* tokens. */
+
+.flx-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 56px 0 -48px;
+}
+/* Long choices wrap inside their control instead of widening a phone screen. */
+.flx-toggles .mono-seg {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.flx-single.mono-facing {
+  grid-template-columns: minmax(0, 1fr);
+}
+.flx-single.mono-facing::before {
+  display: none;
+}
+.flx-facing .mono-sheet,
+.flx-single .mono-sheet {
+  min-width: 0;
+}
+.flx-word {
+  font-family: var(--mono-mono);
+}
+
+/* A word's derivation, and a run's limits: a term with its value. */
+.flx-facts {
+  margin: 0;
+}
+.flx-facts > div {
+  display: grid;
+  grid-template-columns: 9.5em minmax(0, 1fr);
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--mono-hair-2);
+}
+.flx-facts > div:first-child {
+  padding-top: 0;
+}
+.flx-facts dt {
+  font: 600 13px/1.5 var(--mono-sans);
+  color: var(--mono-ink-2);
+}
+.flx-facts dd {
+  margin: 0;
+  font: 400 15px/1.5 var(--mono-sans);
+  color: var(--mono-ink);
+  overflow-wrap: anywhere;
+}
+.flx-facts code,
+.flx-check code,
+.flx-suggestions code {
+  font: 400 14px/1.5 var(--mono-mono);
+}
+.flx-limits > div {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.flx-limits dd {
+  font-family: var(--mono-mono);
+  text-align: right;
+}
+
+/* Checked words: the misses carry their suggestions. */
+.flx-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.flx-check {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--mono-hair-2);
+}
+.flx-check:first-child {
+  padding-top: 0;
+}
+.flx-check > span {
+  font: 400 13px/1.5 var(--mono-sans);
+  color: var(--mono-ink-3);
+}
+.flx-check[data-miss] > code {
+  text-decoration: underline wavy var(--mono-ink-2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.flx-check[data-miss] > span {
+  font-weight: 600;
+  color: var(--mono-ink);
+}
+.flx-check-detail {
+  flex-basis: 100%;
+}
+
+/* Suggestions, closest first, each with its edit distance. */
+.flx-suggestions {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.flx-suggestions li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--mono-hair);
+  background: var(--mono-paper);
+}
+.flx-suggestions span {
+  font: 400 12px/1.4 var(--mono-sans);
+  color: var(--mono-ink-3);
+}
+.flx-sub {
+  font: 400 13px/1.45 var(--mono-sans);
+  color: var(--mono-ink-2);
+  margin: 10px 0 0;
+}
+.flx-none {
+  font: 400 15px/1.55 var(--mono-sans);
+  color: var(--mono-ink-2);
+  margin: 6px 0 0;
+}
+
+/* The locale status, as passed checks with a leader. */
+.flx-locales.mono-proofs {
+  margin-top: 28px;
+}
+.flx-locales code {
+  font: 400 13px/1.5 var(--mono-mono);
+  color: var(--mono-ink-3);
+}
+
+@media (max-width: 640px) {
+  /* The package sets facing pages 48px apart here; keep 16px under the toggles. */
+  .flx-toggles {
+    margin: 40px 0 -32px;
+  }
+  .flx-facts > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flx-limits > div {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* A long command in running text breaks anywhere rather than widen a phone. */
+.flx-command {
+  overflow-wrap: anywhere;
+}
