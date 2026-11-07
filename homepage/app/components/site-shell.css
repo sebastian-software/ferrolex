@@ -1,38 +1,9 @@
-/* The Monografie chrome inside Ardo's shell, on the homepage (flx-home) and on
-   documentation pages (flx-docs). */
+/* The documentation pages' own seam inside the Monografie page (flx-docs). The
+   shell fixes for Ardo come from ferramenta-family/monografie-ardo.css. */
 
-/* Ardo pads its layout for a fixed header; the Monografie header is sticky. */
-.flx-home .ferra-ardo-shell > div {
-  padding-block-start: 0;
-}
-
-/* Anchors and the reading layout's sticky panels clear the 60px sticky header. */
-html:has(.flx-home, .flx-docs) {
-  scroll-padding-top: 76px;
-}
-.flx-docs :is(.ferra-reading-navigation, .ferra-reading-outline) {
-  top: 84px;
-  max-height: calc(100svh - 108px);
-}
-
-@media (max-width: 960px) {
-  /* The documentation drawer carries the navigation and the brand leads home,
-     so the menu button steps aside and the drawer and search sit at the end. */
-  .flx-docs .mono-header .mono-menu-button {
-    display: none;
-  }
-  .flx-docs .mono-header .mono-header-actions {
-    margin-left: auto;
-  }
-}
-
-/* Search closes the header row, so its shortcut hint opens toward the page
-   instead of past the right edge of a phone screen. */
-:is(.flx-home, .flx-docs)
-  .mono-header-actions
-  button[aria-label="Search"]
-  > span[aria-hidden="true"] {
-  left: auto;
-  right: 0;
-  transform: none;
+/* Monografie sets highlighted code on its warm sheet, where the light theme's
+   comment grey falls just short of 4.5:1. Comments take the darker grey of the
+   same theme until the package carries the fix. */
+.flx-docs .ardo-code-block span[style*="--shiki-light:#6E7781"] {
+  color: #59636e !important;
 }

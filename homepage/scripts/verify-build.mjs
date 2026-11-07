@@ -12,6 +12,11 @@ const samples = JSON.parse(await readFile(data("home-samples.json"), "utf8"));
 const compatibility = JSON.parse(await readFile(data("compatibility.json"), "utf8"));
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const output = new URL("../build/client/", import.meta.url);
+/**
+ * Monografie reuses three Ferra identity parts: the mark, the instrument and the
+ * workshop logo. Nothing else from the Ferra entry may reach a page.
+ */
+const ferraIdentity = new Set(["ferra-mark", "ferra-instrument", "ferra-workshop-logo"]);
 for (const page of expectedPages) {
   const source = await readFile(new URL(page, output), "utf8");
   const html = source.replaceAll(/<!--[\s\S]*?-->/g, "");
@@ -30,9 +35,20 @@ for (const page of expectedPages) {
     assert(html.includes(fragment), `${page} is missing ${fragment} from the shared shell`);
   }
   assert(!html.includes("site.css"), `${page} uses project-specific CSS`);
+  verifyNoFerra(html, page);
   if (page === "index.html") {
     verifyHomepage(html);
     continue;
+  }
+  assert(
+    html.includes('class="mono mono-docs flx-docs"'),
+    `${page} should read on the Monografie documentation page.`,
+  );
+  for (const fragment of ["mono-ardo-shell", "mono-reading-navigation", "mono-prose"]) {
+    assert(
+      html.includes(fragment),
+      `${page} is missing the Monografie reading layout (${fragment})`,
+    );
   }
   const blocks = [...html.matchAll(/<pre\b[^>]*>/g)];
   assert(
@@ -50,6 +66,7 @@ for (const page of expectedPages) {
   );
 }
 await verifyScopedCss();
+await verifyNoFerraStyles();
 
 /** The homepage reads on the Monografie page, keeps its anchors and shows the data's figures. */
 function verifyHomepage(html) {
@@ -73,6 +90,43 @@ function verifyHomepage(html) {
     assert(text.includes(claim), `The homepage no longer states "${claim.trim()}" from its data.`);
   }
   assert(!/NaN|undefined|Infinity/.test(text), "The homepage renders a missing figure.");
+}
+
+/** Renders no Ferra class beyond the identity parts Monografie reuses. */
+function verifyNoFerra(html, page) {
+  const classes = [...html.matchAll(/\bclass="([^"]*)"/g)].flatMap(([, value]) =>
+    value.split(/\s+/),
+  );
+  const foreign = [
+    ...new Set(classes.filter((name) => name.startsWith("ferra-") && !ferraIdentity.has(name))),
+  ];
+  assert.deepEqual(foreign, [], `${page} renders Ferra classes`);
+}
+
+/** No Ferra stylesheet is imported: by the site's source, or into a built stylesheet. */
+async function verifyNoFerraStyles() {
+  const appFiles = await readdir(new URL("../app/", import.meta.url), { recursive: true });
+  for (const file of appFiles.filter((name) => /\.(?:tsx?|css|mdx?)$/.test(name))) {
+    const source = await readFile(new URL(`../app/${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(
+      source,
+      /ferramenta-family\/(?:ferra(?:-ardo|-tokens|-fonts)?\.css|ferra["'])/,
+      `${file} imports the Ferra entry or its stylesheets`,
+    );
+  }
+  const assets = new URL("assets/", output);
+  const assetFiles = await readdir(assets);
+  for (const file of assetFiles.filter((name) => name.endsWith(".css"))) {
+    const css = await readFile(new URL(file, assets), "utf8");
+    const foreign = [
+      ...new Set(
+        [...css.matchAll(/\.(ferra-[\w-]+)/g)]
+          .map(([, name]) => name)
+          .filter((name) => !ferraIdentity.has(name)),
+      ),
+    ];
+    assert.deepEqual(foreign, [], `assets/${file} carries Ferra styles`);
+  }
 }
 
 /** A selector list split at its top-level commas, so `:is(a, b)` stays whole. */
