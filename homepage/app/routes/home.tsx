@@ -49,7 +49,6 @@ function Opening() {
     <MonoOpening
       product="ferrolex"
       instrumentLabel="Ferrolex's instrument: a long steel gauge holding four engraved type blocks, A, F, N and E, under a stepped bridge. A rust-brown sliding stop rests on the bridge between two blocks, and a spare rust-brown insert stands upright at the end."
-      caption="A wordform gauge: type blocks are held against the dictionary’s profile, and a stop marks where a form fits."
       kicker={`Ferrolex ${releaseLine}, ${lowerFirst(ferrolex.what)} for Rust`}
       title="Your dictionaries. A Rust spell checker."
       subtitle="Hunspell’s dictionaries, read by an independent engine."
