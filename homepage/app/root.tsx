@@ -8,10 +8,10 @@ import {
   ArdoRootLayout,
   ArdoTOC,
 } from "ardo/ui";
-import { MarkDefs } from "ferramenta-family";
 import touchIcon from "ferramenta-family/ferra-assets/ferrolex/apple-touch-icon.png?url";
 import favicon from "ferramenta-family/ferra-assets/ferrolex/favicon.ico?url";
 import {
+  MarkDefs,
   MonoFooter,
   MonoGuideNavigation,
   MonoHeader,
@@ -26,7 +26,6 @@ import "ferramenta-family/monografie-ardo.css";
 
 import navigation from "./data/navigation.json";
 import site from "./data/site.json";
-import "./components/site-shell.css";
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
