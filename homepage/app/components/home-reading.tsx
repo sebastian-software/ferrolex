@@ -1,5 +1,5 @@
 import { ArdoLink as Link } from "ardo/runtime";
-import { MonoCredit, MonoLeadIn, MonoPassage, MonoSection } from "ferramenta-family/monografie";
+import { MonoCredit, MonoPassage, MonoSection } from "ferramenta-family/monografie";
 
 import { dictionary, samples } from "./home-data";
 import { BudgetSpecimen, CheckSpecimen, ExplainSpecimen } from "./lex-specimens";
@@ -20,11 +20,11 @@ export function Explainer() {
         }}
       >
         <p>
-          <MonoLeadIn>A spell checker does not store</MonoLeadIn> every word a language can form.
-          English alone has walk, walks, walked and walking; German and Hungarian build far more
-          forms from one word. A Hunspell dictionary comes as two files instead: a word list, in
-          which each word carries a few letters that name the rules it takes, and a rules file that
-          says what those rules add or remove.
+          A spell checker does not store every word a language can form. English alone has walk,
+          walks, walked and walking; German and Hungarian build far more forms from one word. A
+          Hunspell dictionary comes as two files instead: a word list, in which each word carries a
+          few letters that name the rules it takes, and a rules file that says what those rules add
+          or remove.
         </p>
       </MonoPassage>
       <MonoPassage
@@ -65,10 +65,10 @@ export function Checking() {
         }}
       >
         <p>
-          <MonoLeadIn>Suggestions are ranked</MonoLeadIn> by how few changes they need, weighed with
-          the dictionary’s own hints about likely typos, then alphabetically. Nothing depends on the
-          machine or the operating system, so a test that expects a suggestion today still finds it
-          tomorrow and in CI.
+          Suggestions are ranked by how few changes they need, weighed with the dictionary’s own
+          hints about likely typos, then alphabetically. Nothing depends on the machine or the
+          operating system, so a test that expects a suggestion today still finds it tomorrow and in
+          CI.
         </p>
       </MonoPassage>
       <p>
@@ -101,10 +101,10 @@ export function Limits() {
         }}
       >
         <p>
-          <MonoLeadIn>An editor checks as you type</MonoLeadIn>, so one misspelling must not stall
-          it. Ferrolex never expands a whole dictionary in advance and stops at the limits you set.
-          Its answer then carries a plain statement: complete, or stopped at a named limit with the
-          best suggestions found until then.
+          An editor checks as you type, so one misspelling must not stall it. Ferrolex never expands
+          a whole dictionary in advance and stops at the limits you set. Its answer then carries a
+          plain statement: complete, or stopped at a named limit with the best suggestions found
+          until then.
         </p>
       </MonoPassage>
       <p>

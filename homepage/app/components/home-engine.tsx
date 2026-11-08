@@ -1,7 +1,6 @@
 import { ArdoLink as Link } from "ardo/runtime";
 import {
   MonoCredit,
-  MonoLeadIn,
   MonoPassage,
   MonoProofs,
   MonoSection,
@@ -73,10 +72,10 @@ export function Dictionaries() {
     >
       <MonoPassage note={{ term: note.title, children: note.body }}>
         <p>
-          <MonoLeadIn>Dictionaries are data</MonoLeadIn> with their own authors and licenses, and a
-          product that ships one has to know which version it ships. Ferrolex keeps that choice with
-          you: it never downloads or updates a dictionary while it checks, and every file it
-          installs must match the digest recorded in the catalog.
+          Dictionaries are data with their own authors and licenses, and a product that ships one
+          has to know which version it ships. Ferrolex keeps that choice with you: it never
+          downloads or updates a dictionary while it checks, and every file it installs must match
+          the digest recorded in the catalog.
         </p>
       </MonoPassage>
       <MonoWide>
@@ -131,10 +130,10 @@ export function Compatibility() {
         }}
       >
         <p>
-          <MonoLeadIn>For every locale in the test set</MonoLeadIn>, the exact upstream dictionary
-          is imported strictly and a reviewed list of word forms is checked against it. CI repeats
-          this on relevant changes and before every release. {spelled(ready.length)} of the{" "}
-          {spelled(locales.length)} locales pass; {pendingText}.
+          For every locale in the test set, the exact upstream dictionary is imported strictly and a
+          reviewed list of word forms is checked against it. CI repeats this on relevant changes and
+          before every release. {spelled(ready.length)} of the {spelled(locales.length)} locales
+          pass; {pendingText}.
         </p>
       </MonoPassage>
       <p>
