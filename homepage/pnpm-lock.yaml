@@ -170,8 +170,8 @@ importers:
         specifier: ^6.4.1
         version: 6.4.1(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3)
       ferramenta-family:
-        specifier: github:sebastian-software/ferramenta#2c6efd9861f57657f2898f381fb771018e0e6b66&path:/packages/family
-        version: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/2c6efd9861f57657f2898f381fb771018e0e6b66#path:/packages/family(ardo@6.4.1(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3))(react@19.3.1)
+        specifier: github:sebastian-software/ferramenta#70d696962356af5a100c970f0f4b0187fdafcccf&path:/packages/family
+        version: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/70d696962356af5a100c970f0f4b0187fdafcccf#path:/packages/family(ardo@6.4.1(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3))(react@19.3.1)
     devDependencies:
       '@sebastian-software/standards':
         specifier: 0.11.1
@@ -2873,17 +2873,8 @@ packages:
   fast-levenshtein@2.0.6:
     resolution: {integrity: sha512-DCXu6Ifhqcks7TZKY3Hxp3y6qphY5SJZmrWMDrKcERSOXWQdMhU9Ig/PYrzyw/ul9jOIyh0N4M0tbC5hodg8dw==}
 
-  fdir@6.5.0:
-    resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
-    engines: {node: '>=12.0.0'}
-    peerDependencies:
-      picomatch: ^3 || ^4
-    peerDependenciesMeta:
-      picomatch:
-        optional: true
-
-  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/2c6efd9861f57657f2898f381fb771018e0e6b66#path:/packages/family:
-    resolution: {gitHosted: true, integrity: sha512-05LOjat7kfX/fMuN58lpvaIqQfsMOaDeQrbdjBA9KZx1Hj/q2RSV4tQfi5dL0inuLeBlPDb+iPLpvxm/ImCP1w==, path: /packages/family, tarball: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/2c6efd9861f57657f2898f381fb771018e0e6b66}
+  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/70d696962356af5a100c970f0f4b0187fdafcccf#path:/packages/family:
+    resolution: {gitHosted: true, integrity: sha512-fvJF1627GWQXQlgrZQyc4EQQERmVemsaxsLj/y/qfMaWd6MA5pnfzJcWNtp82x/AiGYvAJAKsgWBmBTzWJ7WCQ==, path: /packages/family, tarball: https://codeload.github.com/sebastian-software/ferramenta/tar.gz/70d696962356af5a100c970f0f4b0187fdafcccf}
     version: 2.0.0
     engines: {node: '>=20.11.0'}
     peerDependencies:
@@ -7050,11 +7041,7 @@ snapshots:
 
   fast-levenshtein@2.0.6: {}
 
-  fdir@6.5.0(picomatch@4.0.7):
-    optionalDependencies:
-      picomatch: 4.0.7
-
-  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/2c6efd9861f57657f2898f381fb771018e0e6b66#path:/packages/family(ardo@6.4.1(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3))(react@19.3.1):
+  ferramenta-family@https://codeload.github.com/sebastian-software/ferramenta/tar.gz/70d696962356af5a100c970f0f4b0187fdafcccf#path:/packages/family(ardo@6.4.1(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3))(react@19.3.1):
     dependencies:
       ardo: 6.4.1(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(supports-color@9.4.0)(typescript@6.0.3)
       react: 19.3.1
@@ -8588,10 +8575,7 @@ snapshots:
     dependencies:
       convert-hrtime: 5.0.0
 
-  tinyglobby@0.2.17:
-    dependencies:
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
+  tinyglobby@0.2.17: {}
 
   tinypool@2.1.2: {}
 
