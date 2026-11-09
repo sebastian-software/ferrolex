@@ -72,7 +72,7 @@ ferrolex-node = { path = "crates/ferrolex-node", version = "0.4.0" }
 ferrolex-python = { path = "crates/ferrolex-python", version = "0.4.0" }
 ferrolex-suggest = { path = "crates/ferrolex-suggest", version = "0.4.0" }
 ferrolex-text = { path = "crates/ferrolex-text", version = "0.4.0" }
-fs2 = "=0.4.3"
+fs2 = "0.4.3"
 fst = "0.4.7"
 lsp-server = "=0.8.0"
 napi = { version = "=3.12.1", default-features = false, features = ["dyn-symbols", "napi8"] }
