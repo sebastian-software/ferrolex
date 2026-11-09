@@ -18,8 +18,8 @@
     "verify": "pnpm sample:pins && pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm browser:check"
   },
   "dependencies": {
-    "ardo": "^6.0.0",
-    "ferramenta-family": "github:sebastian-software/ferramenta#f9081592db47d051d95e2c9b2e00905103d71213&path:/packages/family"
+    "ardo": "^6.4.1",
+    "ferramenta-family": "github:sebastian-software/ferramenta#70d696962356af5a100c970f0f4b0187fdafcccf&path:/packages/family"
   },
   "devDependencies": {
     "@sebastian-software/standards": "0.11.1",
