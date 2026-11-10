@@ -1,13 +1,12 @@
 {
   "version": "0.2",
-  "ignorePaths": [".standards/"],
+  "ignorePaths": [],
   "words": [
     "forgejo",
     "lockfile",
     "oxfmt",
     "oxlint",
     "pnpm",
-    "repometa",
     "ardo",
     "ferramenta",
     "ferrolex",

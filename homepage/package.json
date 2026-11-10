@@ -22,7 +22,6 @@
     "ferramenta-family": "github:sebastian-software/ferramenta#70d696962356af5a100c970f0f4b0187fdafcccf&path:/packages/family"
   },
   "devDependencies": {
-    "@sebastian-software/standards": "0.11.1",
     "axe-core": "4.13.0",
     "eslint": "^10.11.0",
     "eslint-config-setup": "^0.5.2",
