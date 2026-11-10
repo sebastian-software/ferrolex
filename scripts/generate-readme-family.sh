@@ -6,7 +6,7 @@
 # sebastian-software/ferramenta is the single source of truth for family
 # membership, job wording, grouping, and links, and its ferramenta-readme
 # generator renders the block from it. The company footer below the block is a
-# separate, standards-owned concern; scripts/mirror-readme-footer.py handles it.
+# separate generated surface; scripts/mirror-readme-footer.py handles it.
 #
 # Needs network access, pnpm, and Node.js 22.13 or newer.
 set -euo pipefail
