@@ -8,8 +8,11 @@ pull-request titles are checked in CI. Release Please creates one product
 release PR for the whole Rust workspace. All public workspace crates share a
 version and release record through the root `ferrolex` umbrella package. The
 `Release version contract` CI gate verifies member versions, internal Cargo
-requirements, the release manifest, and the explicit Cargo-workspace release
-plugin configuration on every change.
+requirements, the release manifest, and the root-only Release Please configuration on every change. The Rust
+strategy updates every member manifest and Cargo.lock; explicit TOML extra-files
+update inherited internal requirements in `[workspace.dependencies]`. Do not add
+the independent-package `cargo-workspace` plugin: it generates per-crate release
+records and candidates instead of one coordinated product release.
 
 ## Releasing
 

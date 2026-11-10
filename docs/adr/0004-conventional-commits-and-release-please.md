@@ -18,6 +18,10 @@ configuration and executable release contracts remain owned by this project.
   [Conventional Commits](https://www.conventionalcommits.org/) specification.
 - Releases are automated with Release Please using the project-owned
   configuration and coordinated release contracts.
+- The single root Rust strategy owns the coordinated workspace release. Its
+  native manifest and lockfile updates are combined with explicit TOML extra-files
+  for inherited internal requirements. The independent-package `cargo-workspace`
+  plugin is incompatible with the root-only release record and is not enabled.
 - Version bumps and changelogs are derived from commit messages; commit
   messages are therefore treated as a machine-read API, not free-form prose.
 

@@ -33,7 +33,8 @@ def cargo_metadata() -> dict[str, Any]:
 def main() -> int:
     errors: list[str] = []
     with (ROOT / "Cargo.toml").open("rb") as source:
-        root_version = tomllib.load(source)["package"]["version"]
+        root_manifest = tomllib.load(source)
+    root_version = root_manifest["package"]["version"]
 
     release_config = load_json(ROOT / "release-please-config.json")
     configured_packages = release_config.get("packages", {})
@@ -84,23 +85,22 @@ def main() -> int:
         ("editors/vscode/ferrolex/package-lock.json", "$.version"),
         ("editors/vscode/ferrolex/package-lock.json", "$['packages']['']['version']"),
     }
+    expected_release_paths.update(
+        ("Cargo.toml", f"$['workspace']['dependencies']['{name}']['version']")
+        for name, dependency in root_manifest["workspace"]["dependencies"].items()
+        if isinstance(dependency, dict) and "path" in dependency
+    )
     if configured_release_paths != expected_release_paths:
         errors.append(
             "release-please extra-files must update every Node.js, Python, and "
-            "VS Code version field"
+            "VS Code version field and inherited Cargo requirement"
         )
 
-    workspace_plugins = [
-        plugin
-        for plugin in release_config.get("plugins", [])
-        if isinstance(plugin, dict) and plugin.get("type") == "cargo-workspace"
-    ]
-    if len(workspace_plugins) != 1:
-        errors.append("release-please must configure exactly one cargo-workspace plugin")
-    elif workspace_plugins[0].get("updateAllPackages") is not True:
-        errors.append("cargo-workspace must set updateAllPackages to true")
-    elif workspace_plugins[0].get("merge", True) is not True:
-        errors.append("cargo-workspace must keep its release candidate merged")
+    # The Rust strategy already updates every workspace member. The optional
+    # cargo-workspace plugin adds independent per-crate release records, which
+    # contradict this repository's coordinated root-only release contract.
+    if release_config.get("plugins"):
+        errors.append("the coordinated root release must not use workspace plugins")
 
     release_manifest = load_json(ROOT / ".release-please-manifest.json")
     if release_manifest != {".": root_version}:
@@ -169,6 +169,9 @@ def main() -> int:
     if root_version in node_loader:
         errors.append("the generated Node.js loader must not embed the release version")
 
+    # Capture the checked-in lock before Cargo metadata can refresh it.
+    with (ROOT / "Cargo.lock").open("rb") as source:
+        locked_packages = tomllib.load(source)["package"]
     metadata = cargo_metadata()
     workspace_ids = set(metadata["workspace_members"])
     packages = [
@@ -176,6 +179,12 @@ def main() -> int:
     ]
     workspace_names = {package["name"] for package in packages}
     internal_requirements = 0
+    for package in locked_packages:
+        if package["name"] in workspace_names and package["version"] != root_version:
+            errors.append(
+                f"Cargo.lock has {package['name']} {package['version']}, "
+                f"expected workspace version {root_version}"
+            )
 
     for package in sorted(packages, key=lambda item: item["name"]):
         if package["version"] != root_version:
