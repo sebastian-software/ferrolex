@@ -3,12 +3,6 @@
   "bootstrap-sha": "677e61027108f91ab226bd5ab854d5466a60049c",
   "release-type": "rust",
   "include-component-in-tag": true,
-  "plugins": [
-    {
-      "type": "cargo-workspace",
-      "updateAllPackages": true
-    }
-  ],
   "packages": {
     ".": {
       "component": "ferrolex",
@@ -128,6 +122,66 @@
           "type": "json",
           "path": "editors/vscode/ferrolex/package-lock.json",
           "jsonpath": "$['packages']['']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-code']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-compiler']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-core']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-dictionaries']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-ffi']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-hunspell']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-lsp']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-node']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-python']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-suggest']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$['workspace']['dependencies']['ferrolex-text']['version']"
         }
       ]
     }

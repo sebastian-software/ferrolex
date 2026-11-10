@@ -32,6 +32,14 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: python3 scripts/check-release-version-contract.py
       - run: python3 scripts/publish-crates.py --check
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Exercise release preparation and refresh
+        # Keep this engine version aligned with the pinned release-please action.
+        run: |
+          npm install --prefix "$RUNNER_TEMP/release-preparation-test" --ignore-scripts --no-package-lock --no-audit --no-fund release-please@17.6.0
+          node scripts/test-release-preparation.cjs "$RUNNER_TEMP/release-preparation-test"
 
   readme-brand-contract:
     name: README and brand contract
