@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -96,56 +96,42 @@ impl State {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| std::path::Path::new("."));
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        // Resolve aliases before choosing the lock and replacing the target, so a
-        // configured symlink keeps pointing at the same dictionary.
-        let path = match fs::canonicalize(path) {
-            Ok(path) => path,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => fs::canonicalize(parent)
-                .map_err(|error| error.to_string())?
-                .join(path.file_name().ok_or("dictionary path has no file name")?),
-            Err(error) => return Err(error.to_string()),
-        };
-        let parent = path.parent().ok_or("dictionary path has no parent")?;
-        // A separate, persistent lock file remains stable across atomic replacements.
-        let mut lock_name = path.as_os_str().to_os_string();
-        lock_name.push(".lock");
-        let lock = OpenOptions::new()
+        // Lock the dictionary itself so hard links and symlinks share the lock,
+        // and preserve its permissions and identity when adding words.
+        let mut file = OpenOptions::new()
+            .read(true)
+            .append(true)
             .create(true)
-            .truncate(false)
-            .write(true)
-            .open(lock_name)
+            .open(path)
             .map_err(|error| error.to_string())?;
-        lock.lock().map_err(|error| error.to_string())?;
-        let mut text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(error) => return Err(error.to_string()),
-        };
+        file.lock().map_err(|error| error.to_string())?;
+        let mut text = String::new();
+        file.read_to_string(&mut text)
+            .map_err(|error| error.to_string())?;
+        let original_len = text.len() as u64;
         let merged = UserDictionary::from_text(Normalization::Exact, &text);
+        let mut additions = String::new();
         for word in &self.pending_words {
             if merged.insert(word).map_err(|error| error.to_string())? {
-                if !text.is_empty() && !text.ends_with('\n') {
-                    text.push('\n');
+                if additions.is_empty() && !text.is_empty() && !text.ends_with('\n') {
+                    additions.push('\n');
                 }
-                text.push_str(word);
-                text.push('\n');
+                additions.push_str(word);
+                additions.push('\n');
             }
         }
-        let mut temporary =
-            tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
-        if let Ok(metadata) = fs::metadata(&path) {
-            temporary
-                .as_file()
-                .set_permissions(metadata.permissions())
-                .map_err(|error| error.to_string())?;
+        if let Err(error) = file
+            .write_all(additions.as_bytes())
+            .and_then(|()| file.sync_all())
+        {
+            // Restore the original length after a partial append where possible.
+            if let Err(rollback) = file.set_len(original_len) {
+                return Err(format!(
+                    "{error}; could not roll back partial write: {rollback}"
+                ));
+            }
+            return Err(error.to_string());
         }
-        temporary
-            .write_all(text.as_bytes())
-            .and_then(|()| temporary.as_file().sync_all())
-            .map_err(|error| error.to_string())?;
-        temporary
-            .persist(&path)
-            .map_err(|error| error.to_string())?;
         self.user = Arc::new(merged);
         self.pending_words.clear();
         Ok(())
@@ -601,6 +587,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("words");
         std::fs::write(&path, "# manual comment\noriginal\n").unwrap();
+        let alias = dir.path().join("alias");
+        std::fs::hard_link(&path, &alias).unwrap();
         let exe = std::env::current_exe().unwrap();
         let mut children: Vec<_> = ["alpha", "beta"]
             .iter()
@@ -611,7 +599,10 @@ mod tests {
                         "--exact",
                         "tests::concurrent_process_additions_preserve_manual_content",
                     ])
-                    .env("FERROLEX_TEST_DICTIONARY", &path)
+                    .env(
+                        "FERROLEX_TEST_DICTIONARY",
+                        if *word == "alpha" { &path } else { &alias },
+                    )
                     .env("FERROLEX_TEST_WORD", word)
                     .spawn()
                     .unwrap()
@@ -627,6 +618,7 @@ mod tests {
         }
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("# manual comment\noriginal\nmanual edit\n"));
+        assert_eq!(std::fs::read_to_string(alias).unwrap(), text);
         let state = State::new(Config {
             user_dictionary_path: Some(path),
             ..Config::default()
