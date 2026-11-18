@@ -492,6 +492,7 @@ dependencies = [
  "lsp-server",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

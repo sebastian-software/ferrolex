@@ -28,6 +28,7 @@ ferrolex-suggest.workspace = true
 lsp-server.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
