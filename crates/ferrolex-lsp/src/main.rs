@@ -522,27 +522,48 @@ fn byte_range_to_lsp(text: &str, range: std::ops::Range<usize>) -> Value {
     json!({"start": byte_to_position(text, range.start), "end": byte_to_position(text, range.end)})
 }
 
+// Each range excludes its line ending; CRLF is one line break.
+fn line_ranges(text: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        if start > text.len() {
+            return None;
+        }
+        let line_start = start;
+        let ending = text.as_bytes()[start..]
+            .iter()
+            .position(|byte| matches!(byte, b'\r' | b'\n'));
+        let end = ending.map_or(text.len(), |offset| start + offset);
+        start = if end == text.len() {
+            text.len() + 1
+        } else if text.as_bytes()[end..].starts_with(b"\r\n") {
+            end + 2
+        } else {
+            end + 1
+        };
+        Some(line_start..end)
+    })
+}
+
 fn byte_to_position(text: &str, byte: usize) -> Value {
-    let before = &text[..byte];
-    let line = before.bytes().filter(|byte| *byte == b'\n').count();
-    let start = before.rfind('\n').map_or(0, |index| index + 1);
-    json!({"line": line, "character": text[start..byte].encode_utf16().count()})
+    let (line, range) = line_ranges(text)
+        .enumerate()
+        .take_while(|(_, range)| range.start <= byte)
+        .last()
+        .expect("the first line starts at byte zero");
+    let end = byte.min(range.end);
+    json!({"line": line, "character": text[range.start..end].encode_utf16().count()})
 }
 
 fn position_to_byte(text: &str, position: LspPosition) -> Result<usize, String> {
-    let start = text
-        .split_inclusive('\n')
-        .take(position.line as usize)
-        .map(str::len)
-        .sum::<usize>();
-    if start > text.len() {
-        return Err("position line is outside the document".to_owned());
-    }
-    let line = text[start..].split('\n').next().unwrap_or_default();
+    let range = line_ranges(text)
+        .nth(position.line as usize)
+        .ok_or_else(|| "position line is outside the document".to_owned())?;
+    let line = &text[range.clone()];
     let mut units = 0u32;
     for (offset, character) in line.char_indices() {
         if units == position.character {
-            return Ok(start + offset);
+            return Ok(range.start + offset);
         }
         units += match character.len_utf16() {
             1 => 1,
@@ -554,12 +575,16 @@ fn position_to_byte(text: &str, position: LspPosition) -> Result<usize, String> 
         }
     }
     (units == position.character)
-        .then_some(start + line.len())
+        .then_some(range.end)
         .ok_or_else(|| "position character is outside the line".to_owned())
 }
 
 fn line_start_byte(text: &str, byte: usize) -> usize {
-    text[..byte].rfind('\n').map_or(0, |index| index + 1)
+    line_ranges(text)
+        .take_while(|range| range.start <= byte)
+        .last()
+        .expect("the first line starts at byte zero")
+        .start
 }
 
 #[cfg(test)]
@@ -721,6 +746,116 @@ mod tests {
             Ok(4)
         );
         assert_eq!(byte_to_position("😀", 4)["character"], 2);
+    }
+
+    #[test]
+    fn line_endings_preserve_diagnostics_edits_and_ignore_actions() {
+        for ending in ["\n", "\r\n", "\r"] {
+            let mut state = State::new(Config {
+                words: vec!["hello".to_owned(), "world".to_owned()],
+                ..Config::default()
+            });
+            let uri = "file:///test";
+            state.open(uri.to_owned(), 1, format!("hello{ending}😀 wrld"));
+            let diagnostics = state.diagnostics(uri);
+            assert_eq!(diagnostics.len(), 1);
+            let range = serde_json::json!({"start": {"line": 1, "character": 3}, "end": {"line": 1, "character": 7}});
+            assert_eq!(diagnostics[0]["range"], range);
+            let edit_range = LspRange {
+                start: LspPosition {
+                    line: 1,
+                    character: 3,
+                },
+                end: LspPosition {
+                    line: 1,
+                    character: 7,
+                },
+            };
+            let actions = state.code_actions(
+                uri,
+                LspRange {
+                    start: LspPosition {
+                        line: 1,
+                        character: 3,
+                    },
+                    end: LspPosition {
+                        line: 1,
+                        character: 7,
+                    },
+                },
+            );
+            let ignore = actions
+                .iter()
+                .find(|action| {
+                    action["title"]
+                        .as_str()
+                        .is_some_and(|title| title.starts_with("Ignore "))
+                })
+                .unwrap();
+            assert_eq!(
+                ignore["edit"]["changes"][uri][0]["range"],
+                serde_json::json!({"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 0}})
+            );
+            state
+                .change(
+                    uri,
+                    2,
+                    vec![TextChange {
+                        range: Some(edit_range),
+                        text: "world".to_owned(),
+                    }],
+                )
+                .unwrap();
+            assert_eq!(state.documents[uri].text, format!("hello{ending}😀 world"));
+            assert!(state.diagnostics(uri).is_empty());
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_utf16_positions_and_accepts_trailing_empty_lines() {
+        for ending in ["\n", "\r\n", "\r"] {
+            let text = format!("😀{ending}");
+            assert_eq!(
+                position_to_byte(
+                    &text,
+                    LspPosition {
+                        line: 1,
+                        character: 0
+                    }
+                ),
+                Ok(text.len())
+            );
+            assert!(
+                position_to_byte(
+                    &text,
+                    LspPosition {
+                        line: 2,
+                        character: 0
+                    }
+                )
+                .is_err()
+            );
+            assert!(
+                position_to_byte(
+                    &text,
+                    LspPosition {
+                        line: 0,
+                        character: 1
+                    }
+                )
+                .is_err()
+            );
+            assert!(
+                position_to_byte(
+                    &text,
+                    LspPosition {
+                        line: 0,
+                        character: 3
+                    }
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
