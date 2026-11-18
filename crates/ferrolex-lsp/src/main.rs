@@ -4,7 +4,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -42,6 +43,7 @@ struct State {
     comment_prefix: String,
     user_dictionary_path: Option<PathBuf>,
     documents: BTreeMap<String, OpenDocument>,
+    pending_words: BTreeSet<String>,
 }
 
 impl State {
@@ -53,6 +55,7 @@ impl State {
             comment_prefix: config.comment_prefix.unwrap_or_else(|| "//".to_owned()),
             user_dictionary_path: config.user_dictionary_path,
             documents: BTreeMap::new(),
+            pending_words: BTreeSet::new(),
         };
         state.reload_user_dictionary();
         state
@@ -67,6 +70,7 @@ impl State {
             self.comment_prefix = prefix;
         }
         if config.user_dictionary_path.is_some() {
+            self.pending_words.clear();
             self.user_dictionary_path = config.user_dictionary_path;
             self.user = Arc::new(UserDictionary::new(Normalization::Exact));
             self.reload_user_dictionary();
@@ -82,14 +86,55 @@ impl State {
         }
     }
 
-    fn persist_user_dictionary(&self) -> Result<(), String> {
+    fn persist_user_dictionary(&mut self) -> Result<(), String> {
         let Some(path) = &self.user_dictionary_path else {
+            self.pending_words.clear();
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        // Lock the dictionary itself so hard links and symlinks share the lock,
+        // and preserve its permissions and identity when adding words.
+        let mut file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(path)
+            .map_err(|error| error.to_string())?;
+        file.lock().map_err(|error| error.to_string())?;
+        let mut text = String::new();
+        file.read_to_string(&mut text)
+            .map_err(|error| error.to_string())?;
+        let original_len = text.len() as u64;
+        let merged = UserDictionary::from_text(Normalization::Exact, &text);
+        let mut additions = String::new();
+        for word in &self.pending_words {
+            if merged.insert(word).map_err(|error| error.to_string())? {
+                if additions.is_empty() && !text.is_empty() && !text.ends_with('\n') {
+                    additions.push('\n');
+                }
+                additions.push_str(word);
+                additions.push('\n');
+            }
         }
-        fs::write(path, self.user.to_text()).map_err(|error| error.to_string())
+        if let Err(error) = file
+            .write_all(additions.as_bytes())
+            .and_then(|()| file.sync_all())
+        {
+            // Restore the original length after a partial append where possible.
+            if let Err(rollback) = file.set_len(original_len) {
+                return Err(format!(
+                    "{error}; could not roll back partial write: {rollback}"
+                ));
+            }
+            return Err(error.to_string());
+        }
+        self.user = Arc::new(merged);
+        self.pending_words.clear();
+        Ok(())
     }
 
     fn findings<'text>(&self, text: &'text str) -> Vec<Finding<'text>> {
@@ -196,6 +241,7 @@ impl State {
 
     fn add_user_word(&mut self, word: &str) -> Result<(), String> {
         self.user.insert(word).map_err(|error| error.to_string())?;
+        self.pending_words.insert(word.trim().to_owned());
         self.persist_user_dictionary()
     }
 }
@@ -521,6 +567,120 @@ mod tests {
     use super::{
         Config, LspPosition, LspRange, State, TextChange, byte_to_position, position_to_byte,
     };
+
+    // Always reap children, including when a handshake or assertion fails.
+    struct TestChildren(Vec<std::process::Child>);
+
+    impl Drop for TestChildren {
+        fn drop(&mut self) {
+            for child in &mut self.0 {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_process_additions_preserve_manual_content() {
+        if let Ok(path) = std::env::var("FERROLEX_TEST_DICTIONARY") {
+            let mut state = State::new(Config {
+                user_dictionary_path: Some(path.into()),
+                ..Config::default()
+            });
+            let word = std::env::var("FERROLEX_TEST_WORD").unwrap();
+            // Both children have loaded their initial snapshots before the parent releases them.
+            std::fs::write(format!("{word}.ready"), "").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !std::path::Path::new("release").exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "parent did not release children"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            state.add_user_word(&word).unwrap();
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("words");
+        std::fs::write(&path, "# manual comment\noriginal\n").unwrap();
+        let alias = dir.path().join("alias");
+        std::fs::hard_link(&path, &alias).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let mut children = TestChildren(Vec::new());
+        for word in ["alpha", "beta"] {
+            children.0.push(
+                std::process::Command::new(&exe)
+                    .current_dir(dir.path())
+                    .args([
+                        "--exact",
+                        "tests::concurrent_process_additions_preserve_manual_content",
+                    ])
+                    .env(
+                        "FERROLEX_TEST_DICTIONARY",
+                        if word == "alpha" { &path } else { &alias },
+                    )
+                    .env("FERROLEX_TEST_WORD", word)
+                    .spawn()
+                    .unwrap(),
+            );
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !dir.path().join("alpha.ready").exists() || !dir.path().join("beta.ready").exists() {
+            for child in &mut children.0 {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "child exited before handshake"
+                );
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "children did not become ready"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::fs::write(&path, "# manual comment\noriginal\nmanual edit").unwrap();
+        std::fs::write(dir.path().join("release"), "").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        for child in &mut children.0 {
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(status.success(), "child failed: {status}");
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "child did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# manual comment\noriginal\nmanual edit\n"));
+        assert_eq!(std::fs::read_to_string(alias).unwrap(), text);
+        let state = State::new(Config {
+            user_dictionary_path: Some(path),
+            ..Config::default()
+        });
+        assert!(state.findings("original alpha beta").is_empty());
+    }
+
+    #[test]
+    fn failed_write_keeps_pending_words_for_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("words");
+        std::fs::create_dir(&path).unwrap();
+        let mut state = State::new(Config {
+            user_dictionary_path: Some(path.clone()),
+            ..Config::default()
+        });
+        assert!(state.add_user_word("first").is_err());
+        std::fs::remove_dir(&path).unwrap();
+        state.add_user_word("second").unwrap();
+        assert!(state.findings("first second").is_empty());
+        let reloaded = State::new(Config {
+            user_dictionary_path: Some(path),
+            ..Config::default()
+        });
+        assert!(reloaded.findings("first second").is_empty());
+    }
 
     #[test]
     fn incrementally_reanalyzes_utf16_documents() {
