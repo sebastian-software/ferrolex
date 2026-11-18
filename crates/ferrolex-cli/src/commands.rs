@@ -515,14 +515,41 @@ pub(crate) fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> 
             )
         }
     };
+    let sources: &[&Path] = match &command.input {
+        CompileInput::WordList(path) => &[path],
+        CompileInput::Hunspell { aff_path, dic_path } => &[aff_path, dic_path],
+    };
+    let write_error = |source| CliError::WriteArtifact {
+        path: command.output_path.clone(),
+        source,
+    };
+    // Check the same open file that will receive the bytes, before truncating it.
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&command.output_path)
+        .map_err(write_error)?;
+    let mut output = same_file::Handle::from_file(file).map_err(write_error)?;
+    for path in sources {
+        let source = same_file::Handle::from_path(path).map_err(write_error)?;
+        if source == output {
+            return Err(CliError::Usage(format!(
+                "output `{}` refers to source dictionary `{}`",
+                command.output_path.display(),
+                path.display()
+            )));
+        }
+    }
     eprintln!(
         "writing compiled artifact to {}...",
         command.output_path.display()
     );
-    fs::write(&command.output_path, compiled).map_err(|source| CliError::WriteArtifact {
-        path: command.output_path.clone(),
-        source,
-    })?;
+    let file = output.as_file_mut();
+    if file.metadata().map_err(write_error)?.is_file() {
+        file.set_len(0).map_err(write_error)?;
+    }
+    file.write_all(&compiled).map_err(write_error)?;
 
     println!(
         "compiled: {} ({description})",

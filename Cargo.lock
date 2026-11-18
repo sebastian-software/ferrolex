@@ -416,6 +416,7 @@ dependencies = [
  "ferrolex-suggest",
  "ferrolex-text",
  "fs2",
+ "same-file",
  "serde_json",
 ]
 
