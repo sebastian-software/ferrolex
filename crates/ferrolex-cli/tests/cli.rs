@@ -207,6 +207,37 @@ fn compile_rejects_output_aliases_without_changing_sources() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn compile_replaces_an_existing_write_only_artifact() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = temporary_directory("compile-write-only-output");
+    let output = directory.join("existing.flexdic");
+    fs::write(directory.join("words.txt"), "alpha\nbeta\n").unwrap();
+    let args = [
+        "compile",
+        "--dictionary",
+        "words.txt",
+        "-o",
+        "existing.flexdic",
+    ];
+    assert!(run_in(&directory, &args).status.success());
+    let expected = fs::read(&output).unwrap();
+
+    fs::write(&output, vec![0; expected.len() + 100]).unwrap();
+    fs::set_permissions(&output, fs::Permissions::from_mode(0o200)).unwrap();
+    let result = run_in(&directory, &args);
+    fs::set_permissions(&output, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(fs::read(output).unwrap(), expected);
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn inspect_labels_hunspell_features_as_format_capabilities() {
     let directory = temporary_directory("inspect-capabilities");

@@ -515,46 +515,41 @@ pub(crate) fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> 
             )
         }
     };
-    // Compare file identities, not path spellings, so symlinks and hard links
-    // cannot cause the output to overwrite either source dictionary.
     let sources: &[&Path] = match &command.input {
         CompileInput::WordList(path) => &[path],
         CompileInput::Hunspell { aff_path, dic_path } => &[aff_path, dic_path],
     };
-    match fs::metadata(&command.output_path) {
-        Ok(_) => {
-            for source_path in sources {
-                let same = same_file::is_same_file(source_path, &command.output_path).map_err(
-                    |source| CliError::WriteArtifact {
-                        path: command.output_path.clone(),
-                        source,
-                    },
-                )?;
-                if same {
-                    return Err(CliError::Usage(format!(
-                        "output `{}` refers to source dictionary `{}`",
-                        command.output_path.display(),
-                        source_path.display()
-                    )));
-                }
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(source) => {
-            return Err(CliError::WriteArtifact {
-                path: command.output_path.clone(),
-                source,
-            });
+    let write_error = |source| CliError::WriteArtifact {
+        path: command.output_path.clone(),
+        source,
+    };
+    // Check the same open file that will receive the bytes, before truncating it.
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&command.output_path)
+        .map_err(write_error)?;
+    let mut output = same_file::Handle::from_file(file).map_err(write_error)?;
+    for path in sources {
+        let source = same_file::Handle::from_path(path).map_err(write_error)?;
+        if source == output {
+            return Err(CliError::Usage(format!(
+                "output `{}` refers to source dictionary `{}`",
+                command.output_path.display(),
+                path.display()
+            )));
         }
     }
     eprintln!(
         "writing compiled artifact to {}...",
         command.output_path.display()
     );
-    fs::write(&command.output_path, compiled).map_err(|source| CliError::WriteArtifact {
-        path: command.output_path.clone(),
-        source,
-    })?;
+    let file = output.as_file_mut();
+    if file.metadata().map_err(write_error)?.is_file() {
+        file.set_len(0).map_err(write_error)?;
+    }
+    file.write_all(&compiled).map_err(write_error)?;
 
     println!(
         "compiled: {} ({description})",
