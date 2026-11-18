@@ -515,6 +515,38 @@ pub(crate) fn compile(command: &CompileCommand) -> Result<RunOutcome, CliError> 
             )
         }
     };
+    // Compare file identities, not path spellings, so symlinks and hard links
+    // cannot cause the output to overwrite either source dictionary.
+    let sources: &[&Path] = match &command.input {
+        CompileInput::WordList(path) => &[path],
+        CompileInput::Hunspell { aff_path, dic_path } => &[aff_path, dic_path],
+    };
+    match fs::metadata(&command.output_path) {
+        Ok(_) => {
+            for source_path in sources {
+                let same = same_file::is_same_file(source_path, &command.output_path).map_err(
+                    |source| CliError::WriteArtifact {
+                        path: command.output_path.clone(),
+                        source,
+                    },
+                )?;
+                if same {
+                    return Err(CliError::Usage(format!(
+                        "output `{}` refers to source dictionary `{}`",
+                        command.output_path.display(),
+                        source_path.display()
+                    )));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(CliError::WriteArtifact {
+                path: command.output_path.clone(),
+                source,
+            });
+        }
+    }
     eprintln!(
         "writing compiled artifact to {}...",
         command.output_path.display()

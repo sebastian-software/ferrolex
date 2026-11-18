@@ -148,6 +148,66 @@ fn compile_reports_long_running_phases_on_stderr() {
 }
 
 #[test]
+fn compile_rejects_output_aliases_without_changing_sources() {
+    let directory = temporary_directory("compile-source-alias");
+    let words = b"alpha\nbeta\n";
+    let aff = b"SET UTF-8\n";
+    let dic = b"1\nbook\n";
+    fs::write(directory.join("words.txt"), words).unwrap();
+    fs::write(directory.join("fixture.aff"), aff).unwrap();
+    fs::write(directory.join("fixture.dic"), dic).unwrap();
+    fs::hard_link(directory.join("words.txt"), directory.join("hardlink.txt")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("words.txt", directory.join("symlink.txt")).unwrap();
+
+    let outputs = vec!["words.txt", "./words.txt", "hardlink.txt"];
+    #[cfg(unix)]
+    let outputs = {
+        let mut outputs = outputs;
+        outputs.push("symlink.txt");
+        outputs
+    };
+    for output in outputs {
+        let result = run_in(
+            &directory,
+            &["compile", "--dictionary", "words.txt", "-o", output],
+        );
+        assert!(!result.status.success(), "{output} must be rejected");
+        assert!(String::from_utf8_lossy(&result.stderr).contains("refers to source dictionary"));
+        assert_eq!(fs::read(directory.join("words.txt")).unwrap(), words);
+    }
+    for output in ["fixture.aff", "./fixture.dic"] {
+        let result = run_in(
+            &directory,
+            &["compile", "fixture.aff", "fixture.dic", "-o", output],
+        );
+        assert!(!result.status.success(), "{output} must be rejected");
+        assert!(String::from_utf8_lossy(&result.stderr).contains("refers to source dictionary"));
+        assert_eq!(fs::read(directory.join("fixture.aff")).unwrap(), aff);
+        assert_eq!(fs::read(directory.join("fixture.dic")).unwrap(), dic);
+    }
+    for args in [
+        vec![
+            "compile",
+            "--dictionary",
+            "words.txt",
+            "-o",
+            "words.flexdic",
+        ],
+        vec![
+            "compile",
+            "fixture.aff",
+            "fixture.dic",
+            "-o",
+            "fixture.flexhsp",
+        ],
+    ] {
+        assert!(run_in(&directory, &args).status.success());
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn inspect_labels_hunspell_features_as_format_capabilities() {
     let directory = temporary_directory("inspect-capabilities");
     fs::write(directory.join("fixture.aff"), "SET UTF-8\n").expect("affix fixture is written");
