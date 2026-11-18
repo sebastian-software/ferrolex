@@ -568,6 +568,18 @@ mod tests {
         Config, LspPosition, LspRange, State, TextChange, byte_to_position, position_to_byte,
     };
 
+    // Always reap children, including when a handshake or assertion fails.
+    struct TestChildren(Vec<std::process::Child>);
+
+    impl Drop for TestChildren {
+        fn drop(&mut self) {
+            for child in &mut self.0 {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
     #[test]
     fn concurrent_process_additions_preserve_manual_content() {
         if let Ok(path) = std::env::var("FERROLEX_TEST_DICTIONARY") {
@@ -578,8 +590,13 @@ mod tests {
             let word = std::env::var("FERROLEX_TEST_WORD").unwrap();
             // Both children have loaded their initial snapshots before the parent releases them.
             std::fs::write(format!("{word}.ready"), "").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while !std::path::Path::new("release").exists() {
-                std::thread::yield_now();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "parent did not release children"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
             state.add_user_word(&word).unwrap();
             return;
@@ -590,9 +607,9 @@ mod tests {
         let alias = dir.path().join("alias");
         std::fs::hard_link(&path, &alias).unwrap();
         let exe = std::env::current_exe().unwrap();
-        let mut children: Vec<_> = ["alpha", "beta"]
-            .iter()
-            .map(|word| {
+        let mut children = TestChildren(Vec::new());
+        for word in ["alpha", "beta"] {
+            children.0.push(
                 std::process::Command::new(&exe)
                     .current_dir(dir.path())
                     .args([
@@ -601,20 +618,39 @@ mod tests {
                     ])
                     .env(
                         "FERROLEX_TEST_DICTIONARY",
-                        if *word == "alpha" { &path } else { &alias },
+                        if word == "alpha" { &path } else { &alias },
                     )
                     .env("FERROLEX_TEST_WORD", word)
                     .spawn()
-                    .unwrap()
-            })
-            .collect();
+                    .unwrap(),
+            );
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while !dir.path().join("alpha.ready").exists() || !dir.path().join("beta.ready").exists() {
-            std::thread::yield_now();
+            for child in &mut children.0 {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "child exited before handshake"
+                );
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "children did not become ready"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         std::fs::write(&path, "# manual comment\noriginal\nmanual edit").unwrap();
         std::fs::write(dir.path().join("release"), "").unwrap();
-        for child in &mut children {
-            assert!(child.wait().unwrap().success());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        for child in &mut children.0 {
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(status.success(), "child failed: {status}");
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "child did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("# manual comment\noriginal\nmanual edit\n"));
