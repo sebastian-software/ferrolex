@@ -545,14 +545,45 @@ fn line_ranges(text: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ 
     })
 }
 
+// The byte between CR and LF belongs to the preceding line, since LSP
+// positions cannot address the interior of a line ending.
+fn line_at_byte(text: &str, byte: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let mut line = 0;
+    let mut start = 0;
+    let mut index = 0;
+    while index < byte {
+        match bytes[index] {
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                if index + 1 == byte {
+                    break;
+                }
+                index += 2;
+                line += 1;
+                start = index;
+            }
+            b'\r' | b'\n' => {
+                index += 1;
+                line += 1;
+                start = index;
+            }
+            _ => index += 1,
+        }
+    }
+    (line, start)
+}
+
 fn byte_to_position(text: &str, byte: usize) -> Value {
-    let (line, range) = line_ranges(text)
-        .enumerate()
-        .take_while(|(_, range)| range.start <= byte)
-        .last()
-        .expect("the first line starts at byte zero");
-    let end = byte.min(range.end);
-    json!({"line": line, "character": text[range.start..end].encode_utf16().count()})
+    let (line, start) = line_at_byte(text, byte);
+    let end = if byte > start
+        && text.as_bytes()[byte - 1] == b'\r'
+        && text.as_bytes().get(byte) == Some(&b'\n')
+    {
+        byte - 1
+    } else {
+        byte
+    };
+    json!({"line": line, "character": text[start..end].encode_utf16().count()})
 }
 
 fn position_to_byte(text: &str, position: LspPosition) -> Result<usize, String> {
@@ -580,11 +611,7 @@ fn position_to_byte(text: &str, position: LspPosition) -> Result<usize, String> 
 }
 
 fn line_start_byte(text: &str, byte: usize) -> usize {
-    line_ranges(text)
-        .take_while(|range| range.start <= byte)
-        .last()
-        .expect("the first line starts at byte zero")
-        .start
+    line_at_byte(text, byte).1
 }
 
 #[cfg(test)]
@@ -809,6 +836,20 @@ mod tests {
             assert_eq!(state.documents[uri].text, format!("hello{ending}😀 world"));
             assert!(state.diagnostics(uri).is_empty());
         }
+    }
+
+    #[test]
+    fn crlf_interior_maps_to_the_end_of_the_preceding_line() {
+        let text = "😀\r\nnext";
+        assert_eq!(
+            byte_to_position(text, 5),
+            serde_json::json!({"line": 0, "character": 2})
+        );
+        assert_eq!(super::line_start_byte(text, 5), 0);
+        assert_eq!(
+            byte_to_position(text, 6),
+            serde_json::json!({"line": 1, "character": 0})
+        );
     }
 
     #[test]
