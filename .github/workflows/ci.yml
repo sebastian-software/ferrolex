@@ -34,7 +34,7 @@ jobs:
       - run: python3 scripts/publish-crates.py --check
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: 26
       - name: Exercise release preparation and refresh
         # Keep this engine version aligned with the pinned release-please action.
         run: |
@@ -353,6 +353,13 @@ jobs:
       - run: npm test --prefix crates/ferrolex-node
       - run: bash scripts/test-node-package.sh
 
+      - name: Set up Node.js 26 for package tests
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "26"
+      - name: Test native package on Node.js 26
+        run: npm test --prefix crates/ferrolex-node && bash scripts/test-node-package.sh
+
   node-prebuilt:
     name: Node prebuilt (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
@@ -437,7 +444,7 @@ jobs:
           tool: cargo-zigbuild
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: crates/ferrolex-node/package-lock.json
       - run: npm ci --prefix crates/ferrolex-node --ignore-scripts
